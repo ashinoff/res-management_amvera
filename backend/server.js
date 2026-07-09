@@ -58,10 +58,10 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
-// Health check для Render
-app.get('/', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+// Health check (Amvera смотрит на /api/health). Корень / отдаёт SPA (см. ниже).
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
     message: 'RES Management Backend is running',
     version: '2.0.1',
     features: ['user-management', 'phase-detection', 'auto-updates', 'auto-hide-notifications']
@@ -4055,12 +4055,44 @@ app.get('/api/download/:public_id', async (req, res) => {
 });
 
 // =====================================================
+// РАЗДАЧА ФРОНТЕНДА (единый origin) — ПОСЛЕ всех /api-роутов
+// =====================================================
+const FRONTEND_DIST = path.join(__dirname, '..', 'frontend', 'dist');
+if (fs.existsSync(FRONTEND_DIST)) {
+  app.use(express.static(FRONTEND_DIST));
+  // SPA-fallback: любой НЕ-API путь → index.html (клиентский роутинг).
+  // ДОЛЖЕН быть последним middleware, после всех /api-роутов, иначе перехватит API.
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
+    res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
+  });
+}
+
+// =====================================================
 // ИНИЦИАЛИЗАЦИЯ БД И ЗАПУСК СЕРВЕРА
 // =====================================================
 
+// Amvera: DNS-имя БД может быть ещё не резолвимо в момент старта контейнера
+// ("Temporary failure in name resolution"). Ретраим подключение, не падаем сразу.
+async function connectWithRetry(maxAttempts = 15, delayMs = 3000) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await sequelize.authenticate();
+      if (attempt > 1) console.log(`Database connected on attempt ${attempt}/${maxAttempts}`);
+      return;
+    } catch (err) {
+      lastError = err;
+      console.warn(`Database not ready (attempt ${attempt}/${maxAttempts}): ${err.code || err.name}. Retry in ${delayMs}ms...`);
+      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastError;
+}
+
 async function initializeDatabase() {
   try {
-    await sequelize.authenticate();
+    await connectWithRetry();
     console.log('Database connected successfully');
     
     // ✅ PERF: alter:true при КАЖДОМ старте — медленно и рискованно на Postgres.
