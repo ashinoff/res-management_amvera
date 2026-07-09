@@ -1,0 +1,4 @@
+xlrd==2.0.1
+xlwt
+pandas
+openpyxl
