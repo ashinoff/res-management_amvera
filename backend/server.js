@@ -192,10 +192,14 @@ const sequelize = new Sequelize(process.env.DATABASE_URL || 'postgres://user:pas
   dialect: 'postgres',
   protocol: 'postgres',
   dialectOptions: {
-    ssl: process.env.NODE_ENV === 'production' ? {
-      require: true,
-      rejectUnauthorized: false
-    } : false,
+    // SSL управляется env DB_SSL (true/false). По умолчанию — как раньше:
+    // включён в production. У managed-Postgres Amvera (внутренняя сеть) SSL
+    // часто НЕ поддерживается — тогда выставить DB_SSL=false, без правки кода.
+    ssl: (process.env.DB_SSL !== undefined
+      ? process.env.DB_SSL === 'true'
+      : process.env.NODE_ENV === 'production')
+      ? { require: true, rejectUnauthorized: false }
+      : false,
     charset: 'utf8',
     client_encoding: 'UTF8'
   },
