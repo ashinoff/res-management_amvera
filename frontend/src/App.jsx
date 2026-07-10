@@ -6161,6 +6161,8 @@ function DatabaseMaintenance() {
   const [cleanupType, setCleanupType] = useState('');
   const [cleanupPassword, setCleanupPassword] = useState('');
   const [cleaning, setCleaning] = useState(false);
+  const [backuping, setBackuping] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
     const runHealthCheck = async () => {
     setLoading(true);
@@ -6204,7 +6206,57 @@ function DatabaseMaintenance() {
       setCleaning(false);
     }
   };
-  
+
+  // Скачать полный бэкап БД (JSON-файл)
+  const handleBackup = async () => {
+    setBackuping(true);
+    try {
+      const response = await api.get('/api/admin/backup', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `res-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      alert('Ошибка бэкапа: ' + (error.response?.data?.error || error.message));
+    } finally {
+      setBackuping(false);
+    }
+  };
+
+  // Восстановить БД из файла бэкапа. Через fetch + FormData (multipart), чтобы
+  // не упереться в лимит express.json и не спорить с Content-Type axios-инстанса.
+  const handleRestore = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // сброс — чтобы можно было выбрать тот же файл повторно
+    if (!file) return;
+    if (!window.confirm('ВНИМАНИЕ! Восстановление ПОЛНОСТЬЮ заменит все данные в базе (текущие будут удалены). Продолжить?')) return;
+    setRestoring(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('confirm', 'true');
+      const token = localStorage.getItem('token');
+      const resp = await fetch(`${API_URL}/api/admin/restore`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const r = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(r.error || `HTTP ${resp.status}`);
+      let msg = `✅ Восстановление завершено.\nВставлено записей: ${r.inserted}`;
+      if (r.errorsCount) msg += `\n\nОшибок: ${r.errorsCount}\n• ` + (r.errors || []).join('\n• ');
+      alert(msg);
+    } catch (error) {
+      alert('Ошибка восстановления: ' + error.message);
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const getSeverityColor = (severity) => {
     switch(severity) {
       case 'error': return '#ff4d4f';
@@ -6303,7 +6355,27 @@ function DatabaseMaintenance() {
           )}
         </button>
       </div>
-      
+
+      {/* Резервная копия базы: скачать бэкап / восстановить из файла */}
+      <div className="db-header" style={{ marginTop: 12 }}>
+        <div className="db-header-content">
+          <div className="db-header-icon">💾</div>
+          <div className="db-header-text">
+            <h3>Резервная копия базы</h3>
+            <p>Скачать полный бэкап (JSON) или восстановить данные из файла. Восстановление заменяет все данные.</p>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn-check-db" onClick={handleBackup} disabled={backuping || restoring}>
+            {backuping ? 'Скачивание...' : '⬇️ Скачать бэкап'}
+          </button>
+          <label className="btn-check-db" style={{ cursor: restoring ? 'default' : 'pointer', opacity: restoring ? 0.6 : 1 }}>
+            {restoring ? 'Восстановление...' : '⬆️ Восстановить из файла'}
+            <input type="file" accept=".json,application/json" onChange={handleRestore} disabled={restoring || backuping} style={{ display: 'none' }} />
+          </label>
+        </div>
+      </div>
+
       {loading && (
         <div className="db-loading">
           <div className="loading-animation">

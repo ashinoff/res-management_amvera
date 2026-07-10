@@ -769,7 +769,10 @@ User.beforeCreate(async (user) => {
 });
 
 User.beforeUpdate(async (user) => {
-  if (user.changed('password') && user.password && !user.password.startsWith('$2a$')) {
+  // Не перехэшировать уже готовый bcrypt-хэш (важно при restore). Покрываем
+  // оба префикса: $2a$ и $2b$.
+  if (user.changed('password') && user.password &&
+      !user.password.startsWith('$2a$') && !user.password.startsWith('$2b$')) {
     user.password = await bcrypt.hash(user.password, 10);
   }
 });
@@ -4055,6 +4058,126 @@ app.get('/api/download/:public_id', async (req, res) => {
   } catch (error) {
     console.error('❌ Download error:', error);
     res.status(500).json({ error: 'Ошибка скачивания файла: ' + error.message });
+  }
+});
+
+// =====================================================
+// БЭКАП / ВОССТАНОВЛЕНИЕ (перенос данных Render → Amvera)
+// =====================================================
+
+// Порядок таблиц: родители → дети. Вставка идёт в этом порядке, очистка — в
+// обратном (чтобы не нарушать FK).
+const BACKUP_TABLES = [
+  { key: 'ResUnits', table: 'ResUnits' },
+  { key: 'Users', table: 'Users' },
+  { key: 'NetworkStructures', table: 'NetworkStructures' },
+  { key: 'PuStatuses', table: 'PuStatuses' },
+  { key: 'UploadHistories', table: 'UploadHistories' },
+  { key: 'CheckHistories', table: 'CheckHistories' },
+  { key: 'ProblemVLs', table: 'ProblemVLs' },
+  { key: 'Notifications', table: 'Notifications' },
+  { key: 'NotificationReads', table: 'NotificationReads' },
+  { key: 'PuUploadHistories', table: 'PuUploadHistories' },
+];
+
+// Полный JSON-дамп всех таблиц. Пароли выгружаются как есть (bcrypt-хэши),
+// ссылки Cloudinary едут внутри JSON — сами файлы переносить не нужно.
+app.get('/api/admin/backup', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const tables = {};
+    for (const t of BACKUP_TABLES) {
+      const [rows] = await sequelize.query(`SELECT * FROM "${t.table}" ORDER BY id`);
+      tables[t.key] = rows;
+    }
+    const backup = {
+      format: 'full',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      tables,
+    };
+    const dateStr = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="res-backup-${dateStr}.json"`);
+    res.send(JSON.stringify(backup));
+  } catch (error) {
+    console.error('Backup error:', error.message);
+    res.status(500).json({ error: 'Ошибка бэкапа: ' + error.message });
+  }
+});
+
+// Восстановление из JSON-файла. ПОЛНОСТЬЮ заменяет данные (чистит → вставляет с
+// явными id → сбрасывает sequence). Файл принимаем через multer (в обход лимита
+// express.json). Вставка raw-SQL — мимо hooks, пароли остаются как есть. Ошибки
+// копим (первые 20), не падаем целиком. Пользователь БД не суперюзер — только
+// правильный порядок вставки, без отключения триггеров.
+const backupUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
+
+app.post('/api/admin/restore', authenticateToken, checkRole(['admin']), backupUpload.single('file'), async (req, res) => {
+  try {
+    if (req.body.confirm !== 'true') {
+      return res.status(400).json({ error: 'Требуется подтверждение: восстановление заменит ВСЕ данные в базе.' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'Файл бэкапа не передан' });
+    }
+    let backup;
+    try {
+      backup = JSON.parse(req.file.buffer.toString('utf8'));
+    } catch (e) {
+      return res.status(400).json({ error: 'Файл не является корректным JSON' });
+    }
+    if (!backup || backup.format !== 'full' || !backup.tables) {
+      return res.status(400).json({ error: 'Неверный формат бэкапа (ожидается format: "full")' });
+    }
+
+    const errors = [];
+    let inserted = 0;
+
+    // 1) Очистка в обратном порядке (дети → родители)
+    for (const t of [...BACKUP_TABLES].reverse()) {
+      await sequelize.query(`DELETE FROM "${t.table}"`);
+    }
+
+    // 2) Вставка в прямом порядке с явными id
+    for (const t of BACKUP_TABLES) {
+      const rows = backup.tables[t.key] || [];
+      for (const row of rows) {
+        try {
+          const cols = Object.keys(row);
+          if (cols.length === 0) continue;
+          const colList = cols.map((c) => `"${c}"`).join(', ');
+          const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+          const values = cols.map((c) => {
+            const v = row[c];
+            // JSON/JSONB-объекты из бэкапа — обратно в строку (pg приведёт к jsonb)
+            if (v !== null && typeof v === 'object' && !(v instanceof Date)) return JSON.stringify(v);
+            return v;
+          });
+          await sequelize.query(
+            `INSERT INTO "${t.table}" (${colList}) VALUES (${placeholders})`,
+            { bind: values }
+          );
+          inserted++;
+        } catch (e) {
+          if (errors.length < 20) errors.push(`${t.table} id=${row.id}: ${e.message}`);
+        }
+      }
+      // 3) Сброс sequence под текущий max(id)
+      try {
+        await sequelize.query(
+          `SELECT setval(pg_get_serial_sequence('"${t.table}"', 'id'),
+             COALESCE((SELECT MAX(id) FROM "${t.table}"), 1),
+             (SELECT MAX(id) IS NOT NULL FROM "${t.table}"))`
+        );
+      } catch (e) {
+        if (errors.length < 20) errors.push(`setval ${t.table}: ${e.message}`);
+      }
+    }
+
+    res.json({ ok: true, inserted, errorsCount: errors.length, errors });
+  } catch (error) {
+    console.error('Restore error:', error.message);
+    res.status(500).json({ error: 'Ошибка восстановления: ' + error.message });
   }
 });
 
