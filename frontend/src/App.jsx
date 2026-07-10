@@ -14,6 +14,9 @@ import * as XLSX from 'xlsx';
 // =====================================================
 
 const API_URL = import.meta.env.VITE_API_URL || '';
+// Единый вход через платформу (SSO): origin платформы и признак встраивания в iframe.
+const PLATFORM_ORIGIN = import.meta.env.VITE_PLATFORM_ORIGIN || 'https://sue-system-ashinoff.amvera.io';
+const EMBEDDED = typeof window !== 'undefined' && window.self !== window.top;
 
 const api = axios.create({
   baseURL: API_URL,
@@ -38,7 +41,8 @@ api.interceptors.response.use(
   error => {
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
-      window.location.href = '/';
+      // В iframe платформы не редиректим на логин (иначе перезагрузка окна на 401).
+      if (!EMBEDDED) window.location.href = '/';
     }
     return Promise.reject(error);
   }
@@ -6714,12 +6718,20 @@ function DatabaseMaintenance() {
 
 export default function App() {
   const [user, setUser] = useState(null);
+  // Пока в iframe ждём/меняем токен платформы — показываем лоадер, а не форму логина.
+  const [ssoPending, setSsoPending] = useState(EMBEDDED);
   const [activeSection, setActiveSection] = useState('structure');
   const [selectedRes, setSelectedRes] = useState(null);
   const [resList, setResList] = useState([]);
 
   // Оптимизированная проверка токена
   useEffect(() => {
+    // В iframe платформы не доверяем старому токену из localStorage — ждём
+    // свежий токен платформы (иначе мигнёт предыдущий пользователь).
+    if (EMBEDDED) {
+      localStorage.removeItem('token');
+      return;
+    }
     const token = localStorage.getItem('token');
     if (token) {
       api.get('/api/auth/me')
@@ -6741,6 +6753,42 @@ export default function App() {
           }
         });
     }
+  }, []);
+
+  // Единый вход через платформу: слушаем токен из iframe и меняем на свою сессию.
+  // Контракт platform-auth/app-ready фиксирован платформой — не менять.
+  useEffect(() => {
+    if (!EMBEDDED) return;
+    const exchange = async (kcToken) => {
+      try {
+        // Чистый fetch (не axios), чтобы 401-интерсептор не мешал.
+        const resp = await fetch(`${API_URL}/api/auth/platform`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${kcToken}` }
+        });
+        if (!resp.ok) throw new Error('sso failed');
+        const data = await resp.json();
+        localStorage.setItem('token', data.token);
+        setUser(data.user);
+        if (data.user?.resId) setSelectedRes(data.user.resId);
+      } catch {
+        localStorage.removeItem('token');
+        setUser(null); // упадём на обычную форму логина
+      } finally {
+        setSsoPending(false);
+      }
+    };
+    const onMessage = (event) => {
+      if (event.origin !== PLATFORM_ORIGIN) return; // доверяем только платформе
+      const d = event.data;
+      if (d && d.type === 'platform-auth' && d.token) exchange(d.token);
+    };
+    window.addEventListener('message', onMessage);
+    // Сообщаем платформе, что готовы принять токен (она ответит platform-auth).
+    window.parent.postMessage({ type: 'app-ready' }, PLATFORM_ORIGIN);
+    // Токен так и не пришёл за 5с → обычная форма логина (fallback).
+    const timer = setTimeout(() => setSsoPending(false), 5000);
+    return () => { window.removeEventListener('message', onMessage); clearTimeout(timer); };
   }, []);
 
   useEffect(() => {
@@ -6817,6 +6865,16 @@ export default function App() {
   };
 
   if (!user) {
+    // Пока ждём токен платформы (в iframe) — лоадер, а не форма логина.
+    if (ssoPending) {
+      return (
+        <div className="login-container">
+          <div className="login-box">
+            <h2>Вход через платформу…</h2>
+          </div>
+        </div>
+      );
+    }
     return <LoginForm onLogin={handleLogin} />;
   }
 

@@ -34,6 +34,7 @@ const fs = require('fs');
 const { Sequelize, DataTypes, Op } = require('sequelize');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const kc = require('./keycloakPlatform');
 
 
 // =====================================================
@@ -55,6 +56,14 @@ const DELETE_PASSWORD = process.env.DELETE_PASSWORD || '1191';
 
 // Middleware
 app.use(cors());
+// Платформа: разрешаем встраивание в iframe ТОЛЬКО платформе (CSP
+// frame-ancestors), снимаем легаси X-Frame-Options. Только заголовок — на
+// авторизацию не влияет, не за фиче-флагом.
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', `frame-ancestors 'self' ${kc.PLATFORM_ORIGIN}`);
+  res.removeHeader('X-Frame-Options');
+  next();
+});
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
@@ -266,6 +275,12 @@ const User = sequelize.define('User', {
   email: {
     type: DataTypes.STRING,
     allowNull: false
+  },
+  // Единый вход через платформу: id пользователя в Keycloak (claim sub).
+  keycloakId: {
+    type: DataTypes.STRING(64),
+    allowNull: true,
+    unique: true
   }
 });
 
@@ -903,6 +918,110 @@ app.post('/api/auth/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// =====================================================
+// ЕДИНЫЙ ВХОД ЧЕРЕЗ ПЛАТФОРМУ (Keycloak SSO)
+// =====================================================
+
+// Достать Bearer-токен из заголовка Authorization.
+function getBearer(req) {
+  const h = req.headers['authorization'] || '';
+  return h.toLowerCase().startsWith('bearer ') ? h.slice(7).trim() : null;
+}
+
+// Обмен Keycloak-токена платформы на обычную сессию приложения.
+// Keycloak решает «кто ты» (email) + «пускать ли» (роль ACCESS_ROLE), а
+// функциональная роль и resId берутся из СВОЕЙ БД по email.
+app.post('/api/auth/platform', async (req, res) => {
+  try {
+    if (!kc.PLATFORM_SSO) return res.status(401).json({ error: 'Platform SSO disabled' });
+    const token = getBearer(req);
+    if (!token) return res.status(401).json({ error: 'No token' });
+
+    let claims;
+    try {
+      claims = await kc.verifyToken(token);
+    } catch (e) {
+      console.warn('Platform SSO 401:', e.message); // причина — да, токен — никогда
+      return res.status(401).json({ error: 'Invalid platform token' });
+    }
+    const ident = kc.identityFromClaims(claims);
+    if (!ident.keycloakId) return res.status(401).json({ error: 'Invalid platform token' });
+    if (!kc.hasAccess(ident.roles)) return res.status(403).json({ error: 'Нет доступа к приложению' });
+
+    // Поиск учётки: по keycloakId, затем разово по email (регистронезависимо).
+    let user = await User.findOne({ where: { keycloakId: ident.keycloakId }, include: [ResUnit] });
+    if (!user && ident.email) {
+      user = await User.findOne({
+        where: sequelize.where(sequelize.fn('lower', sequelize.col('email')), ident.email.toLowerCase()),
+        include: [ResUnit]
+      });
+      if (user && !user.keycloakId) {
+        user.keycloakId = ident.keycloakId; // разовая привязка
+        await user.save();
+      }
+    }
+    if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
+
+    // Обычный JWT приложения — тот же формат, что в /api/auth/login.
+    const appToken = jwt.sign(
+      { id: user.id, role: user.role, resId: user.resId },
+      process.env.JWT_SECRET || 'secret-key',
+      { expiresIn: '24h' }
+    );
+    res.json({
+      token: appToken,
+      user: {
+        id: user.id,
+        fio: user.fio,
+        role: user.role,
+        resId: user.resId,
+        resName: user.ResUnit?.name
+      }
+    });
+  } catch (error) {
+    console.error('Platform auth error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Счётчик уведомлений для бейджа иконки на рабочем столе платформы.
+// Проверка тем же Keycloak-токеном, БЕЗ создания сессии, только чтение.
+app.get('/api/platform/badge', async (req, res) => {
+  try {
+    if (!kc.PLATFORM_SSO) return res.status(401).json({ error: 'Platform SSO disabled' });
+    const token = getBearer(req);
+    if (!token) return res.status(401).json({ error: 'No token' });
+
+    let claims;
+    try {
+      claims = await kc.verifyToken(token);
+    } catch (e) {
+      return res.status(401).json({ error: 'Invalid platform token' });
+    }
+    const ident = kc.identityFromClaims(claims);
+    if (!ident.keycloakId) return res.status(401).json({ error: 'Invalid platform token' });
+
+    // Только чтение: по keycloakId, затем по email. Не найден → count 0.
+    let user = await User.findOne({ where: { keycloakId: ident.keycloakId } });
+    if (!user && ident.email) {
+      user = await User.findOne({
+        where: sequelize.where(sequelize.fn('lower', sequelize.col('email')), ident.email.toLowerCase())
+      });
+    }
+    if (!user) return res.json({ count: 0 });
+
+    const counts = await getNotificationCounts(user);
+    let count = 0;
+    if (user.role === 'admin') count = counts.tech_pending + counts.askue_pending + counts.problem_vl;
+    else if (user.role === 'res_responsible') count = counts.tech_pending;
+    else if (user.role === 'uploader') count = counts.askue_pending;
+    res.json({ count });
+  } catch (error) {
+    console.error('Platform badge error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2409,85 +2528,89 @@ app.get('/api/reports/problem-vl',
     }
 });
 // Получение количества непрочитанных уведомлений
-app.get('/api/notifications/counts', authenticateToken, async (req, res) => {
-  try {
-    let whereClause = {};
-    
-    if (req.user.role === 'admin') {
-      whereClause = {};
-    } else if (req.user.role === 'res_responsible') {
-      whereClause = {
-        resId: req.user.resId,
-        [Op.or]: [
-          { toUserId: null },
-          { toUserId: req.user.id }
-        ]
-      };
-    } else {
-      whereClause = { 
-        toUserId: req.user.id
-      };
-    }
-    
-    // Для проблемных ВЛ считаем только активные
-    let problemVLCount = 0;
-    if (req.user.role === 'admin') {
-      problemVLCount = await ProblemVL.count({
-        where: { status: 'active' }  // Только активные!
-      });
-    }
-    
-    // ✅ PERF: считаем только те типы, которые реально участвуют в счётчиках,
-    // вместо сканирования ВСЕЙ таблицы уведомлений
-    whereClause.type = { [Op.in]: ['error', 'pending_askue'] };
-    
-    // Получаем все доступные уведомления
-    const allNotifications = await Notification.findAll({
-      where: whereClause,
-      attributes: ['id', 'type', 'message']
+// Счётчики уведомлений по роли (переиспользуются эндпоинтом ниже и бейджем
+// платформы /api/platform/badge). Возвращает { tech_pending, askue_pending,
+// problem_vl }. user — { id, role, resId }.
+async function getNotificationCounts(user) {
+  let whereClause = {};
+
+  if (user.role === 'admin') {
+    whereClause = {};
+  } else if (user.role === 'res_responsible') {
+    whereClause = {
+      resId: user.resId,
+      [Op.or]: [
+        { toUserId: null },
+        { toUserId: user.id }
+      ]
+    };
+  } else {
+    whereClause = {
+      toUserId: user.id
+    };
+  }
+
+  // Для проблемных ВЛ считаем только активные (только для admin)
+  let problemVLCount = 0;
+  if (user.role === 'admin') {
+    problemVLCount = await ProblemVL.count({
+      where: { status: 'active' }  // Только активные!
     });
-    
-    // ✅ PERF: один индексированный запрос по userId вместо гигантского IN(...)
-    const readNotifications = await NotificationRead.findAll({
-      where: {
-        userId: req.user.id
-      },
-      attributes: ['notificationId']
-    });
-    
-    const readIds = new Set(readNotifications.map(r => r.notificationId));
-    
-    // ✅ Считаем уникальные ПУ+фаза по типам (не общее количество уведомлений!)
-    const techKeys = new Set();
-    const askueKeys = new Set();
-    
-    allNotifications.forEach(notif => {
-      if (!readIds.has(notif.id)) {
-        try {
-          const data = JSON.parse(notif.message);
-          const puNumber = data.puNumber;
-          
-          if (puNumber) {
-            const phaseKey = getPhaseSignature(notif.message);
-            const key = `${puNumber}_${phaseKey}`;
-            
-            if (notif.type === 'error') techKeys.add(key);
-            else if (notif.type === 'pending_askue') askueKeys.add(key);
-          } else {
-            if (notif.type === 'error') techKeys.add(`id_${notif.id}`);
-            else if (notif.type === 'pending_askue') askueKeys.add(`id_${notif.id}`);
-          }
-        } catch {
+  }
+
+  // ✅ PERF: считаем только те типы, которые реально участвуют в счётчиках
+  whereClause.type = { [Op.in]: ['error', 'pending_askue'] };
+
+  const allNotifications = await Notification.findAll({
+    where: whereClause,
+    attributes: ['id', 'type', 'message']
+  });
+
+  // ✅ PERF: один индексированный запрос по userId вместо гигантского IN(...)
+  const readNotifications = await NotificationRead.findAll({
+    where: { userId: user.id },
+    attributes: ['notificationId']
+  });
+
+  const readIds = new Set(readNotifications.map(r => r.notificationId));
+
+  // ✅ Считаем уникальные ПУ+фаза по типам (не общее количество уведомлений!)
+  const techKeys = new Set();
+  const askueKeys = new Set();
+
+  allNotifications.forEach(notif => {
+    if (!readIds.has(notif.id)) {
+      try {
+        const data = JSON.parse(notif.message);
+        const puNumber = data.puNumber;
+
+        if (puNumber) {
+          const phaseKey = getPhaseSignature(notif.message);
+          const key = `${puNumber}_${phaseKey}`;
+
+          if (notif.type === 'error') techKeys.add(key);
+          else if (notif.type === 'pending_askue') askueKeys.add(key);
+        } else {
           if (notif.type === 'error') techKeys.add(`id_${notif.id}`);
           else if (notif.type === 'pending_askue') askueKeys.add(`id_${notif.id}`);
         }
+      } catch {
+        if (notif.type === 'error') techKeys.add(`id_${notif.id}`);
+        else if (notif.type === 'pending_askue') askueKeys.add(`id_${notif.id}`);
       }
-    });
-    res.json({
-      tech_pending: techKeys.size,
-      askue_pending: askueKeys.size,
-      problem_vl: problemVLCount
-    });
+    }
+  });
+
+  return {
+    tech_pending: techKeys.size,
+    askue_pending: askueKeys.size,
+    problem_vl: problemVLCount
+  };
+}
+
+app.get('/api/notifications/counts', authenticateToken, async (req, res) => {
+  try {
+    res.json(await getNotificationCounts(req.user));
   } catch (error) {
     console.error('Error counting notifications:', error);
     res.status(500).json({ error: error.message });
@@ -4244,7 +4367,12 @@ async function initializeDatabase() {
       `CREATE INDEX IF NOT EXISTS idx_netstruct_res ON "NetworkStructures" ("resId")`,
       `CREATE INDEX IF NOT EXISTS idx_pustatus_struct ON "PuStatuses" ("networkStructureId")`,
       `CREATE INDEX IF NOT EXISTS idx_problemvl_status ON "ProblemVLs" ("status")`,
-      `CREATE INDEX IF NOT EXISTS idx_problemvl_res ON "ProblemVLs" ("resId")`
+      `CREATE INDEX IF NOT EXISTS idx_problemvl_res ON "ProblemVLs" ("resId")`,
+      // Единый вход через платформу: колонка keycloakId + уникальный индекс.
+      // ADD COLUMN IF NOT EXISTS — доезжает без DB_ALTER (Postgres-safe,
+      // уникальный индекс допускает много NULL).
+      `ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "keycloakId" VARCHAR(64)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_keycloak ON "Users" ("keycloakId")`
     ];
     for (const stmt of indexStatements) {
       try {
