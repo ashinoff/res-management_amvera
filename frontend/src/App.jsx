@@ -16,6 +16,16 @@ import RossetiLoader from './RossetiLoader.jsx';
 // =====================================================
 
 const API_URL = import.meta.env.VITE_API_URL || '';
+
+// Все файлы (фото/PDF из Cloudinary) показываем и скачиваем ТОЛЬКО через свой
+// бэкенд (/api/download) — прямые ссылки на res.cloudinary.com блокируются
+// браузерами (Яндекс.Браузер и др.). inline=true — открыть в браузере.
+const fileProxyUrl = (file, inline = false) => {
+  if (!file) return '';
+  if (!file.public_id) return file.url; // старые записи без public_id — как было
+  const q = `name=${encodeURIComponent(file.original_name || 'file')}${inline ? '&inline=1' : ''}`;
+  return `${API_URL}/api/download/${encodeURIComponent(file.public_id)}?${q}`;
+};
 // Единый вход через платформу (SSO): origin платформы и признак встраивания в iframe.
 const PLATFORM_ORIGIN = import.meta.env.VITE_PLATFORM_ORIGIN || 'https://sue-system-ashinoff.amvera.io';
 const EMBEDDED = typeof window !== 'undefined' && window.self !== window.top;
@@ -3269,7 +3279,7 @@ function FileManagement() {
                   file.url.toLowerCase().endsWith('.jpeg') || 
                   file.url.toLowerCase().endsWith('.png') || 
                   file.url.toLowerCase().endsWith('.gif')) ? (
-                  <img src={file.url} alt={file.original_name} className="file-thumbnail" />
+                  <img src={fileProxyUrl(file, true)} alt={file.original_name} className="file-thumbnail" />
                 ) : (
                   <div className="file-icon"><IconFileText className="ico" /></div>
                 )}
@@ -3296,7 +3306,7 @@ function FileManagement() {
                 
                 <div className="file-actions">
                   <a 
-                    href={file.url} 
+                    href={fileProxyUrl(file, true)} 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="btn-icon"
@@ -4577,11 +4587,21 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
         
         <div className="file-viewer-content">
           {isImage ? (
-            <img 
-              src={currentFile.url} 
-              alt={currentFile.original_name}
-              className="file-viewer-image"
-            />
+            <div className="image-viewer-wrap">
+              <img 
+                src={fileProxyUrl(currentFile, true)} 
+                alt={currentFile.original_name}
+                className="file-viewer-image"
+              />
+              <a
+                href={fileProxyUrl(currentFile)}
+                download={currentFile.original_name}
+                className="btn-download-pdf image-download-btn"
+              >
+                <span><IconDownload className="ico" /></span>
+                Скачать {currentFile.original_name}
+              </a>
+            </div>
           ) : isPdf ? (
             <div className="pdf-viewer-modern">
               <div className="pdf-preview">
@@ -4590,7 +4610,7 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
                 <p className="pdf-info">PDF документ</p>
                 <div className="pdf-actions">
                   <a 
-                    href={currentFile.url} 
+                    href={fileProxyUrl(currentFile, true)} 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="btn-view-pdf"
@@ -4618,7 +4638,7 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
             <div className="file-not-supported">
               <p>Предпросмотр недоступен</p>
               <a 
-                href={currentFile.url} 
+                href={fileProxyUrl(currentFile)} 
                 target="_blank" 
                 rel="noopener noreferrer"
                 className="download-link"
@@ -6230,6 +6250,11 @@ function DatabaseMaintenance() {
         desc: 'Закрыть проблемные ВЛ без активности более 90 дней',
         icon: <IconZap className="ico" style={{color:'var(--amber)'}} />
       },
+      'irrelevant_problem_vl': {
+        title: 'Неактуальные проблемные ВЛ',
+        desc: 'Закрыть проблемные ВЛ, у которых ПУ уже проверен без ошибок или удалён из структуры',
+        icon: <IconAlertTriangle className="ico" style={{color:'var(--amber)'}} />
+      },
         'stale_notifications': {
       title: 'Неактуальные уведомления',
       desc: 'Удалить уведомления для ПУ, которые уже проверены без ошибок',
@@ -6510,8 +6535,28 @@ function DatabaseMaintenance() {
   </details>
 )}
           
+        {/* Неактуальные проблемные ВЛ — свой список примеров */}
+        {issue.type === 'irrelevant_problem_vl' && issue.items && issue.items.length > 0 && (
+          <details className="issue-details">
+            <summary>
+              <span><IconClipboard className="ico" /></span>
+              Показать неактуальные проблемные ВЛ (первые 10)
+            </summary>
+            <ul className="issue-items-list">
+              {issue.items.slice(0, 10).map((item, i) => (
+                <li key={i}>
+                  <strong>ПУ {item.puNumber}</strong> — {item.tpName} / {item.vlName}: {item.reason}
+                </li>
+              ))}
+              {issue.count > 10 && (
+                <li className="more-items">... и еще {issue.count - 10}</li>
+              )}
+            </ul>
+          </details>
+        )}
+
         {/* Старое отображение для остальных типов */}
-        {issue.type !== 'stale_notifications' && issue.items && issue.items.length > 0 && (
+        {!['stale_notifications', 'irrelevant_problem_vl'].includes(issue.type) && issue.items && issue.items.length > 0 && (
           <details className="issue-details">
             <summary>
               <span><IconClipboard className="ico" /></span>
@@ -6536,7 +6581,7 @@ function DatabaseMaintenance() {
         {/* Кнопка очистки */}
         {['orphaned_pu_status', 'duplicate_pu_statuses', 'old_unread_notifications', 
           'orphaned_notifications', 'checks_without_res', 'broken_file_references', 
-          'stale_problem_vl', 'stale_notifications', 'missing_notifications'].includes(issue.type) && (
+          'stale_problem_vl', 'irrelevant_problem_vl', 'stale_notifications', 'missing_notifications'].includes(issue.type) && (
           <button 
             className="btn-cleanup"
             onClick={() => {
