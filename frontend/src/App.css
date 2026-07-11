@@ -654,28 +654,18 @@ text-align: left;
 /* Компактные уведомления */
 .notification-compact {
   background: var(--surface);
-  padding: 16px 20px;
-  border-radius: 12px;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
-  transition: all 0.3s ease;
-  border-left: 4px solid transparent;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, box-shadow .12s;
 }
 
+/* Строгий hover — тёмно-синяя рамка и лёгкий фон, без боковых полос и «прыжка» */
 .notification-compact:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow);
-}
-
-.notification-compact.error {
-  border-left-color: var(--red);
-}
-
-.notification-compact.pending_askue {
-  border-left-color: var(--amber);
-}
-
-.notification-compact.success {
-  border-left-color: var(--green);
+  border-color: var(--navy);
+  background: var(--surface-2);
 }
 
 .notification-compact.unread {
@@ -2799,18 +2789,28 @@ tr.selected {
 
 .problem-card {
   background: var(--surface);
-  border: 2px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  transition: all 0.3s ease;
-  border-left: 4px solid var(--red);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, box-shadow .12s;
 }
 
 .problem-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow);
-  border-left-color: var(--red);
+  border-color: var(--navy);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
 }
+
+/* Компактная карточка проблемной ВЛ */
+.problem-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.problem-meta {
+  display: flex; flex-wrap: wrap; gap: 4px 18px;
+  margin-top: 8px; font-size: 13px; color: var(--text-muted);
+}
+.problem-meta b { color: var(--text); font-weight: 600; }
+.problem-error-line { margin-top: 8px; font-size: 13px; color: var(--text-muted); }
+.problem-error-line b { color: var(--red); font-weight: 600; }
 
 .problem-header {
   display: flex;
@@ -4257,8 +4257,8 @@ tr.selected {
 }
 
 .notification-compact.selected {
-  background: var(--blue-bg);
-  border-left-color: var(--blue);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 /* Обновите notification-narrow-content для правильного выравнивания с чекбоксом */
@@ -4434,8 +4434,8 @@ tr.selected {
 
 /* Стиль для выбранного уведомления */
 .notification-compact.selected {
-  background: var(--blue-bg);
-  border-left-color: var(--blue);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 /* Обновляем выравнивание для уведомлений АСКУЭ */

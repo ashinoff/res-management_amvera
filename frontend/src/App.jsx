@@ -2777,7 +2777,7 @@ function Reports() {
 // КОМПОНЕНТ ПРОБЛЕМНЫХ ВЛ (2+ НЕУДАЧНЫХ ПРОВЕРКИ)
 // =====================================================
 
-function ProblemVL() {
+function ProblemVL({ selectedRes }) {
   const [problemVLs, setProblemVLs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -2793,11 +2793,11 @@ function ProblemVL() {
     
     const handleUpdate = () => loadProblemVLs();
     window.addEventListener('problemVLUpdated', handleUpdate);
-    
+
     return () => {
       window.removeEventListener('problemVLUpdated', handleUpdate);
     };
-  }, []);
+  }, [selectedRes]);
 
 const handleSendEmail = async () => {
     try {
@@ -2812,7 +2812,9 @@ const handleSendEmail = async () => {
   
   const loadProblemVLs = async () => {
     try {
-      const response = await api.get('/api/problem-vl/list');
+      const response = await api.get('/api/problem-vl/list', {
+        params: selectedRes ? { resId: selectedRes } : {}
+      });
       setProblemVLs(response.data);
     } catch (error) {
       console.error('Error loading problem VLs:', error);
@@ -2868,86 +2870,33 @@ const handleSendEmail = async () => {
       ) : (
         <div className="problem-list">
           {problemVLs.map(problem => (
-            <div key={problem.id} className="problem-card">
+            <div
+              key={problem.id}
+              className="problem-card"
+              onClick={() => { setDetailsProblem(problem); setShowDetailsModal(true); }}
+              title="Открыть подробности"
+            >
               <div className="problem-header">
-                <div>
-                  <h3>{problem.tpName} - {problem.vlName}</h3>
+                <div className="problem-title">
+                  <h3>{problem.tpName} — {problem.vlName}</h3>
                   <span className="res-badge">{problem.ResUnit?.name}</span>
                 </div>
                 <span className="failure-badge critical">
-                  <IconX className="ico" style={{color:'var(--red)'}} /> {problem.failureCount} неудачных проверок
+                  <IconX className="ico" style={{color:'var(--red)'}} /> {problem.failureCount} неудачных
                 </span>
               </div>
-              
-              <div className="problem-details">
-                <div className="detail-grid">
-                  <div className="detail-item">
-                    <span className="label">ПУ №:</span>
-                    <span className="value">{problem.puNumber}</span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="label">Позиция:</span>
-                    <span className="value">
-                      {problem.position === 'start' ? 'Начало' :
-                       problem.position === 'middle' ? 'Середина' : 'Конец'}
-                    </span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="label">Первое обращение:</span>
-                    <span className="value">
-                      {new Date(problem.firstReportDate).toLocaleDateString('ru-RU')}
-                    </span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="label">Последняя проверка:</span>
-                    <span className="value">
-                      {new Date(problem.lastErrorDate).toLocaleDateString('ru-RU')}
-                    </span>
-                  </div>
-                </div>
+
+              <div className="problem-meta">
+                <span><b>ПУ №:</b> {problem.puNumber}</span>
+                <span><b>Позиция:</b> {problem.position === 'start' ? 'Начало' : problem.position === 'middle' ? 'Середина' : 'Конец'}</span>
+                <span><b>Первое обращение:</b> {new Date(problem.firstReportDate).toLocaleDateString('ru-RU')}</span>
+                <span><b>Последняя проверка:</b> {new Date(problem.lastErrorDate).toLocaleDateString('ru-RU')}</span>
               </div>
-              
-              <div className="problem-error">
-                <strong>Последняя ошибка:</strong>
-                <p>{problem.lastErrorDetails}</p>
-              </div>
-              
+
+              <div className="problem-error-line"><b>Ошибка:</b> {problem.lastErrorDetails}</div>
               {problem.resComment && (
-                <div className="problem-comment">
-                  <strong>Комментарий РЭС:</strong>
-                  <p>{problem.resComment}</p>
-                </div>
+                <div className="problem-error-line"><b>Комментарий РЭС:</b> {problem.resComment}</div>
               )}
-              
-              <div className="problem-actions">
-                <button 
-                  className="btn-details"
-                  onClick={() => {
-                    setDetailsProblem(problem);
-                    setShowDetailsModal(true);
-                  }}
-                >
-                  <IconSearch className="ico" /> Подробности
-                </button>
-               <button 
-                  className="btn-email"
-                  onClick={() => {
-                    setEmailProblem(problem);
-                    setShowEmailModal(true);
-                  }}
-                >
-                  <IconMail className="ico" /> Направить письмо исполнителю
-                </button>
-                <button 
-                  className="btn-dismiss"
-                  onClick={() => {
-                    setSelectedProblem(problem);
-                    setShowDeleteModal(true);
-                  }}
-                >
-                  <IconCheck className="ico" style={{color:'var(--green)'}} /> Рассмотреть без объяснительной
-                </button>
-              </div>
             </div>
           ))}
         </div>
@@ -6860,7 +6809,7 @@ const renderContent = () => {
     case 'askue_pending':
       return <Notifications filterType="pending_askue" onSectionChange={setActiveSection} selectedRes={selectedRes} />;
     case 'problem_vl':
-      return <ProblemVL />;
+      return <ProblemVL selectedRes={selectedRes} />;
     case 'documents':
       return <UploadedDocuments />;
     case 'reports':

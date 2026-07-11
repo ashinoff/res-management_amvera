@@ -2383,8 +2383,10 @@ app.get('/api/problem-vl/list',
   checkRole(['admin']), 
   async (req, res) => {
     try {
+      const where = { status: 'active' };
+      if (req.query.resId) where.resId = parseInt(req.query.resId);
       const problemVLs = await ProblemVL.findAll({
-        where: { status: 'active' },
+        where,
         include: [ResUnit, NetworkStructure],
         order: [['failureCount', 'DESC'], ['lastErrorDate', 'DESC']]
       });
@@ -3294,7 +3296,16 @@ if (result.has_errors) {
                 errorDetails: result.has_errors ? result.summary : null,
                 lastCheck: new Date()
               });
-              
+
+              // Успешная проверка (без ошибок) — автоматически снимаем ВЛ с
+              // проблемных (даже если ранее было 2+ неудачных проверок).
+              if (!result.has_errors) {
+                await ProblemVL.update(
+                  { status: 'resolved' },
+                  { where: { puNumber: fileName, status: 'active' } }
+                );
+              }
+
               // Если есть ошибки - добавляем для создания уведомлений
               if (result.has_errors) {
                 errors.push({
