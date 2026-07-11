@@ -2287,12 +2287,12 @@ app.put('/api/users/:id', authenticateToken, checkRole(['admin']), async (req, r
   try {
     const userId = req.params.id;
     const { fio, password, email, role, resId } = req.body;
-    
+
     const user = await User.findByPk(userId);
     if (!user) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
-    
+
     // Обновляем только переданные поля
     const updateData = {};
     if (fio) updateData.fio = fio;
@@ -2359,14 +2359,29 @@ app.delete('/api/users/:id', authenticateToken, checkRole(['admin']), async (req
         return res.status(400).json({ error: 'Нельзя удалить последнего администратора' });
       }
     }
-    
-    await user.destroy();
-    
+
+    // Чистим зависимые записи в одной транзакции, чтобы удаление не падало на
+    // FK и при этом сохранялись уведомления (их отработают с других учёток).
+    await sequelize.transaction(async (t) => {
+      // Служебное: отметки «прочитано» этого пользователя — просто мусор.
+      await NotificationRead.destroy({ where: { userId }, transaction: t });
+      // Уведомления сохраняем, только обнуляем ссылки на пользователя:
+      //  - fromUserId → NULL: уведомление остаётся, теряет лишь имя отправителя;
+      //  - toUserId → NULL: личное уведомление становится общим по РЭС и его
+      //    подхватят другие ответственные учётки.
+      await Notification.update({ fromUserId: null }, { where: { fromUserId: userId }, transaction: t });
+      await Notification.update({ toUserId: null }, { where: { toUserId: userId }, transaction: t });
+      // Содержательное (аудит загрузок) сохраняем, обнуляя авторство.
+      await UploadHistory.update({ userId: null }, { where: { userId }, transaction: t });
+      await PuUploadHistory.update({ uploadedBy: null }, { where: { uploadedBy: userId }, transaction: t });
+      await user.destroy({ transaction: t });
+    });
+
     res.json({
       success: true,
       message: 'Пользователь удален'
     });
-    
+
   } catch (error) {
     console.error('Delete user error:', error);
     res.status(500).json({ error: error.message });
