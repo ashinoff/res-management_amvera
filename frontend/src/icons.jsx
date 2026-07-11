@@ -219,6 +219,13 @@ export const IconBroom = (p) => (
     <path d="M12.5 8.5 9 13l2 2 4.5-3.5z" /><path d="M9 13l-2.5 5.5a1 1 0 0 0 1.3 1.3L13 17" />
   </Svg>
 );
+export const IconMeter = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <rect x="6" y="8" width="12" height="3.5" rx="1" />
+    <path d="M12 14l-1.2 2.2h2.4L12 18.4" />
+  </Svg>
+);
 export const IconInfo = (p) => (
   <Svg {...p}><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></Svg>
 );

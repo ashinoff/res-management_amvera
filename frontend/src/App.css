@@ -28,6 +28,21 @@
   animation: electric-bulb 2.1s ease-in-out infinite;
 }
 .rosseti-loader--small .rosseti-letter { font-size: 1.25rem; }
+
+/* Синяя рамка с SVG-логотипом (памятки, заголовки страниц) */
+.svg-frame {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; flex: 0 0 auto;
+  background: var(--accent-soft);
+  border: 1px solid #bcd4ef;
+  border-radius: var(--radius);
+  color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37,99,168,.08);
+  vertical-align: middle;
+}
+.svg-frame--sm { width: 34px; height: 34px; border-radius: var(--radius-sm); }
+/* Иконки пунктов левого меню */
+.menu-ico { display: inline-flex; align-items: center; margin-right: 10px; flex: 0 0 auto; }
 @keyframes electric-bulb {
   0%, 100% { color: #cbd5e1; text-shadow: none; }
   15%, 85% { color: #2563eb; text-shadow: 0 0 10px #3b82f6, 0 0 20px #3b82f6, 0 0 30px #1d4ed8; }

@@ -8,7 +8,7 @@ import React, { useState, useEffect, createContext, useContext, useCallback, use
 import axios from 'axios';
 import './App.css';
 import * as XLSX from 'xlsx';
-import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo } from './icons.jsx';
+import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo, IconMeter, IconUpload, IconSettings } from './icons.jsx';
 import RossetiLoader from './RossetiLoader.jsx';
 
 // =====================================================
@@ -60,24 +60,12 @@ const AuthContext = createContext(null);
 // УНИВЕРСАЛЬНЫЙ КОМПОНЕНТ ЗАГРУЗКИ
 // =====================================================
 
-function LoadingSpinner({ type = 'default', message = 'Загрузка...', submessage = null }) {
-  // Единый загрузчик — анимированная надпись «РОССЕТИ» (буквы по очереди),
-  // как в «Учёте ПУ». Все типы (default/dots/pulse/inline/overlay) рисуют её.
+function LoadingSpinner({ type = 'default' }) {
+  // Заставка загрузки — только анимация «РОССЕТИ» (буквы по очереди), без текста.
   if (type === 'inline') {
-    return (
-      <div className="loading-inline">
-        <RossetiLoader size="small" />
-        {message && <span>{message}</span>}
-      </div>
-    );
+    return <div className="loading-inline"><RossetiLoader size="small" /></div>;
   }
-  const body = (
-    <div className="loading-container">
-      <RossetiLoader />
-      {message && <p className="loading-message">{message}</p>}
-      {submessage && <small className="loading-submessage">{submessage}</small>}
-    </div>
-  );
+  const body = <div className="loading-container"><RossetiLoader /></div>;
   return type === 'overlay' ? <div className="loading-overlay">{body}</div> : body;
 }
 
@@ -187,16 +175,16 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
   };
 
   const menuItems = [
-    { id: 'structure', label: 'Структура сети', roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'upload', label: 'Загрузить файлы', roles: ['admin', 'uploader'] },
-    { id: 'tech_pending', label: 'Ожидающие мероприятий', roles: ['admin', 'res_responsible'], badge: notificationCounts.tech_pending },
-    { id: 'askue_pending', label: 'Ожидающие проверки АСКУЭ', roles: ['admin', 'uploader'], badge: notificationCounts.askue_pending },
-    { id: 'problem_vl', label: 'Проблемные ВЛ', roles: ['admin'], badge: notificationCounts.problem_vl },
-    { id: 'documents', label: 'Загруженные документы', roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'history', label: 'История системы', roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'reports', label: 'Отчеты', roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'settings', label: 'Настройки', roles: ['admin'] },
-    { id: 'analytics', label: 'Аналитика', roles: ['admin', 'uploader', 'res_responsible'], }
+    { id: 'structure', label: 'Структура сети', icon: <IconLayers size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
+    { id: 'upload', label: 'Загрузить файлы', icon: <IconUpload size={18} />, roles: ['admin', 'uploader'] },
+    { id: 'tech_pending', label: 'Ожидающие мероприятий', icon: <IconWrench size={18} />, roles: ['admin', 'res_responsible'], badge: notificationCounts.tech_pending },
+    { id: 'askue_pending', label: 'Ожидающие проверки АСКУЭ', icon: <IconClipboard size={18} />, roles: ['admin', 'uploader'], badge: notificationCounts.askue_pending },
+    { id: 'problem_vl', label: 'Проблемные ВЛ', icon: <IconAlertTriangle size={18} />, roles: ['admin'], badge: notificationCounts.problem_vl },
+    { id: 'documents', label: 'Загруженные документы', icon: <IconFolder size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
+    { id: 'history', label: 'История системы', icon: <IconClock size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
+    { id: 'reports', label: 'Отчеты', icon: <IconFileText size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
+    { id: 'settings', label: 'Настройки', icon: <IconSettings size={18} />, roles: ['admin'] },
+    { id: 'analytics', label: 'Аналитика', icon: <IconChart size={18} />, roles: ['admin', 'uploader', 'res_responsible'], }
   ];
 
   const visibleItems = menuItems.filter(item => item.roles.includes(userRole));
@@ -210,6 +198,7 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
           onClick={() => onSectionChange(item.id)}
           className={`menu-item ${activeSection === item.id ? 'active' : ''}`}
         >
+          <span className="menu-ico">{item.icon}</span>
           <span className="menu-label">{item.label}</span>
           {item.badge > 0 && (
             <span className="notification-badge">{item.badge > 99 ? '99+' : item.badge}</span>
@@ -665,10 +654,10 @@ const executeClearHistory = async () => {
   
   return (
     <div className="network-structure">
-      <h2></h2>
+      <h2><span className="svg-frame"><IconLayers size={24} /></span> Структура сети</h2>
       {user.role === 'admin' && (
   <p className="edit-hint">
-    <img src="/icons/important.png" alt="Важно" style={{width: 36, height: 36, verticalAlign: 'middle', marginRight: 5}} />
+    <span className="svg-frame svg-frame--sm" style={{marginRight: 8}}><IconEdit size={20} /></span>
       Двойной клик по номеру счетчика для редактирования
   </p>
 )}
@@ -1033,19 +1022,19 @@ function FileUpload() {
   { 
     id: 'rim_single', 
     label: 'Счетчики РИМ',
-    icon: <img src="/icons/PU.png" alt="Счетчик" style={{width: 40, height: 40}} />,
+    icon: <span className="svg-frame"><IconMeter size={24} /></span>,
     description: 'Один файл = один ПУ'
   },
   { 
     id: 'nartis', 
     label: 'Счетчики Нартис',
-    icon: <img src="/icons/PU.png" alt="Счетчик" style={{width: 40, height: 40}} />,
+    icon: <span className="svg-frame"><IconMeter size={24} /></span>,
     description: 'Один файл = один ПУ'
   },
   { 
     id: 'energomera', 
     label: 'Счетчики Энергомера',
-    icon: <img src="/icons/PU.png" alt="Счетчик" style={{width: 40, height: 40}} />,
+    icon: <span className="svg-frame"><IconMeter size={24} /></span>,
     description: 'Один файл = один ПУ'
   }
 ];
@@ -1209,7 +1198,7 @@ for (let i = 0; i < files.length; i++) {
   return (
     <div className="file-upload-container">
       <div className="upload-header">
-        <h2>Загрузка файлов для анализа</h2>
+        <h2><span className="svg-frame"><IconUpload size={24} /></span> Загрузка файлов для анализа</h2>
         <p className="upload-subtitle">Загружайте Excel файлы с данными счетчиков для автоматической проверки</p>
       </div>
 
@@ -1217,7 +1206,7 @@ for (let i = 0; i < files.length; i++) {
       <div className="upload-info-panel">
         <div className="info-card">
   <div className="info-icon">
-    <img src="/icons/place.png" alt="Местоположение" style={{width: 72, height: 72}} />
+    <span className="svg-frame"><IconMapPin size={24} /></span>
   </div>
   <div className="info-content">
     <h4>Текущий РЭС</h4>
@@ -1226,7 +1215,7 @@ for (let i = 0; i < files.length; i++) {
 </div>
         <div className="info-card">
   <div className="info-icon">
-    <img src="/icons/important.png" alt="Важно" style={{width: 60, height: 60}} />
+    <span className="svg-frame"><IconAlertTriangle size={24} /></span>
   </div>
   <div className="info-content">
     <h4>ВАЖНО!!!</h4>
@@ -2521,7 +2510,7 @@ function Reports() {
 
   return (
     <div className="reports">
-      <h2>Отчеты по проверкам</h2>
+      <h2><span className="svg-frame"><IconFileText size={24} /></span> Отчеты по проверкам</h2>
 
       {user.role !== 'admin' && (
         <div className="res-indicator">
@@ -2851,7 +2840,7 @@ const handleSendEmail = async () => {
   if (loading) return <LoadingSpinner type="pulse" message="Загрузка проблемных ВЛ..." submessage="Анализируем критические проблемы" />;
   return (
     <div className="problem-vl-container">
-      <h2>Проблемные ВЛ</h2>
+      <h2><span className="svg-frame"><IconAlertTriangle size={24} /></span> Проблемные ВЛ</h2>
       
       <div className="problem-info">
         <p>В этом разделе отображаются ВЛ, которые не прошли проверку 2 и более раз после выполнения мероприятий РЭС.</p>
@@ -2872,7 +2861,7 @@ const handleSendEmail = async () => {
       {problemVLs.length === 0 ? (
   <div className="no-data">
     <p>
-      <img src="/icons/ok.png" alt="OK" style={{width: 110, height: 140, verticalAlign: 'middle', marginRight: 8}} />
+      <span className="svg-frame" style={{marginRight: 8}}><IconCheck size={26} /></span>
       Проблемных ВЛ нет
     </p>
   </div>
@@ -3115,7 +3104,7 @@ function Settings() {
   
   return (
     <div className="settings-container">
-      <h2>Настройки системы</h2>
+      <h2><span className="svg-frame"><IconSettings size={24} /></span> Настройки системы</h2>
       
       <div className="settings-tabs">
         <button 
@@ -4844,7 +4833,7 @@ function UploadedDocuments() {
   
   return (
     <div className="uploaded-documents">
-      <h2>Загруженные документы</h2>
+      <h2><span className="svg-frame"><IconFolder size={24} /></span> Загруженные документы</h2>
       
       <div className="documents-controls">
         <div className="documents-info">
@@ -5184,7 +5173,7 @@ function ExtendedPuModal({
         
         <div className="modal-body">
           {loading ? (
-            <div className="loading"><RossetiLoader /><p className="loading-message">Загрузка истории...</p></div>
+            <div className="loading"><RossetiLoader /></div>
           ) : (
             <>
               {/* Вкладка текущего состояния */}
@@ -5515,7 +5504,7 @@ function SystemHistory() {
   
   return (
     <div className="system-history">
-      <h2>История системы</h2>
+      <h2><span className="svg-frame"><IconClock size={24} /></span> История системы</h2>
 
       {user.role !== 'admin' && (
     <div className="res-indicator">
@@ -5963,7 +5952,7 @@ function Analytics() {
   
   return (
     <div className="analytics-container">
-      <h2><IconChart className="ico" /> Аналитика по загрузкам</h2>
+      <h2><span className="svg-frame"><IconChart size={24} /></span> Аналитика по загрузкам</h2>
       
       {/* НОВОЕ: Индикатор для не-админов */}
       {user.role !== 'admin' && (
@@ -6077,7 +6066,7 @@ function Analytics() {
       </div>
       
       {/* ВЛ в работе у РЭС */}
-      <h2 style={{ marginTop: '32px' }}><IconWrench className="ico" /> ВЛ в работе у РЭС</h2>
+      <h2 style={{ marginTop: '32px' }}><span className="svg-frame"><IconZap size={24} /></span> ВЛ в работе у РЭС</h2>
       <p className="info-hint" style={{ marginBottom: '12px' }}>
         <IconInfo className="ico" style={{color:'var(--blue)'}} /> Текущее состояние: количество ВЛ с нерешёнными проблемами на данный момент
       </p>
@@ -6367,8 +6356,6 @@ function DatabaseMaintenance() {
         <div className="db-loading">
           <div className="loading-animation">
             <RossetiLoader />
-            <p>Анализируем базу данных...</p>
-            <small>Это может занять несколько секунд</small>
           </div>
         </div>
       )}
