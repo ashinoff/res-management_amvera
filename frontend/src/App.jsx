@@ -1739,6 +1739,19 @@ const loadNotifications = useCallback(async () => {
     <div 
       key={notif.id} 
       className={`notification-compact ${notif.type} ${!notif.isRead ? 'unread' : ''} ${selectedNotificationIds.includes(notif.id) ? 'selected' : ''}`}
+      onClick={() => {
+        // Клик по всему уведомлению = "Детали"
+        if (notif.type === 'error' || notif.type === 'pending_askue') {
+          try {
+            const data = JSON.parse(notif.message);
+            setDetailsNotification({ ...notif, data });
+            setShowDetailsModal(true);
+          } catch (e) { /* некорректный формат — игнорируем */ }
+        } else if (notif.type === 'problem_vl') {
+          if (typeof onSectionChange === 'function') onSectionChange('problem_vl');
+        }
+      }}
+      title={notif.type === 'error' || notif.type === 'pending_askue' ? 'Открыть подробности' : notif.type === 'problem_vl' ? 'Перейти к проблемным ВЛ' : undefined}
     >
       {/* ЧЕКБОКС ТЕПЕРЬ СНАРУЖИ И СЛЕВА */}
       {user.role === 'admin' && (
@@ -1784,20 +1797,12 @@ const loadNotifications = useCallback(async () => {
               </div>
               
               <div className="notification-narrow-actions">
-                <button 
-                  className="btn-details-blue"
-                  onClick={() => {
-                    setDetailsNotification({ ...notif, data });
-                    setShowDetailsModal(true);
-                  }}
-                >
-                  Детали
-                </button>
-                
+                {/* Кнопка "Детали" убрана — детали открываются кликом по самому уведомлению */}
                 {user.role === 'res_responsible' && (
                   <button 
                     className="btn-complete-green"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setSelectedNotification({ id: notif.id, data });
                       setShowCompleteModal(true);
                     }}
@@ -1836,23 +1841,14 @@ const loadNotifications = useCallback(async () => {
                 <div className="notification-buttons">
                   <button 
                     className="btn-upload-orange"  // Изменили класс
-                    onClick={() => handleFileUpload(data.puNumber, data)}
+                    onClick={(e) => { e.stopPropagation(); handleFileUpload(data.puNumber, data); }}
                     disabled={uploadingPu === data.puNumber}
                     title="Загрузить файл"
                   >
                     {uploadingPu === data.puNumber ? 'Загрузка...' : 'Загрузить'}
                   </button>
                   
-                  <button 
-                    className="btn-details-blue"
-                    onClick={() => {
-                      setDetailsNotification({ ...notif, data });
-                      setShowDetailsModal(true);
-                    }}
-                  >
-                    Детали
-                  </button>
-                  
+                  {/* Кнопка "Детали" убрана — детали открываются кликом по самому уведомлению */}
                   {/* УБИРАЕМ КНОПКУ УДАЛЕНИЯ */}
                 </div>
               </div>
@@ -1910,7 +1906,8 @@ const loadNotifications = useCallback(async () => {
                 <div className="notification-buttons">
                   <button 
                     className="btn-view-problem"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       if (typeof onSectionChange === 'function') {
                         onSectionChange('problem_vl');
                       }
@@ -3517,8 +3514,7 @@ function DiagnoseData() {
         >
           {loading ? (
             <>
-              <div className="loading-spinner-small"></div>
-              Диагностика...
+                            Диагностика...
             </>
           ) : (
             <>
@@ -3852,8 +3848,7 @@ function DiagnoseData() {
               >
                 {massFixing ? (
                   <>
-                    <div className="loading-spinner-small"></div>
-                    Исправление...
+                                        Исправление...
                   </>
                 ) : (
                   <>
@@ -4020,8 +4015,7 @@ function StructureSettings() {
       >
         {uploading ? (
           <>
-            <div className="loading-spinner-small"></div>
-            Загрузка...
+                        Загрузка...
           </>
         ) : (
           'Загрузить структуру'
@@ -5938,8 +5932,7 @@ function Analytics() {
         >
           {loadingDetailed ? (
             <>
-              <div className="loading-spinner-small" style={{marginRight: '8px'}}></div>
-              Формирование...
+                            Формирование...
             </>
           ) : (
             <>
@@ -6269,8 +6262,7 @@ function DatabaseMaintenance() {
         >
           {loading ? (
             <>
-              <span className="spinner-small"></span>
-              Проверка...
+                            Проверка...
             </>
           ) : (
             <>
@@ -6617,8 +6609,7 @@ function DatabaseMaintenance() {
               >
                 {cleaning ? (
                   <>
-                    <span className="spinner-small"></span>
-                    Очистка...
+                                        Очистка...
                   </>
                 ) : (
                   <>
