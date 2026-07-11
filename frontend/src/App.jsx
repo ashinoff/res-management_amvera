@@ -6820,13 +6820,27 @@ export default function App() {
   };
 
   if (!user) {
-    // Пока ждём токен платформы (в iframe) — лоадер, а не форма логина.
-    if (ssoPending) {
+    // Внутри iframe платформы НЕ показываем свою форму логина: пока ждём токен —
+    // заставка; если вход не удался (нет доступа/учётки) — сообщение, а не логин.
+    if (EMBEDDED) {
+      if (ssoPending) {
+        return (
+          <div className="login-container">
+            <div className="login-box" style={{ textAlign: 'center' }}>
+              <RossetiLoader />
+              <h2 style={{ marginTop: 16 }}>Вход через платформу…</h2>
+            </div>
+          </div>
+        );
+      }
       return (
         <div className="login-container">
           <div className="login-box" style={{ textAlign: 'center' }}>
-            <RossetiLoader />
-            <h2 style={{ marginTop: 16 }}>Вход через платформу…</h2>
+            <h2>Нет доступа</h2>
+            <p style={{ marginTop: 10, color: '#5b6b82' }}>
+              У вашей учётной записи нет доступа к этому приложению.<br />
+              Обратитесь к администратору.
+            </p>
           </div>
         </div>
       );
