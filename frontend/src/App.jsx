@@ -9,6 +9,7 @@ import axios from 'axios';
 import './App.css';
 import * as XLSX from 'xlsx';
 import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo } from './icons.jsx';
+import RossetiLoader from './RossetiLoader.jsx';
 
 // =====================================================
 // НАСТРОЙКА API КЛИЕНТА
@@ -60,53 +61,24 @@ const AuthContext = createContext(null);
 // =====================================================
 
 function LoadingSpinner({ type = 'default', message = 'Загрузка...', submessage = null }) {
-  const spinnerTypes = {
-    default: (
-      <div className="loading-container">
-        <div className="loading-spinner-large"></div>
-        <p className="loading-message">{message}</p>
-        {submessage && <small className="loading-submessage">{submessage}</small>}
-      </div>
-    ),
-    
-    inline: (
+  // Единый загрузчик — анимированная надпись «РОССЕТИ» (буквы по очереди),
+  // как в «Учёте ПУ». Все типы (default/dots/pulse/inline/overlay) рисуют её.
+  if (type === 'inline') {
+    return (
       <div className="loading-inline">
-        <div className="loading-spinner-small"></div>
-        <span>{message}</span>
+        <RossetiLoader size="small" />
+        {message && <span>{message}</span>}
       </div>
-    ),
-    
-    overlay: (
-      <div className="loading-overlay">
-        <div className="loading-container">
-          <div className="loading-spinner-large"></div>
-          <p className="loading-message">{message}</p>
-          {submessage && <small className="loading-submessage">{submessage}</small>}
-        </div>
-      </div>
-    ),
-    
-    dots: (
-      <div className="loading-dots-container">
-        <div className="loading-dots">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-        <p className="loading-message">{message}</p>
-      </div>
-    ),
-    
-    pulse: (
-      <div className="loading-pulse-container">
-        <div className="loading-pulse"></div>
-        <p className="loading-message">{message}</p>
-        {submessage && <small className="loading-submessage">{submessage}</small>}
-      </div>
-    )
-  };
-  
-  return spinnerTypes[type] || spinnerTypes.default;
+    );
+  }
+  const body = (
+    <div className="loading-container">
+      <RossetiLoader />
+      {message && <p className="loading-message">{message}</p>}
+      {submessage && <small className="loading-submessage">{submessage}</small>}
+    </div>
+  );
+  return type === 'overlay' ? <div className="loading-overlay">{body}</div> : body;
 }
 
 
@@ -3282,7 +3254,7 @@ function FileManagement() {
     return true;
   });
   
-  if (loading) return <div className="loading">Загрузка...</div>;
+  if (loading) return <div className="loading"><RossetiLoader /></div>;
   
   return (
     <div className="settings-section">
@@ -5212,7 +5184,7 @@ function ExtendedPuModal({
         
         <div className="modal-body">
           {loading ? (
-            <div className="loading">Загрузка истории...</div>
+            <div className="loading"><RossetiLoader /><p className="loading-message">Загрузка истории...</p></div>
           ) : (
             <>
               {/* Вкладка текущего состояния */}
@@ -6394,7 +6366,7 @@ function DatabaseMaintenance() {
       {loading && (
         <div className="db-loading">
           <div className="loading-animation">
-            <div className="loading-spinner-large"></div>
+            <RossetiLoader />
             <p>Анализируем базу данных...</p>
             <small>Это может занять несколько секунд</small>
           </div>
@@ -6880,8 +6852,9 @@ export default function App() {
     if (ssoPending) {
       return (
         <div className="login-container">
-          <div className="login-box">
-            <h2>Вход через платформу…</h2>
+          <div className="login-box" style={{ textAlign: 'center' }}>
+            <RossetiLoader />
+            <h2 style={{ marginTop: 16 }}>Вход через платформу…</h2>
           </div>
         </div>
       );

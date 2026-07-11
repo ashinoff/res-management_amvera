@@ -18,6 +18,21 @@
 /* Выравнивание инлайн SVG-иконок (icons.jsx) по тексту */
 .ico { display: inline-flex; align-items: center; vertical-align: -0.15em; }
 
+/* ========== Заставка загрузки РОССЕТИ (буквы загораются по очереди) ========== */
+.rosseti-loader { display: flex; gap: 4px; justify-content: center; align-items: center; }
+.rosseti-letter {
+  font-weight: 700;
+  font-size: 2.25rem;
+  line-height: 1;
+  color: #cbd5e1;
+  animation: electric-bulb 2.1s ease-in-out infinite;
+}
+.rosseti-loader--small .rosseti-letter { font-size: 1.25rem; }
+@keyframes electric-bulb {
+  0%, 100% { color: #cbd5e1; text-shadow: none; }
+  15%, 85% { color: #2563eb; text-shadow: 0 0 10px #3b82f6, 0 0 20px #3b82f6, 0 0 30px #1d4ed8; }
+}
+
 /* =====================================================
    ПРОФЕССИОНАЛЬНЫЕ СТИЛИ ДЛЯ СИСТЕМЫ УПРАВЛЕНИЯ РЭС
    Файл: src/App.css
