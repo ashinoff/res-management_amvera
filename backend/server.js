@@ -3838,6 +3838,74 @@ try {
 } catch (err) {
   console.error('Error in check 10:', err);
 }
+
+      // 11. Проверка АКТУАЛЬНОСТИ проблемных ВЛ: активная запись, но её ПУ
+      // уже проверен без ошибок или удалён из структуры сети. Такие записи
+      // могли остаться с времён до внедрения авто-resolve при чистой проверке.
+try {
+  console.log('Check 11: irrelevant_problem_vl - START');
+
+  const activeProblemVLs = await ProblemVL.findAll({
+    where: { status: 'active' }
+  });
+
+  console.log(`Found ${activeProblemVLs.length} active problem VLs to check`);
+
+  const irrelevantProblems = [];
+
+  for (const problem of activeProblemVLs) {
+    try {
+      if (!problem.puNumber) continue;
+
+      const puStatus = await PuStatus.findOne({
+        where: { puNumber: problem.puNumber }
+      });
+
+      if (!puStatus) {
+        // ПУ удалён из структуры — проблема потеряла смысл
+        irrelevantProblems.push({
+          problemId: problem.id,
+          puNumber: problem.puNumber,
+          tpName: problem.tpName,
+          vlName: problem.vlName,
+          failureCount: problem.failureCount,
+          lastErrorDate: problem.lastErrorDate,
+          currentStatus: 'not_found',
+          reason: 'ПУ не найден в структуре сети'
+        });
+      } else if (puStatus.status === 'checked_ok') {
+        // ПУ уже зелёный, а ВЛ всё ещё числится проблемной
+        irrelevantProblems.push({
+          problemId: problem.id,
+          puNumber: problem.puNumber,
+          tpName: problem.tpName,
+          vlName: problem.vlName,
+          failureCount: problem.failureCount,
+          lastErrorDate: problem.lastErrorDate,
+          lastCheck: puStatus.lastCheck,
+          currentStatus: 'checked_ok',
+          reason: 'ПУ уже проверен без ошибок'
+        });
+      }
+    } catch (e) {
+      console.error('Error checking problem VL:', e);
+    }
+  }
+
+  if (irrelevantProblems.length > 0) {
+    issues.push({
+      type: 'irrelevant_problem_vl',
+      severity: 'warning',
+      count: irrelevantProblems.length,
+      description: 'Найдены проблемные ВЛ, потерявшие актуальность (ПУ уже зелёные или удалены из структуры)',
+      items: irrelevantProblems.slice(0, 10)
+    });
+  }
+
+  console.log('Check 11: irrelevant_problem_vl - OK, found:', irrelevantProblems.length);
+} catch (err) {
+  console.error('Error in check 11:', err);
+}
       
       // Итоговая статистика
       const stats = {
@@ -3849,6 +3917,7 @@ try {
   },
   staleNotifications: issues.find(i => i.type === 'stale_notifications')?.count || 0, // ✅ ДОБАВЛЕНО
   missingNotifications: issues.find(i => i.type === 'missing_notifications')?.count || 0,
+  irrelevantProblemVL: issues.find(i => i.type === 'irrelevant_problem_vl')?.count || 0,
   totalRecords: {
     networkStructures: await NetworkStructure.count(),
     puStatuses: await PuStatus.count(),
@@ -4036,6 +4105,32 @@ app.post('/api/admin/database-cleanup',
           console.log(`Cleaned stale_problem_vl: ${cleaned}`);
           break;
 
+        case 'irrelevant_problem_vl': {
+          // Закрываем проблемные ВЛ, потерявшие актуальность: ПУ уже
+          // проверен без ошибок или удалён из структуры. Статус — resolved
+          // (как в авто-resolve при чистой проверке), НЕ dismissed.
+          const activeProblems = await ProblemVL.findAll({
+            where: { status: 'active' },
+            transaction
+          });
+
+          for (const problem of activeProblems) {
+            if (!problem.puNumber) continue;
+
+            const puStatus = await PuStatus.findOne({
+              where: { puNumber: problem.puNumber },
+              transaction
+            });
+
+            if (!puStatus || puStatus.status === 'checked_ok') {
+              await problem.update({ status: 'resolved' }, { transaction });
+              cleaned++;
+            }
+          }
+          console.log(`Cleaned irrelevant_problem_vl: ${cleaned}`);
+          break;
+        }
+
           case 'stale_notifications':
   // ✅ НОВОЕ: Очистка неактуальных уведомлений
   console.log('Cleaning stale notifications...');
@@ -4173,34 +4268,51 @@ app.post('/api/admin/database-cleanup',
 // ENDPOINT ДЛЯ СКАЧИВАНИЯ ФАЙЛОВ С ПРАВИЛЬНЫМ ИМЕНЕМ
 // =====================================================
 
+// Прокси файлов из Cloudinary. ВАЖНО: не редиректим браузер на
+// res.cloudinary.com (общий CDN-домен, его блокируют Яндекс.Браузер/фильтры) —
+// сервер сам скачивает файл и отдаёт его со своего домена.
+// ?inline=1 — показать в браузере (картинки/просмотр), без — скачать файлом.
 app.get('/api/download/:public_id', async (req, res) => {
   try {
     const publicId = decodeURIComponent(req.params.public_id);
-    const originalName = req.query.name || 'file.pdf';
-    
-    console.log('📥 Download request:', { publicId, originalName });
-    
-    // Определяем тип ресурса
+    const originalName = req.query.name || 'file';
+    const inline = req.query.inline === '1';
+
+    // Определяем тип ресурса (PDF хранятся как raw, остальное — image)
     const isPdf = publicId.toLowerCase().endsWith('.pdf');
     const resourceType = isPdf ? 'raw' : 'image';
-    
-    // ИСПРАВЛЕНО: Генерируем signed URL для доступа к приватным файлам
-    const downloadUrl = cloudinary.url(publicId, {
+
+    // Signed URL для доступа к приватным файлам — но идёт по нему СЕРВЕР
+    const fileUrl = cloudinary.url(publicId, {
       resource_type: resourceType,
       type: 'upload',
       secure: true,
-      attachment: true,  // Заставляет браузер скачивать
-      sign_url: true     // Подписываем URL
+      sign_url: true
     });
-    
-    console.log('✅ Redirect to:', downloadUrl);
-    
-    // Редирект на signed URL
-    res.redirect(302, downloadUrl);
-    
+
+    const upstream = await fetch(fileUrl);
+    if (!upstream.ok || !upstream.body) {
+      console.error('Download proxy: upstream status', upstream.status, 'for', publicId);
+      return res.status(upstream.status === 404 ? 404 : 502)
+        .json({ error: 'Файл недоступен в хранилище' });
+    }
+
+    res.setHeader('Content-Type',
+      upstream.headers.get('content-type') || 'application/octet-stream');
+    const contentLength = upstream.headers.get('content-length');
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+    res.setHeader('Content-Disposition',
+      `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(originalName)}`);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+
+    const { Readable } = require('stream');
+    Readable.fromWeb(upstream.body).pipe(res);
+
   } catch (error) {
     console.error('❌ Download error:', error);
-    res.status(500).json({ error: 'Ошибка скачивания файла: ' + error.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Ошибка скачивания файла: ' + error.message });
+    }
   }
 });
 
