@@ -31,6 +31,7 @@ const nodemailer = require('nodemailer');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const zlib = require('zlib');
 const { Sequelize, DataTypes, Op } = require('sequelize');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
@@ -4219,9 +4220,13 @@ app.get('/api/admin/backup', authenticateToken, checkRole(['admin']), async (req
       tables,
     };
     const dateStr = new Date().toISOString().slice(0, 10);
+    // Отдаём gzip-ом (Content-Encoding: gzip) — браузер распакует прозрачно,
+    // пользователь получает обычный .json. Обходит лимиты/таймауты прокси Amvera.
+    const gz = zlib.gzipSync(Buffer.from(JSON.stringify(backup), 'utf8'));
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Encoding', 'gzip');
     res.setHeader('Content-Disposition', `attachment; filename="res-backup-${dateStr}.json"`);
-    res.send(JSON.stringify(backup));
+    res.send(gz);
   } catch (error) {
     console.error('Backup error:', error.message);
     res.status(500).json({ error: 'Ошибка бэкапа: ' + error.message });
@@ -4245,7 +4250,14 @@ app.post('/api/admin/restore', authenticateToken, checkRole(['admin']), backupUp
     }
     let backup;
     try {
-      backup = JSON.parse(req.file.buffer.toString('utf8'));
+      // Клиент сжимает файл gzip (прокси Amvera режет большие тела запросов).
+      // Определяем gzip по магическим байтам 1f 8b и распаковываем; несжатый
+      // файл обрабатывается как раньше.
+      let buf = req.file.buffer;
+      if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+        buf = zlib.gunzipSync(buf);
+      }
+      backup = JSON.parse(buf.toString('utf8'));
     } catch (e) {
       return res.status(400).json({ error: 'Файл не является корректным JSON' });
     }

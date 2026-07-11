@@ -6241,7 +6241,17 @@ function DatabaseMaintenance() {
     setRestoring(true);
     try {
       const fd = new FormData();
-      fd.append('file', file);
+      // Сжимаем файл gzip перед отправкой (прокси Amvera режет большие тела —
+      // HTTP 413). JSON жмётся в 10-20 раз. Сервер распознаёт gzip по магическим
+      // байтам. Если CompressionStream недоступен (старый браузер) — шлём как есть.
+      if (window.CompressionStream) {
+        const gzBlob = await new Response(
+          file.stream().pipeThrough(new CompressionStream('gzip'))
+        ).blob();
+        fd.append('file', gzBlob, file.name + '.gz');
+      } else {
+        fd.append('file', file);
+      }
       fd.append('confirm', 'true');
       const token = localStorage.getItem('token');
       const resp = await fetch(`${API_URL}/api/admin/restore`, {
