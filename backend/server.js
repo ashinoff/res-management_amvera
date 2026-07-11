@@ -2571,8 +2571,15 @@ async function getNotificationCounts(user) {
       ]
     };
   } else {
+    // Загрузчик АСКУЭ: как в GET /api/notifications — свои личные уведомления
+    // ПЛЮС общие pending_askue по его РЭС (они создаются с toUserId=null,
+    // resId=РЭС — см. Notification.create). Без второй ветки счётчик их не
+    // видел, и бейдж «Ожидающие проверки АСКУЭ» не появлялся, хотя список — 5.
     whereClause = {
-      toUserId: user.id
+      [Op.or]: [
+        { toUserId: user.id },
+        { toUserId: null, resId: user.resId, type: 'pending_askue' }
+      ]
     };
   }
 
