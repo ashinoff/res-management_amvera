@@ -4361,7 +4361,6 @@ function UserSettings() {
                   type="text"
                   value={userForm.login}
                   onChange={(e) => setUserForm({...userForm, login: e.target.value})}
-                  disabled
                 />
               </div>
               

@@ -2286,7 +2286,7 @@ app.post('/api/users/create', authenticateToken, checkRole(['admin']), async (re
 app.put('/api/users/:id', authenticateToken, checkRole(['admin']), async (req, res) => {
   try {
     const userId = req.params.id;
-    const { fio, password, email, role, resId } = req.body;
+    const { fio, login, password, email, role, resId } = req.body;
 
     const user = await User.findByPk(userId);
     if (!user) {
@@ -2296,6 +2296,14 @@ app.put('/api/users/:id', authenticateToken, checkRole(['admin']), async (req, r
     // Обновляем только переданные поля
     const updateData = {};
     if (fio) updateData.fio = fio;
+    // Логин можно менять, но он уникален — проверяем занятость другим пользователем.
+    if (login && login !== user.login) {
+      const taken = await User.findOne({ where: { login, id: { [Op.ne]: userId } } });
+      if (taken) {
+        return res.status(400).json({ error: 'Логин уже занят' });
+      }
+      updateData.login = login;
+    }
     if (email) updateData.email = email;
     if (role) updateData.role = role;
     if (role === 'admin') {
