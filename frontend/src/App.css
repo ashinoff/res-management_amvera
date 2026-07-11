@@ -15,6 +15,9 @@
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
 }
 
+/* Выравнивание инлайн SVG-иконок (icons.jsx) по тексту */
+.ico { display: inline-flex; align-items: center; vertical-align: -0.15em; }
+
 /* =====================================================
    ПРОФЕССИОНАЛЬНЫЕ СТИЛИ ДЛЯ СИСТЕМЫ УПРАВЛЕНИЯ РЭС
    Файл: src/App.css

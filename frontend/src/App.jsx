@@ -8,6 +8,7 @@ import React, { useState, useEffect, createContext, useContext, useCallback, use
 import axios from 'axios';
 import './App.css';
 import * as XLSX from 'xlsx';
+import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo } from './icons.jsx';
 
 // =====================================================
 // НАСТРОЙКА API КЛИЕНТА
@@ -182,7 +183,7 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
   useEffect(() => {
     loadNotificationCounts();
     
-    // ✅ PERF: не опрашиваем сервер, пока вкладка скрыта
+    // PERF: не опрашиваем сервер, пока вкладка скрыта
     const interval = setInterval(() => {
       if (!document.hidden) loadNotificationCounts();
     }, 30000); // Обновляем каждые 30 сек
@@ -564,8 +565,8 @@ const executeClearHistory = async () => {
             }}
             autoFocus
           />
-          <button onClick={() => saveEdit(item)} className="save-btn">✓</button>
-          <button onClick={cancelEdit} className="cancel-btn">✗</button>
+          <button onClick={() => saveEdit(item)} className="save-btn"><IconCheck className="ico" style={{color:'var(--green)'}} /></button>
+          <button onClick={cancelEdit} className="cancel-btn"><IconX className="ico" /></button>
         </div>
       );
     }
@@ -642,8 +643,8 @@ const executeClearHistory = async () => {
         const status = item.PuStatuses?.find(s => s.puNumber === puNumber && s.position === position);
         
         switch(status?.status) {
-          case 'checked_ok': return 'Проверен ✓';
-          case 'checked_error': return 'Ошибка ✗';
+          case 'checked_ok': return 'Проверен';
+          case 'checked_error': return 'Ошибка';
           case 'pending_recheck': return 'Ожидает перепроверки';
           case 'not_checked': return 'Не проверен';
           default: return 'Не проверен';
@@ -739,14 +740,14 @@ const executeClearHistory = async () => {
       }}
       disabled={loading}
     >
-      {loading ? '⏳ Обновление...' : 'Обновить структуру'}
+      {loading ? 'Обновление...' : 'Обновить структуру'}
     </button>
     
     <button 
       className="export-btn" 
       onClick={exportStructureToExcel}
     >
-      📊 Экспорт в Excel
+      <IconChart className="ico" /> Экспорт в Excel
     </button>
   </div>
 </div>
@@ -861,11 +862,11 @@ const executeClearHistory = async () => {
           <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Подтверждение удаления</h3>
-              <button className="close-btn" onClick={() => {setShowDeleteModal(false); setDeletePassword('');}}>✕</button>
+              <button className="close-btn" onClick={() => {setShowDeleteModal(false); setDeletePassword('');}}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               <p>Вы собираетесь удалить {selectedIds.length} записей.</p>
-              <p className="warning">⚠️ Это действие нельзя отменить!</p>
+              <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
               <div className="form-group">
                 <label>Введите пароль администратора:</label>
                 <input
@@ -901,7 +902,7 @@ const executeClearHistory = async () => {
     <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
       <div className="modal-header">
         <h3>Подтверждение очистки истории</h3>
-        <button className="close-btn" onClick={() => setShowClearHistoryModal(false)}>✕</button>
+        <button className="close-btn" onClick={() => setShowClearHistoryModal(false)}><IconX className="ico" /></button>
       </div>
       <div className="modal-body">
         <p>
@@ -909,7 +910,7 @@ const executeClearHistory = async () => {
           {clearHistoryType === 'tp' && `Вы собираетесь очистить историю для выбранных строк (${selectedIds.length} записей)`}
           {clearHistoryType === 'all' && 'Вы собираетесь очистить ВСЮ историю системы'}
         </p>
-        <p className="warning">⚠️ Будут удалены все записи о загрузках и проверках!</p>
+        <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Будут удалены все записи о загрузках и проверках!</p>
         <div className="form-group">
           <label>Введите пароль администратора:</label>
           <input
@@ -949,7 +950,7 @@ const executeClearHistory = async () => {
     }}
     title="Наверх"
   >
-    ↑
+    <IconArrowUp className="ico" />
   </button>
 )}
       
@@ -1012,7 +1013,7 @@ const getPhaseErrors = () => {
       <div className="modal-content error-details-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h3>Детали проверки ПУ #{details?.puNumber}</h3>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button className="close-btn" onClick={onClose}><IconX className="ico" /></button>
         </div>
         
         <div className="modal-body">
@@ -1215,11 +1216,11 @@ for (let i = 0; i < files.length; i++) {
   
   // Формируем итоговое сообщение
   let message = `Обработано файлов: ${files.length}\n`;
-  if (successCount > 0) message += `✅ Отклонений по напряжению не найдено: ${successCount}\n`;
-  if (problemsCount > 0) message += `⚠️ Отклонения по напряжению найдены: ${problemsCount}\n`;
-  if (duplicatesCount > 0) message += `🔄 Загружен ранее использованный файл: ${duplicatesCount}\n`;
-  if (wrongPeriodCount > 0) message += `📅 Неверный период загруженного файла: ${wrongPeriodCount}\n`;
-  if (errors.length > 0) message += `❌ Ошибок загрузки: ${errors.length}`;
+  if (successCount > 0) message += `Отклонений по напряжению не найдено: ${successCount}\n`;
+  if (problemsCount > 0) message += `Отклонения по напряжению найдены: ${problemsCount}\n`;
+  if (duplicatesCount > 0) message += `Загружен ранее использованный файл: ${duplicatesCount}\n`;
+  if (wrongPeriodCount > 0) message += `Неверный период загруженного файла: ${wrongPeriodCount}\n`;
+  if (errors.length > 0) message += `Ошибок загрузки: ${errors.length}`;
   
   alert(message);
   
@@ -1304,7 +1305,7 @@ for (let i = 0; i < files.length; i++) {
             
             {files.length === 0 ? (
               <>
-                <div className="drop-icon">📁</div>
+                <div className="drop-icon"><IconFolder className="ico" /></div>
                 <h4>Перетащите файлы сюда</h4>
                 <p>или</p>
                 <label htmlFor="file-input" className="btn btn-primary">
@@ -1318,7 +1319,7 @@ for (let i = 0; i < files.length; i++) {
                 <div className="files-grid">
                   {files.map((file, idx) => (
                     <div key={idx} className="file-item-card">
-                      <div className="file-icon">📄</div>
+                      <div className="file-icon"><IconFileText className="ico" /></div>
                       <div className="file-details">
                         <p className="file-name">{file.name}</p>
                         <p className="file-size">{(file.size / 1024).toFixed(1)} KB</p>
@@ -1328,7 +1329,7 @@ for (let i = 0; i < files.length; i++) {
                         className="remove-file-btn"
                         onClick={() => removeFile(idx)}
                       >
-                        ✕
+                        <IconX className="ico" />
                       </button>
                     </div>
                   ))}
@@ -1361,7 +1362,7 @@ for (let i = 0; i < files.length; i++) {
             disabled={!selectedType}
             className="btn btn-primary btn-large btn-default"
           >
-            <span>🚀</span>
+            <span><IconRocket className="ico" /></span>
             Загрузить и анализировать ({files.length} файлов)
           </button>
         </div>
@@ -1409,7 +1410,7 @@ const loadNotifications = useCallback(async () => {
   try {
     const params = new URLSearchParams();
     if (selectedRes) params.set('resId', selectedRes);
-    if (filterType) params.set('type', filterType);   // ← шлём тип на сервер
+    if (filterType) params.set('type', filterType);   // шлём тип на сервер
     const qs = params.toString();
     const response = await api.get(`/api/notifications${qs ? `?${qs}` : ''}`);
     const filtered = response.data.filter(n => (filterType ? n.type === filterType : true));
@@ -1432,7 +1433,7 @@ const loadNotifications = useCallback(async () => {
     window.addEventListener('notificationsUpdated', handleUpdate);
     window.addEventListener('dataCleared', handleUpdate);
     
-    // ✅ PERF: автообновление каждые 30 секунд, но только на видимой вкладке
+    // PERF: автообновление каждые 30 секунд, но только на видимой вкладке
     const interval = setInterval(() => {
       if (!document.hidden) loadNotifications();
     }, 30000);
@@ -1574,7 +1575,7 @@ const loadNotifications = useCallback(async () => {
     const response = await api.post('/api/notifications/delete-bulk', {
       ids: selectedNotificationIds,
       password: bulkDeletePassword,
-      deleteDocuments: deleteRelatedDocs // ✅ Передаём опцию
+      deleteDocuments: deleteRelatedDocs // Передаём опцию
     });
     
     // Показываем детальный результат
@@ -1582,13 +1583,13 @@ const loadNotifications = useCallback(async () => {
     
     setShowBulkDeleteModal(false);
     setBulkDeletePassword('');
-    setDeleteRelatedDocs(false); // ✅ Сбрасываем
+    setDeleteRelatedDocs(false); // Сбрасываем
     setSelectedNotificationIds([]);
     setSearchTp('');
     
     await loadNotifications();
     
-    // ✅ Если удаляли документы - обновляем и их
+    // Если удаляли документы - обновляем и их
     if (deleteRelatedDocs) {
       window.dispatchEvent(new CustomEvent('documentsUpdated'));
     }
@@ -1910,7 +1911,7 @@ const loadNotifications = useCallback(async () => {
               {/* УБИРАЕМ ЧЕКБОКС ОТСЮДА */}
               
               <div className="problem-vl-alert">
-                <span className="critical-icon">🚨</span>
+                <span className="critical-icon"><IconAlertCircle className="ico" style={{color:'var(--red)'}} /></span>
                 <div className="problem-vl-header">
                   <h4>Критическая проблема!</h4>
                   <span className="failure-count">{data.failureCount} неудачных проверок</span>
@@ -1955,7 +1956,7 @@ const loadNotifications = useCallback(async () => {
                     }}
                     title="Перейти к проблемным ВЛ"
                   >
-                    📊 К проблемным ВЛ
+                    <IconChart className="ico" /> К проблемным ВЛ
                   </button>
                   
                   {/* УБИРАЕМ КНОПКУ УДАЛЕНИЯ */}
@@ -1972,7 +1973,7 @@ const loadNotifications = useCallback(async () => {
             {/* УСПЕШНЫЕ УВЕДОМЛЕНИЯ */}
             {notif.type === 'success' && (
               <div className="notification-compact-content success">
-                <div className="success-icon">✅</div>
+                <div className="success-icon"><IconCheck className="ico" style={{color:'var(--green)'}} /></div>
                 <div className="success-text">{notif.message}</div>
               </div>
             )}
@@ -1980,7 +1981,7 @@ const loadNotifications = useCallback(async () => {
             {/* ИНФОРМАЦИОННЫЕ УВЕДОМЛЕНИЯ */}
             {notif.type === 'info' && (
               <div className="notification-compact-content info">
-                <div className="info-icon">ℹ️</div>
+                <div className="info-icon"><IconInfo className="ico" style={{color:'var(--blue)'}} /></div>
                 <div className="info-text">{notif.message}</div>
               </div>
             )}
@@ -1994,7 +1995,7 @@ const loadNotifications = useCallback(async () => {
           <div className="modal-content details-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Подробная информация</h3>
-              <button className="close-btn" onClick={() => setShowDetailsModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowDetailsModal(false)}><IconX className="ico" /></button>
             </div>
             
             <div className="modal-body">
@@ -2063,7 +2064,7 @@ const loadNotifications = useCallback(async () => {
               {detailsNotification.type === 'pending_askue' && (
                 <>
                   <div className="askue-details-content">
-                    <h4>⚡ Требуется снять журнал событий</h4>
+                    <h4><IconZap className="ico" style={{color:'var(--amber)'}} /> Требуется снять журнал событий</h4>
                     <div className="detail-row">
                       <strong>ПУ №:</strong> {detailsNotification.data.puNumber}
                     </div>
@@ -2074,11 +2075,11 @@ const loadNotifications = useCallback(async () => {
                       <strong>Фидер:</strong> {detailsNotification.data.vlName}
                     </div>
                     <div className="highlight-box">
-                      <strong>📅 Журнал событий с даты:</strong>
+                      <strong><IconCalendar className="ico" /> Журнал событий с даты:</strong>
                       <p>{new Date(detailsNotification.data.checkFromDate).toLocaleDateString('ru-RU')}</p>
                     </div>
                     <div className="highlight-box">
-                      <strong>💬 Комментарий РЭС:</strong>
+                      <strong><IconMessage className="ico" /> Комментарий РЭС:</strong>
                       <p>{detailsNotification.data.completedComment}</p>
                     </div>
                     <div className="detail-row">
@@ -2104,7 +2105,7 @@ const loadNotifications = useCallback(async () => {
           <div className="modal-content complete-work-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Отметить выполнение мероприятий</h3>
-              <button className="close-btn" onClick={() => setShowCompleteModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowCompleteModal(false)}><IconX className="ico" /></button>
             </div>
             
             <div className="modal-body">
@@ -2185,11 +2186,11 @@ const loadNotifications = useCallback(async () => {
           <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Подтверждение удаления</h3>
-              <button className="close-btn" onClick={() => {setShowDeleteModal(false); setDeletePassword('');}}>✕</button>
+              <button className="close-btn" onClick={() => {setShowDeleteModal(false); setDeletePassword('');}}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               <p>Вы собираетесь удалить это уведомление.</p>
-              <p className="warning">⚠️ Это действие нельзя отменить!</p>
+              <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
               <div className="form-group">
                 <label>Введите пароль администратора:</label>
                 <input
@@ -2225,11 +2226,11 @@ const loadNotifications = useCallback(async () => {
           <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Подтверждение удаления</h3>
-              <button className="close-btn" onClick={() => {setShowBulkDeleteModal(false); setBulkDeletePassword('');}}>✕</button>
+              <button className="close-btn" onClick={() => {setShowBulkDeleteModal(false); setBulkDeletePassword('');}}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               <p>Вы собираетесь удалить {selectedNotificationIds.length} уведомлений.</p>
-              <p className="warning">⚠️ Это действие нельзя отменить!</p>
+              <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
               <div className="form-group">
                 <label>Введите пароль администратора:</label>
                 <input
@@ -2271,7 +2272,7 @@ const loadNotifications = useCallback(async () => {
           }}
           title="Наверх"
         >
-          ↑
+          <IconArrowUp className="ico" />
         </button>
       )}
     </div>
@@ -2303,7 +2304,7 @@ function Reports() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
   
-  // ✅ НОВОЕ: определяем нужны ли даты для этого типа отчета
+  // НОВОЕ: определяем нужны ли даты для этого типа отчета
   const needsDateFilter = () => {
     return reportType === 'completed' || reportType === 'problem_vl';
   };
@@ -2317,7 +2318,7 @@ function Reports() {
     try {
       let response;
       
-      // ✅ ИСПРАВЛЕНО: передаем даты только для completed и problem_vl
+      // ИСПРАВЛЕНО: передаем даты только для completed и problem_vl
       const params = {
         type: reportType,
         resId: user.role === 'admin' ? selectedRes : user.resId
@@ -2355,7 +2356,7 @@ function Reports() {
     }
   };
   
-  // ✅ ИСПРАВЛЕННАЯ функция exportToExcel
+  // ИСПРАВЛЕННАЯ функция exportToExcel
   const exportToExcel = () => {
   try {
     console.log('=== EXPORT START ===');
@@ -2435,7 +2436,7 @@ function Reports() {
     // Проверяем наличие библиотеки XLSX
     if (typeof XLSX === 'undefined') {
       console.error('XLSX library not found!');
-      alert('❌ Ошибка: библиотека XLSX не загружена. Обновите страницу.');
+      alert('Ошибка: библиотека XLSX не загружена. Обновите страницу.');
       return;
     }
 
@@ -2500,12 +2501,12 @@ function Reports() {
     console.log('=== EXPORT SUCCESS ===');
     
     // Показываем уведомление
-    alert(`✅ Отчет успешно экспортирован!\n\nФайл: ${fileName}\nЗаписей: ${exportData.length}`);
+    alert(`Отчет успешно экспортирован!\n\nФайл: ${fileName}\nЗаписей: ${exportData.length}`);
     
   } catch (error) {
-    console.error('❌ EXPORT ERROR:', error);
+    console.error('EXPORT ERROR:', error);
     console.error('Error stack:', error.stack);
-    alert(`❌ Ошибка экспорта: ${error.message}\n\nПроверьте консоль браузера (F12) для деталей.`);
+    alert(`Ошибка экспорта: ${error.message}\n\nПроверьте консоль браузера (F12) для деталей.`);
   }
 };
 
@@ -2567,7 +2568,7 @@ function Reports() {
           </select>
         </div>
         
-        {/* ✅ ИСПРАВЛЕНО: Показываем даты только для completed и problem_vl */}
+        {/* ИСПРАВЛЕНО: Показываем даты только для completed и problem_vl */}
         {needsDateFilter() && (
           <>
             <div className="control-group">
@@ -2601,17 +2602,17 @@ function Reports() {
         </div>
         
         <button className="export-btn" onClick={exportToExcel}>
-          📊 Экспорт в Excel
+          <IconChart className="ico" /> Экспорт в Excel
         </button>
       </div>
       
       <div className="report-summary">
         <h3>{getReportTitle()}</h3>
         <p>Найдено записей: {filteredData.length}</p>
-        {/* ✅ ДОБАВЛЕНО: Подсказка для пользователя */}
+        {/* ДОБАВЛЕНО: Подсказка для пользователя */}
         {!needsDateFilter() && (
           <p className="info-hint">
-            ℹ️ Отчет показывает текущее состояние на момент формирования
+            <IconInfo className="ico" style={{color:'var(--blue)'}} /> Отчет показывает текущее состояние на момент формирования
           </p>
         )}
       </div>
@@ -2732,7 +2733,7 @@ function Reports() {
                           style={{ cursor: 'pointer' }}
                           title="Нажмите для просмотра комментария"
                         >
-                          {item.recheckResult === 'ok' ? '✅ Исправлено' : '❌ Не исправлено'}
+                          {item.recheckResult === 'ok' ? 'Исправлено' : 'Не исправлено'}
                         </span>
                       </td>
                       <td>
@@ -2741,7 +2742,7 @@ function Reports() {
                             className="btn-view-files"
                             onClick={() => viewAttachments(item.attachments)}
                           >
-                            📎 {item.attachments.length} файл(ов)
+                            <IconPaperclip className="ico" /> {item.attachments.length} файл(ов)
                           </button>
                         ) : (
                           <span className="no-files">—</span>
@@ -2778,7 +2779,7 @@ function Reports() {
           <div className="modal-content comment-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Комментарий РЭС</h3>
-              <button className="close-btn" onClick={() => setShowCommentModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowCommentModal(false)}><IconX className="ico" /></button>
             </div>
             
             <div className="modal-body">
@@ -2788,7 +2789,7 @@ function Reports() {
                 <p><strong>ПУ №:</strong> {selectedComment.puNumber}</p>
                 <p><strong>Результат:</strong> 
                   <span className={selectedComment.result === 'ok' ? 'status-ok' : 'status-error'}>
-                    {selectedComment.result === 'ok' ? '✅ Исправлено' : '❌ Не исправлено'}
+                    {selectedComment.result === 'ok' ? 'Исправлено' : 'Не исправлено'}
                   </span>
                 </p>
               </div>
@@ -2913,7 +2914,7 @@ const handleSendEmail = async () => {
                   <span className="res-badge">{problem.ResUnit?.name}</span>
                 </div>
                 <span className="failure-badge critical">
-                  ❌ {problem.failureCount} неудачных проверок
+                  <IconX className="ico" style={{color:'var(--red)'}} /> {problem.failureCount} неудачных проверок
                 </span>
               </div>
               
@@ -2965,7 +2966,7 @@ const handleSendEmail = async () => {
                     setShowDetailsModal(true);
                   }}
                 >
-                  🔍 Подробности
+                  <IconSearch className="ico" /> Подробности
                 </button>
                <button 
                   className="btn-email"
@@ -2974,7 +2975,7 @@ const handleSendEmail = async () => {
                     setShowEmailModal(true);
                   }}
                 >
-                  📧 Направить письмо исполнителю
+                  <IconMail className="ico" /> Направить письмо исполнителю
                 </button>
                 <button 
                   className="btn-dismiss"
@@ -2983,7 +2984,7 @@ const handleSendEmail = async () => {
                     setShowDeleteModal(true);
                   }}
                 >
-                  ✅ Рассмотреть без объяснительной
+                  <IconCheck className="ico" style={{color:'var(--green)'}} /> Рассмотреть без объяснительной
                 </button>
               </div>
             </div>
@@ -2997,7 +2998,7 @@ const handleSendEmail = async () => {
           <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Рассмотреть без объяснительной</h3>
-              <button className="close-btn" onClick={() => setShowDeleteModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowDeleteModal(false)}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               <p>Вы уверены, что хотите закрыть эту проблему без объяснительной записки?</p>
@@ -3005,7 +3006,7 @@ const handleSendEmail = async () => {
                 <p><strong>{selectedProblem?.tpName} - {selectedProblem?.vlName}</strong></p>
                 <p>ПУ №{selectedProblem?.puNumber} ({selectedProblem?.failureCount} ошибок)</p>
               </div>
-              <p className="warning">⚠️ Проблема будет закрыта без дальнейших действий!</p>
+              <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Проблема будет закрыта без дальнейших действий!</p>
               <div className="form-group">
                 <label>Введите пароль администратора:</label>
                 <input
@@ -3039,7 +3040,7 @@ const handleSendEmail = async () => {
           <div className="modal-content details-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Подробная информация о проблемной ВЛ</h3>
-              <button className="close-btn" onClick={() => setShowDetailsModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowDetailsModal(false)}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               <h4>{detailsProblem.tpName} - {detailsProblem.vlName}</h4>
@@ -3101,7 +3102,7 @@ const handleSendEmail = async () => {
           <div className="modal-content email-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Направить письмо исполнителю</h3>
-              <button className="close-btn" onClick={() => setShowEmailModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowEmailModal(false)}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               <p>Будет отправлено уведомление ответственному РЭС с требованием предоставить объяснительную записку.</p>
@@ -3121,7 +3122,7 @@ const handleSendEmail = async () => {
                 className="primary-btn" 
                 onClick={handleSendEmail}
               >
-                📧 Отправить уведомление
+                <IconMail className="ico" /> Отправить уведомление
               </button>
             </div>
           </div>
@@ -3157,12 +3158,12 @@ function Settings() {
         >
           Пользователи
         </button>
-        {/* ✅ ДОБАВЬ ЭТУ ВКЛАДКУ */}
+        {/* ДОБАВЬ ЭТУ ВКЛАДКУ */}
         <button 
           className={activeTab === 'diagnose' ? 'active' : ''}
           onClick={() => setActiveTab('diagnose')}
         >
-          🔍 Диагностика данных
+          <IconSearch className="ico" /> Диагностика данных
         </button>
         <button 
           className={activeTab === 'maintenance' ? 'active' : ''}
@@ -3187,7 +3188,7 @@ function Settings() {
       <div className="settings-content">
         {activeTab === 'structure' && <StructureSettings />}
         {activeTab === 'users' && <UserSettings />}
-        {activeTab === 'diagnose' && <DiagnoseData />}  {/* ✅ НОВЫЙ */}
+        {activeTab === 'diagnose' && <DiagnoseData />}  {/* НОВЫЙ */}
         {activeTab === 'maintenance' && <MaintenanceSettings />}
         {activeTab === 'files' && <FileManagement />}
         {activeTab === 'database' && <DatabaseMaintenance />}
@@ -3206,7 +3207,7 @@ function FileManagement() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
   
-  // ✅ НОВОЕ: Фильтры
+  // НОВОЕ: Фильтры
   const [searchTp, setSearchTp] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   
@@ -3252,21 +3253,21 @@ function FileManagement() {
     return (totalBytes / 1024 / 1024).toFixed(2);
   };
   
-  // ✅ НОВОЕ: Функция получения статуса
+  // НОВОЕ: Функция получения статуса
   const getStatusInfo = (status) => {
     switch(status) {
       case 'completed':
-        return { text: 'Завершено', class: 'status-completed', icon: '✅' };
+        return { text: 'Завершено', class: 'status-completed', icon: <IconCheck className="ico" style={{color:'var(--green)'}} /> };
       case 'awaiting_recheck':
-        return { text: 'Ожидает перепроверки', class: 'status-awaiting', icon: '⏳' };
+        return { text: 'Ожидает перепроверки', class: 'status-awaiting', icon: <IconClock className="ico" /> };
       case 'awaiting_work':
-        return { text: 'Ожидает мероприятий', class: 'status-work', icon: '🔧' };
+        return { text: 'Ожидает мероприятий', class: 'status-work', icon: <IconWrench className="ico" /> };
       default:
-        return { text: 'Неизвестно', class: 'status-unknown', icon: '❓' };
+        return { text: 'Неизвестно', class: 'status-unknown', icon: <IconHelp className="ico" /> };
     }
   };
   
-  // ✅ НОВОЕ: Фильтрация файлов
+  // НОВОЕ: Фильтрация файлов
   const filteredFiles = files.filter(file => {
     // Фильтр по ТП
     if (searchTp && !file.tpName?.toLowerCase().includes(searchTp.toLowerCase())) {
@@ -3287,10 +3288,10 @@ function FileManagement() {
     <div className="settings-section">
       <h3>Управление загруженными файлами</h3>
       
-      {/* ✅ НОВОЕ: Фильтры */}
+      {/* НОВОЕ: Фильтры */}
       <div className="file-filters">
         <div className="filter-group">
-          <label>🔍 Поиск по ТП:</label>
+          <label><IconSearch className="ico" /> Поиск по ТП:</label>
           <input
             type="text"
             value={searchTp}
@@ -3301,16 +3302,16 @@ function FileManagement() {
         </div>
         
         <div className="filter-group">
-          <label>📊 Статус:</label>
+          <label><IconChart className="ico" /> Статус:</label>
           <select 
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="status-filter"
           >
             <option value="">Все статусы</option>
-            <option value="completed">✅ Завершено</option>
-            <option value="awaiting_recheck">⏳ Ожидает перепроверки</option>
-            <option value="awaiting_work">🔧 Ожидает мероприятий</option>
+            <option value="completed">Завершено</option>
+            <option value="awaiting_recheck">Ожидает перепроверки</option>
+            <option value="awaiting_work">Ожидает мероприятий</option>
           </select>
         </div>
         
@@ -3322,7 +3323,7 @@ function FileManagement() {
               setStatusFilter('');
             }}
           >
-            ✕ Очистить фильтры
+            <IconX className="ico" /> Очистить фильтры
           </button>
         )}
       </div>
@@ -3346,7 +3347,7 @@ function FileManagement() {
         <div className="no-data">
           <p>
             {searchTp || statusFilter 
-              ? '🔍 По вашим фильтрам ничего не найдено' 
+              ? 'По вашим фильтрам ничего не найдено'
               : 'Нет загруженных файлов'}
           </p>
         </div>
@@ -3363,7 +3364,7 @@ function FileManagement() {
                   file.url.toLowerCase().endsWith('.gif')) ? (
                   <img src={file.url} alt={file.original_name} className="file-thumbnail" />
                 ) : (
-                  <div className="file-icon">📄</div>
+                  <div className="file-icon"><IconFileText className="ico" /></div>
                 )}
                 
                 <div className="file-info">
@@ -3376,7 +3377,7 @@ function FileManagement() {
                     <strong>Дата:</strong> {new Date(file.uploadDate).toLocaleDateString('ru-RU')}
                   </p>
                   
-                  {/* ✅ НОВОЕ: Статус документа */}
+                  {/* НОВОЕ: Статус документа */}
                   <div 
                     className={`file-status ${statusInfo.class}`}
                     title={file.resComment || 'Нет комментария'}
@@ -3394,7 +3395,7 @@ function FileManagement() {
                     className="btn-icon"
                     title="Открыть"
                   >
-                    👁️
+                    <IconEye className="ico" />
                   </a>
                   <button 
                     onClick={() => {
@@ -3404,7 +3405,7 @@ function FileManagement() {
                     className="btn-icon danger"
                     title="Удалить"
                   >
-                    🗑️
+                    <IconTrash className="ico" />
                   </button>
                 </div>
               </div>
@@ -3419,12 +3420,12 @@ function FileManagement() {
           <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Подтверждение удаления файла</h3>
-              <button className="close-btn" onClick={() => setShowDeleteModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowDeleteModal(false)}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               <p>Вы собираетесь удалить файл:</p>
               <p><strong>{selectedFile?.original_name}</strong></p>
-              <p className="warning">⚠️ Это действие нельзя отменить!</p>
+              <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
               <div className="form-group">
                 <label>Введите пароль администратора:</label>
                 <input
@@ -3477,7 +3478,7 @@ function DiagnoseData() {
   const [newResId, setNewResId] = useState('');
   const [activeView, setActiveView] = useState('mismatches');
   
-  // ✅ НОВОЕ: для массового исправления
+  // НОВОЕ: для массового исправления
   const [showMassFixModal, setShowMassFixModal] = useState(false);
   const [massFixPassword, setMassFixPassword] = useState('');
   const [massFixing, setMassFixing] = useState(false);
@@ -3512,20 +3513,20 @@ function DiagnoseData() {
     }
   };
   
-  // ✅ НОВАЯ ФУНКЦИЯ: массовое исправление
+  // НОВАЯ ФУНКЦИЯ: массовое исправление
   const handleMassAutoFix = async () => {
     setMassFixing(true);
     try {
-      console.log('🚀 Mass auto-fixing all mismatches for RES:', selectedRes);
+      console.log('Mass auto-fixing all mismatches for RES:', selectedRes);
       
       const response = await api.post(`/api/admin/auto-fix-all/${selectedRes}`, {
         password: massFixPassword
       });
       
-      console.log('✅ Mass fix response:', response.data);
+      console.log('Mass fix response:', response.data);
       
       alert(
-        `✅ ${response.data.message}\n\n` +
+        `${response.data.message}\n\n` +
         `Всего проверено: ${response.data.stats.total}\n` +
         `Исправлено: ${response.data.stats.fixed}\n` +
         `Уже корректных: ${response.data.stats.alreadyCorrect}`
@@ -3538,7 +3539,7 @@ function DiagnoseData() {
       await loadDiagnostics();
       
     } catch (error) {
-      console.error('❌ Mass fix error:', error);
+      console.error('Mass fix error:', error);
       alert('Ошибка: ' + (error.response?.data?.error || error.message));
     } finally {
       setMassFixing(false);
@@ -3547,7 +3548,7 @@ function DiagnoseData() {
   
   const handleManualFix = async () => {
     try {
-      console.log('✏️ Manual fixing notification:', fixingNotif.notificationId);
+      console.log('Manual fixing notification:', fixingNotif.notificationId);
       console.log('New resId:', newResId);
       
       const response = await api.put(`/api/admin/fix-notification/${fixingNotif.notificationId}`, {
@@ -3555,9 +3556,9 @@ function DiagnoseData() {
         password: fixPassword
       });
       
-      console.log('✅ Response:', response.data);
+      console.log('Response:', response.data);
       
-      alert(`✅ ${response.data.message}`);
+      alert(`${response.data.message}`);
       
       setShowFixModal(false);
       setFixPassword('');
@@ -3567,7 +3568,7 @@ function DiagnoseData() {
       await loadDiagnostics();
       
     } catch (error) {
-      console.error('❌ Manual fix error:', error);
+      console.error('Manual fix error:', error);
       alert('Ошибка: ' + (error.response?.data?.error || error.message));
     }
   };
@@ -3576,7 +3577,7 @@ function DiagnoseData() {
     <div className="diagnose-container">
       <div className="diagnose-header">
         <div className="diagnose-title">
-          <div className="diagnose-icon">🔍</div>
+          <div className="diagnose-icon"><IconSearch className="ico" /></div>
           <div>
             <h3>Диагностика и исправление данных</h3>
             <p>Проверка соответствия resId в уведомлениях и структуре сети</p>
@@ -3611,20 +3612,20 @@ function DiagnoseData() {
             </>
           ) : (
             <>
-              <span>🔍</span>
+              <span><IconSearch className="ico" /></span>
               Запустить диагностику
             </>
           )}
         </button>
         
-        {/* ✅ НОВАЯ КНОПКА: Массовое исправление */}
+        {/* НОВАЯ КНОПКА: Массовое исправление */}
         {diagData && diagData.stats.mismatches > 0 && (
           <button 
             onClick={() => setShowMassFixModal(true)}
             className="btn-mass-fix"
             disabled={loading}
           >
-            <span>🔧</span>
+            <span><IconWrench className="ico" /></span>
             Исправить ВСЕ ({diagData.stats.mismatches})
           </button>
         )}
@@ -3635,7 +3636,7 @@ function DiagnoseData() {
           {/* Статистика */}
           <div className="diagnose-stats">
             <div className="stat-card">
-              <div className="stat-icon">📊</div>
+              <div className="stat-icon"><IconChart className="ico" /></div>
               <div className="stat-content">
                 <h4>Структуры</h4>
                 <p className="stat-value">{diagData.stats.totalStructures}</p>
@@ -3643,7 +3644,7 @@ function DiagnoseData() {
             </div>
             
             <div className="stat-card">
-              <div className="stat-icon">🔔</div>
+              <div className="stat-icon"><IconBell className="ico" /></div>
               <div className="stat-content">
                 <h4>Уведомления</h4>
                 <p className="stat-value">{diagData.stats.totalNotifications}</p>
@@ -3651,7 +3652,7 @@ function DiagnoseData() {
             </div>
             
             <div className={`stat-card ${diagData.stats.mismatches > 0 ? 'error' : 'success'}`}>
-              <div className="stat-icon">{diagData.stats.mismatches > 0 ? '⚠️' : '✅'}</div>
+              <div className="stat-icon">{diagData.stats.mismatches > 0 ? <IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> : <IconCheck className="ico" style={{color:'var(--green)'}} />}</div>
               <div className="stat-content">
                 <h4>Несоответствия</h4>
                 <p className="stat-value">{diagData.stats.mismatches}</p>
@@ -3665,7 +3666,7 @@ function DiagnoseData() {
               className={`diagnose-tab ${activeView === 'mismatches' ? 'active' : ''}`}
               onClick={() => setActiveView('mismatches')}
             >
-              <span className="tab-icon">⚠️</span>
+              <span className="tab-icon"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /></span>
               Несоответствия
               {diagData.stats.mismatches > 0 && (
                 <span className="tab-badge">{diagData.stats.mismatches}</span>
@@ -3675,7 +3676,7 @@ function DiagnoseData() {
               className={`diagnose-tab ${activeView === 'all' ? 'active' : ''}`}
               onClick={() => setActiveView('all')}
             >
-              <span className="tab-icon">📋</span>
+              <span className="tab-icon"><IconClipboard className="ico" /></span>
               Все уведомления
               <span className="tab-badge">{diagData.stats.totalNotifications}</span>
             </button>
@@ -3683,7 +3684,7 @@ function DiagnoseData() {
               className={`diagnose-tab ${activeView === 'structures' ? 'active' : ''}`}
               onClick={() => setActiveView('structures')}
             >
-              <span className="tab-icon">🏗️</span>
+              <span className="tab-icon"><IconLayers className="ico" /></span>
               Структура сети
               <span className="tab-badge">{diagData.stats.totalStructures}</span>
             </button>
@@ -3696,7 +3697,7 @@ function DiagnoseData() {
               <div className="mismatches-view">
                 {diagData.mismatches.length === 0 ? (
                   <div className="no-issues">
-                    <div className="no-issues-icon">✨</div>
+                    <div className="no-issues-icon"><IconCheck className="ico" style={{color:'var(--green)'}} /></div>
                     <h4>Несоответствий не найдено!</h4>
                     <p>Все resId в уведомлениях соответствуют структуре сети</p>
                   </div>
@@ -3718,16 +3719,16 @@ function DiagnoseData() {
                         
                         <div className="mismatch-comparison">
                           <div className="comparison-item wrong">
-                            <div className="comparison-label">❌ ResId в уведомлении:</div>
+                            <div className="comparison-label"><IconX className="ico" style={{color:'var(--red)'}} /> ResId в уведомлении:</div>
                             <div className="comparison-value">
                               {mismatch.notifResId} ({mismatch.notifResName})
                             </div>
                           </div>
                           
-                          <div className="comparison-arrow">→</div>
+                          <div className="comparison-arrow"><IconArrowRight className="ico" /></div>
                           
                           <div className="comparison-item correct">
-                            <div className="comparison-label">✅ ResId в структуре:</div>
+                            <div className="comparison-label"><IconCheck className="ico" style={{color:'var(--green)'}} /> ResId в структуре:</div>
                             <div className="comparison-value">
                               {mismatch.structureResId} ({mismatch.structureResName})
                             </div>
@@ -3743,7 +3744,7 @@ function DiagnoseData() {
                               setShowFixModal(true);
                             }}
                           >
-                            <span>✏️</span>
+                            <span><IconEdit className="ico" /></span>
                             Исправить вручную
                           </button>
                         </div>
@@ -3786,7 +3787,7 @@ function DiagnoseData() {
                             <td>
                               <strong>{notif.resId}</strong>
                               {!isCorrect && (
-                                <span className="wrong-icon" title="Несоответствие!">⚠️</span>
+                                <span className="wrong-icon" title="Несоответствие!"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /></span>
                               )}
                             </td>
                             <td>{notif.ResUnit?.name || '—'}</td>
@@ -3798,9 +3799,9 @@ function DiagnoseData() {
                             <td>{new Date(notif.createdAt).toLocaleDateString('ru-RU')}</td>
                             <td>
                               {isCorrect ? (
-                                <span className="status-ok">✅ OK</span>
+                                <span className="status-ok"><IconCheck className="ico" style={{color:'var(--green)'}} /> OK</span>
                               ) : (
-                                <span className="status-error">❌ Ошибка</span>
+                                <span className="status-error"><IconX className="ico" style={{color:'var(--red)'}} /> Ошибка</span>
                               )}
                             </td>
                           </tr>
@@ -3865,19 +3866,19 @@ function DiagnoseData() {
         </>
       )}
       
-      {/* ✅ НОВОЕ: Модальное окно массового исправления */}
+      {/* НОВОЕ: Модальное окно массового исправления */}
       {showMassFixModal && (
         <div className="modal-backdrop" onClick={() => setShowMassFixModal(false)}>
           <div className="modal-content mass-fix-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <div className="modal-header-icon">🔧</div>
+              <div className="modal-header-icon"><IconWrench className="ico" /></div>
               <h3>Массовое автоисправление</h3>
-              <button className="close-btn" onClick={() => setShowMassFixModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowMassFixModal(false)}><IconX className="ico" /></button>
             </div>
             
             <div className="modal-body">
               <div className="mass-fix-info">
-                <div className="info-icon">💡</div>
+                <div className="info-icon"><IconLightbulb className="ico" /></div>
                 <div>
                   <p><strong>Будет исправлено несоответствий: {diagData.stats.mismatches}</strong></p>
                   <p>Все resId в уведомлениях будут автоматически установлены согласно структуре сети.</p>
@@ -3891,7 +3892,7 @@ function DiagnoseData() {
                     <div key={idx} className="preview-item">
                       <span className="preview-location">{m.tpName} - {m.vlName}</span>
                       <span className="preview-change">
-                        {m.notifResId} → {m.structureResId}
+                        {m.notifResId} <IconArrowRight className="ico" /> {m.structureResId}
                       </span>
                     </div>
                   ))}
@@ -3904,7 +3905,7 @@ function DiagnoseData() {
               </div>
               
               <div className="warning-box">
-                <span className="warning-icon">⚠️</span>
+                <span className="warning-icon"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /></span>
                 <div>
                   <strong>Внимание!</strong>
                   <p>Это действие изменит все несоответствия автоматически. Убедитесь что вы понимаете последствия.</p>
@@ -3913,7 +3914,7 @@ function DiagnoseData() {
               
               <div className="form-group">
                 <label>
-                  <span className="label-icon">🔒</span>
+                  <span className="label-icon"><IconLock className="ico" /></span>
                   Введите пароль администратора:
                 </label>
                 <input
@@ -3946,7 +3947,7 @@ function DiagnoseData() {
                   </>
                 ) : (
                   <>
-                    <span>🚀</span>
+                    <span><IconRocket className="ico" /></span>
                     Исправить ВСЕ ({diagData.stats.mismatches})
                   </>
                 )}
@@ -3961,9 +3962,9 @@ function DiagnoseData() {
         <div className="modal-backdrop" onClick={() => setShowFixModal(false)}>
           <div className="modal-content fix-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <div className="modal-header-icon">✏️</div>
+              <div className="modal-header-icon"><IconEdit className="ico" /></div>
               <h3>Ручное исправление ResId</h3>
-              <button className="close-btn" onClick={() => setShowFixModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowFixModal(false)}><IconX className="ico" /></button>
             </div>
             
             <div className="modal-body">
@@ -3983,7 +3984,7 @@ function DiagnoseData() {
                   />
                 </div>
                 
-                <div className="arrow-down">↓</div>
+                <div className="arrow-down"><IconArrowDown className="ico" /></div>
                 
                 <div className="form-group">
                   <label>Новый ResId:</label>
@@ -4003,7 +4004,7 @@ function DiagnoseData() {
               
               <div className="form-group">
                 <label>
-                  <span className="label-icon">🔒</span>
+                  <span className="label-icon"><IconLock className="ico" /></span>
                   Пароль администратора:
                 </label>
                 <input
@@ -4028,7 +4029,7 @@ function DiagnoseData() {
                 onClick={handleManualFix}
                 disabled={!fixPassword || !newResId}
               >
-                <span>✅</span>
+                <span><IconCheck className="ico" style={{color:'var(--green)'}} /></span>
                 Применить
               </button>
             </div>
@@ -4067,7 +4068,7 @@ function StructureSettings() {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
-      setMessage('✅ Структура сети успешно загружена!');
+      setMessage('Структура сети успешно загружена!');
       setUploadStats(response.data);
       setFile(null);
       
@@ -4076,7 +4077,7 @@ function StructureSettings() {
       
     } catch (error) {
       console.error('Upload error:', error);
-      setMessage('❌ Ошибка загрузки: ' + (error.response?.data?.error || 'Неизвестная ошибка'));
+      setMessage('Ошибка загрузки: ' + (error.response?.data?.error || 'Неизвестная ошибка'));
       setUploadStats(null);
     } finally {
       setUploading(false);
@@ -4118,7 +4119,7 @@ function StructureSettings() {
       </button>
       
       {message && (
-        <div className={message.includes('✅') ? 'success-message' : 'error-message'}>
+        <div className={message.includes('успешно') ? 'success-message' : 'error-message'}>
           {message}
         </div>
       )}
@@ -4138,7 +4139,7 @@ function StructureSettings() {
           </div>
           {uploadStats.errors && uploadStats.errors.length > 0 && (
             <div className="errors-list">
-              <p>⚠️ Ошибки при загрузке:</p>
+              <p><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Ошибки при загрузке:</p>
               <ul>
                 {uploadStats.errors.slice(0, 5).map((err, idx) => (
                   <li key={idx}>{err}</li>
@@ -4309,14 +4310,14 @@ function UserSettings() {
                         className="btn-icon"
                         title="Редактировать"
                       >
-                        ✏️
+                        <IconEdit className="ico" />
                       </button>
                       <button 
                         onClick={() => handleDeleteUser(user.id)}
                         className="btn-icon danger"
                         title="Удалить"
                       >
-                        🗑️
+                        <IconTrash className="ico" />
                       </button>
                     </div>
                   </td>
@@ -4333,7 +4334,7 @@ function UserSettings() {
           <div className="modal-content user-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Создание пользователя</h3>
-              <button className="close-btn" onClick={() => setShowCreateModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowCreateModal(false)}><IconX className="ico" /></button>
             </div>
             
             <div className="modal-body">
@@ -4427,7 +4428,7 @@ function UserSettings() {
           <div className="modal-content user-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Редактирование пользователя</h3>
-              <button className="close-btn" onClick={() => setShowEditModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowEditModal(false)}><IconX className="ico" /></button>
             </div>
             
             <div className="modal-body">
@@ -4540,7 +4541,7 @@ function MaintenanceSettings() {
       window.dispatchEvent(new CustomEvent('dataCleared'));
       
     } catch (error) {
-      alert('❌ Ошибка: ' + (error.response?.data?.error || 'Неизвестная ошибка'));
+      alert('Ошибка: ' + (error.response?.data?.error || 'Неизвестная ошибка'));
     } finally {
       setClearing(false);
     }
@@ -4551,20 +4552,20 @@ function MaintenanceSettings() {
       <h3>Обслуживание системы</h3>
       
       <div className="maintenance-card danger">
-        <h4>⚠️ Очистка данных системы</h4>
+        <h4><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Очистка данных системы</h4>
         <p>Удаляет историю, статусы проверок и уведомления.</p>
-        <p className="info-text">✅ Структура сети НЕ удаляется!</p>
+        <p className="info-text"><IconCheck className="ico" style={{color:'var(--green)'}} /> Структура сети НЕ удаляется!</p>
         <button 
           onClick={() => setShowClearModal(true)}
           disabled={clearing}
           className="danger-btn"
         >
-          {clearing ? 'Удаление...' : '🗑️ Очистить данные'}
+          {clearing ? 'Удаление...' : 'Очистить данные'}
         </button>
       </div>
       
       <div className="maintenance-card">
-        <h4>📊 Статистика системы</h4>
+        <h4><IconChart className="ico" /> Статистика системы</h4>
         <div className="stats-grid">
           <div className="stat-item">
             <span className="stat-label">Версия системы:</span>
@@ -4583,7 +4584,7 @@ function MaintenanceSettings() {
           <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Очистка данных системы</h3>
-              <button className="close-btn" onClick={() => setShowClearModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowClearModal(false)}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               {/* НОВОЕ: выбор периода */}
@@ -4597,19 +4598,19 @@ function MaintenanceSettings() {
                 />
                 {clearBeforeDate && (
                   <p className="info">
-                    ℹ️ Будут удалены данные до {new Date(clearBeforeDate).toLocaleDateString('ru-RU')}
+                    <IconInfo className="ico" style={{color:'var(--blue)'}} /> Будут удалены данные до {new Date(clearBeforeDate).toLocaleDateString('ru-RU')}
                   </p>
                 )}
                 {!clearBeforeDate && (
                   <p className="info">
-                    ℹ️ Если дата не указана - будет удалена ВСЯ история
+                    <IconInfo className="ico" style={{color:'var(--blue)'}} /> Если дата не указана - будет удалена ВСЯ история
                   </p>
                 )}
               </div>
               
-              <p className="warning">⚠️ ВНИМАНИЕ! Будут удалены:</p>
+              <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> ВНИМАНИЕ! Будут удалены:</p>
               <ul>
-                <li>❌ <s>Структура сети</s> <span style={{color: 'green'}}>НЕ УДАЛЯЕТСЯ</span></li>
+                <li><IconX className="ico" style={{color:'var(--red)'}} /> <s>Структура сети</s> <span style={{color: 'green'}}>НЕ УДАЛЯЕТСЯ</span></li>
                 <li>Все статусы проверок {clearBeforeDate && 'за указанный период'}</li>
                 <li>Все уведомления {clearBeforeDate && 'за указанный период'}</li>
                 <li>Вся история загрузок {clearBeforeDate && 'за указанный период'}</li>
@@ -4667,7 +4668,7 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
       <div className="file-viewer-container" onClick={e => e.stopPropagation()}>
         <div className="file-viewer-header">
           <h3>Просмотр файлов ({currentIndex + 1} из {files.length})</h3>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button className="close-btn" onClick={onClose}><IconX className="ico" /></button>
         </div>
         
         <div className="file-viewer-content">
@@ -4680,7 +4681,7 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
           ) : isPdf ? (
             <div className="pdf-viewer-modern">
               <div className="pdf-preview">
-                <div className="pdf-icon">📄</div>
+                <div className="pdf-icon"><IconFileText className="ico" /></div>
                 <h4>{currentFile.original_name}</h4>
                 <p className="pdf-info">PDF документ</p>
                 <div className="pdf-actions">
@@ -4690,7 +4691,7 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
                     rel="noopener noreferrer"
                     className="btn-view-pdf"
                   >
-                    <span>👁️</span>
+                    <span><IconEye className="ico" /></span>
                     Открыть в новой вкладке
                   </a>
                   <a 
@@ -4699,13 +4700,13 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
   download={currentFile.original_name}
   className="btn-download-pdf"
 >
-  <span>📥</span>
+  <span><IconDownload className="ico" /></span>
   Скачать {currentFile.original_name}
 </a>
                 </div>
               </div>
               <div className="pdf-note">
-                <span>💡</span>
+                <span><IconLightbulb className="ico" /></span>
                 <p>PDF откроется в новой вкладке браузера</p>
               </div>
             </div>
@@ -4732,10 +4733,10 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
         {files.length > 1 && (
           <div className="file-viewer-navigation">
             <button onClick={onPrev} className="nav-btn">
-              ← Предыдущий
+              <IconArrowLeft className="ico" /> Предыдущий
             </button>
             <button onClick={onNext} className="nav-btn">
-              Следующий →
+              Следующий <IconArrowRight className="ico" />
             </button>
           </div>
         )}
@@ -4883,7 +4884,7 @@ function UploadedDocuments() {
     className="delete-selected-btn"
     onClick={() => setShowBulkDeleteModal(true)}
   >
-    🗑️ Удалить выбранные ({selectedIds.length})
+    <IconTrash className="ico" /> Удалить выбранные ({selectedIds.length})
   </button>
 )}
 </div>
@@ -4932,7 +4933,7 @@ function UploadedDocuments() {
                 <td className="comment-cell">{doc.resComment}</td>
                 <td>
                   <span className={`status-badge status-${doc.status}`}>
-                    {doc.status === 'completed' ? '✅ Завершен' : '⏳ На проверке'}
+                    {doc.status === 'completed' ? 'Завершен' : 'На проверке'}
                   </span>
                 </td>
                 <td>
@@ -4946,7 +4947,7 @@ function UploadedDocuments() {
                         onClick={() => handleViewFile(doc.attachments)}
                         title="Просмотреть"
                       >
-                        👁️
+                        <IconEye className="ico" />
                       </button>
                     )}
                       {user.role === 'admin' && (
@@ -4958,7 +4959,7 @@ function UploadedDocuments() {
         }}
         title="Удалить запись"
       >
-        🗑️
+        <IconTrash className="ico" />
       </button>
     )}
                   </div>
@@ -4983,23 +4984,23 @@ function UploadedDocuments() {
   }}>
     <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
       <div className="modal-header">
-        <h3>⚠️ Подтверждение удаления</h3>
+        <h3><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Подтверждение удаления</h3>
         <button className="close-btn" onClick={() => {
           setShowBulkDeleteModal(false); 
           setDeletePassword('');
-        }}>✕</button>
+        }}><IconX className="ico" /></button>
       </div>
       
       <div className="modal-body">
         <div className="delete-summary">
-          <div className="delete-icon">🗑️</div>
+          <div className="delete-icon"><IconTrash className="ico" /></div>
           <div>
-            {/* ✅ ИСПРАВЛЕНО: selectedIds вместо selectedNotificationIds */}
+            {/* ИСПРАВЛЕНО: selectedIds вместо selectedNotificationIds */}
             <p className="delete-title">Вы собираетесь удалить <strong>{selectedIds.length}</strong> записей с документами</p>
           </div>
         </div>
         
-        <p className="warning">⚠️ Это действие нельзя отменить!</p>
+        <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
         <p>Будут удалены все файлы и записи истории для выбранных документов.</p>
         
         <div className="form-group">
@@ -5028,7 +5029,7 @@ function UploadedDocuments() {
           onClick={handleBulkDelete}
           disabled={!deletePassword}
         >
-          🗑️ Удалить записи
+          <IconTrash className="ico" /> Удалить записи
         </button>
       </div>
     </div>
@@ -5041,11 +5042,11 @@ function UploadedDocuments() {
           <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Подтверждение удаления записи</h3>
-              <button className="close-btn" onClick={() => setShowDeleteRecordModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowDeleteRecordModal(false)}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               <p>Вы собираетесь удалить всю запись вместе со всеми файлами.</p>
-              <p className="warning">⚠️ Это действие нельзя отменить!</p>
+              <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
               <div className="form-group">
                 <label>Введите пароль администратора:</label>
                 <input
@@ -5079,12 +5080,12 @@ function UploadedDocuments() {
           <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Подтверждение удаления файла</h3>
-              <button className="close-btn" onClick={() => setShowDeleteModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowDeleteModal(false)}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               <p>Вы собираетесь удалить файл:</p>
               <p><strong>{selectedFile?.original_name}</strong></p>
-              <p className="warning">⚠️ Это действие нельзя отменить!</p>
+              <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
               <div className="form-group">
                 <label>Введите пароль администратора:</label>
                 <input
@@ -5173,7 +5174,7 @@ function ExtendedPuModal({
       <div className="modal-content extended-pu-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h3>ПУ #{puData.puNumber} - Детальная информация</h3>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button className="close-btn" onClick={onClose}><IconX className="ico" /></button>
         </div>
         
         {/* Информация о местоположении */}
@@ -5249,7 +5250,7 @@ function ExtendedPuModal({
                     </>
                   ) : puData.status.status === 'checked_ok' ? (
                     <div className="success-state">
-                      <div className="success-icon">✅</div>
+                      <div className="success-icon"><IconCheck className="ico" style={{color:'var(--green)'}} /></div>
                       <h4>Проверен без ошибок</h4>
                       <p>Последняя проверка: {
                         puData.status.lastCheck 
@@ -5259,13 +5260,13 @@ function ExtendedPuModal({
                     </div>
                   ) : puData.status.status === 'pending_recheck' ? (
                     <div className="pending-state">
-                      <div className="pending-icon">⏳</div>
+                      <div className="pending-icon"><IconClock className="ico" /></div>
                       <h4>Ожидает перепроверки АСКУЭ</h4>
                       <p>Мероприятия выполнены РЭС, требуется загрузить новый файл для проверки</p>
                     </div>
                   ) : (
                     <div className="not-checked-state">
-                      <div className="not-checked-icon">❓</div>
+                      <div className="not-checked-icon"><IconHelp className="ico" /></div>
                       <h4>Не проверялся</h4>
                       <p>Для этого ПУ еще не загружались файлы для анализа</p>
                     </div>
@@ -5298,10 +5299,10 @@ function ExtendedPuModal({
                               <td>{upload.fileName}</td>
                               <td>
                                 <span className={`status-badge status-${upload.uploadStatus}`}>
-                                  {upload.uploadStatus === 'success' ? '✅ Успешно' :
-                                   upload.uploadStatus === 'duplicate' ? '🔄 Дубликат' :
-                                   upload.uploadStatus === 'wrong_period' ? '📅 Неверный период' :
-                                   '❌ Ошибка'}
+                                  {upload.uploadStatus === 'success' ? 'Успешно' :
+                                   upload.uploadStatus === 'duplicate' ? 'Дубликат' :
+                                   upload.uploadStatus === 'wrong_period' ? 'Неверный период' :
+                                   'Ошибка'}
                                 </span>
                               </td>
                               <td className="error-cell">
@@ -5338,13 +5339,13 @@ function ExtendedPuModal({
                           
                           <div className="timeline-content">
                             <div className="timeline-step error">
-                              <h5>🔴 Обнаружена ошибка</h5>
+                              <h5><IconAlertCircle className="ico" style={{color:'var(--red)'}} /> Обнаружена ошибка</h5>
                               <p>{check.initialError}</p>
                             </div>
                             
                             {check.workCompletedDate && (
                               <div className="timeline-step work">
-                                <h5>🔧 Мероприятия выполнены</h5>
+                                <h5><IconWrench className="ico" /> Мероприятия выполнены</h5>
                                 <p><strong>Дата:</strong> {new Date(check.workCompletedDate).toLocaleDateString('ru-RU')}</p>
                                 <p><strong>Комментарий:</strong> {check.resComment}</p>
                                 {check.attachments && check.attachments.length > 0 && (
@@ -5355,7 +5356,7 @@ function ExtendedPuModal({
                             
                             {check.recheckDate && (
                               <div className={`timeline-step recheck ${check.recheckResult}`}>
-                                <h5>{check.recheckResult === 'ok' ? '✅ Перепроверка успешна' : '❌ Ошибка не устранена'}</h5>
+                                <h5>{check.recheckResult === 'ok' ? 'Перепроверка успешна' : 'Ошибка не устранена'}</h5>
                                 <p><strong>Дата:</strong> {new Date(check.recheckDate).toLocaleDateString('ru-RU')}</p>
                               </div>
                             )}
@@ -5388,7 +5389,7 @@ function ExtendedPuModal({
                 handleClearPuHistory(puData.puNumber);
               }}
             >
-              🗑️ Очистить историю
+              <IconTrash className="ico" /> Очистить историю
             </button>
           )}
         </div>
@@ -5689,7 +5690,7 @@ function SystemHistory() {
           </div>
           
           <button className="export-btn" onClick={exportToExcel}>
-            📊 Экспорт в Excel
+            <IconChart className="ico" /> Экспорт в Excel
           </button>
         </div>
       </div>
@@ -5731,9 +5732,9 @@ function SystemHistory() {
                         <td>{upload.fileType}</td>
                         <td>
                           <span className={`status-badge status-${upload.uploadStatus}`}>
-                            {upload.uploadStatus === 'success' ? '✅' :
-                             upload.uploadStatus === 'duplicate' ? '🔄' :
-                             upload.uploadStatus === 'wrong_period' ? '📅' : '❌'}
+                            {upload.uploadStatus === 'success' ? <IconCheck className="ico" style={{color:'var(--green)'}} /> :
+                             upload.uploadStatus === 'duplicate' ? <IconRefresh className="ico" /> :
+                             upload.uploadStatus === 'wrong_period' ? <IconCalendar className="ico" /> : <IconX className="ico" style={{color:'var(--red)'}} />}
                           </span>
                         </td>
                         <td className="error-cell">
@@ -5792,7 +5793,7 @@ function SystemHistory() {
                         <td>
                           {check.recheckDate ? (
                             <span className={check.recheckResult === 'ok' ? 'status-ok' : 'status-error'}>
-                              {check.recheckResult === 'ok' ? '✅' : '❌'}
+                              {check.recheckResult === 'ok' ? <IconCheck className="ico" style={{color:'var(--green)'}} /> : <IconX className="ico" style={{color:'var(--red)'}} />}
                               {' ' + new Date(check.recheckDate).toLocaleDateString('ru-RU')}
                             </span>
                           ) : '—'}
@@ -5818,14 +5819,14 @@ function SystemHistory() {
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
                 >
-                  ← Назад
+                  <IconArrowLeft className="ico" /> Назад
                 </button>
                 <span>Страница {currentPage} из {totalPages}</span>
                 <button 
                   onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
                 >
-                  Вперед →
+                  Вперед <IconArrowRight className="ico" />
                 </button>
               </div>
             )}
@@ -5976,11 +5977,11 @@ function Analytics() {
       
       XLSX.writeFile(wb, fileName);
       
-      alert(`✅ Детальный отчет успешно выгружен!\n\nВсего строк: ${detailedData.length}\nФайл: ${fileName}`);
+      alert(`Детальный отчет успешно выгружен!\n\nВсего строк: ${detailedData.length}\nФайл: ${fileName}`);
       
     } catch (error) {
       console.error('Error exporting detailed report:', error);
-      alert('❌ Ошибка при выгрузке детального отчета: ' + error.message);
+      alert('Ошибка при выгрузке детального отчета: ' + error.message);
     } finally {
       setLoadingDetailed(false);
     }
@@ -5990,12 +5991,12 @@ function Analytics() {
   
   return (
     <div className="analytics-container">
-      <h2>📈 Аналитика по загрузкам</h2>
+      <h2><IconChart className="ico" /> Аналитика по загрузкам</h2>
       
       {/* НОВОЕ: Индикатор для не-админов */}
       {user.role !== 'admin' && (
         <div className="res-indicator">
-          <span>📍 Показаны данные для: <strong>{user.resName}</strong></span>
+          <span><IconMapPin className="ico" /> Показаны данные для: <strong>{user.resName}</strong></span>
         </div>
       )}
       
@@ -6032,7 +6033,7 @@ function Analytics() {
             </>
           ) : (
             <>
-              <span>📋</span>
+              <span><IconClipboard className="ico" /></span>
               Экспорт детального отчета
             </>
           )}
@@ -6104,9 +6105,9 @@ function Analytics() {
       </div>
       
       {/* ВЛ в работе у РЭС */}
-      <h2 style={{ marginTop: '32px' }}>🔧 ВЛ в работе у РЭС</h2>
+      <h2 style={{ marginTop: '32px' }}><IconWrench className="ico" /> ВЛ в работе у РЭС</h2>
       <p className="info-hint" style={{ marginBottom: '12px' }}>
-        ℹ️ Текущее состояние: количество ВЛ с нерешёнными проблемами на данный момент
+        <IconInfo className="ico" style={{color:'var(--blue)'}} /> Текущее состояние: количество ВЛ с нерешёнными проблемами на данный момент
       </p>
       
       <div className="analytics-table">
@@ -6173,7 +6174,7 @@ function DatabaseMaintenance() {
     try {
       const response = await api.get('/api/admin/database-health');
   
-  // ✅ ДОБАВЬ ЭТО
+  // ДОБАВЬ ЭТО
     console.log('=== DATABASE HEALTH CHECK RESPONSE ===');
     console.log('Full response:', response.data);
     console.log('Stats:', response.data.stats);
@@ -6197,7 +6198,7 @@ function DatabaseMaintenance() {
         password: cleanupPassword
       });
       
-      alert(`✅ Очистка завершена!\n\nУдалено записей: ${response.data.cleaned}`);
+      alert(`Очистка завершена!\n\nУдалено записей: ${response.data.cleaned}`);
       setShowCleanupModal(false);
       setCleanupPassword('');
       
@@ -6261,7 +6262,7 @@ function DatabaseMaintenance() {
       });
       const r = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(r.error || `HTTP ${resp.status}`);
-      let msg = `✅ Восстановление завершено.\nВставлено записей: ${r.inserted}`;
+      let msg = `Восстановление завершено.\nВставлено записей: ${r.inserted}`;
       if (r.errorsCount) msg += `\n\nОшибок: ${r.errorsCount}\n• ` + (r.errors || []).join('\n• ');
       alert(msg);
     } catch (error) {
@@ -6282,10 +6283,10 @@ function DatabaseMaintenance() {
   
   const getSeverityIcon = (severity) => {
     switch(severity) {
-      case 'error': return '🔴';
-      case 'warning': return '⚠️';
-      case 'info': return 'ℹ️';
-      default: return '✅';
+      case 'error': return <IconAlertCircle className="ico" style={{color:'var(--red)'}} />;
+      case 'warning': return <IconAlertTriangle className="ico" style={{color:'var(--amber)'}} />;
+      case 'info': return <IconInfo className="ico" style={{color:'var(--blue)'}} />;
+      default: return <IconCheck className="ico" style={{color:'var(--green)'}} />;
     }
   };
   
@@ -6294,50 +6295,50 @@ function DatabaseMaintenance() {
       'orphaned_pu_status': {
         title: 'Статусы ПУ без структуры',
         desc: 'Удалить статусы приборов учета, которые не привязаны к структуре сети',
-        icon: '🔌'
+        icon: <IconPlug className="ico" />
       },
       'duplicate_pu_statuses': {
         title: 'Дубликаты статусов',
         desc: 'Удалить дублирующиеся статусы ПУ, оставив только последние',
-        icon: '📋'
+        icon: <IconClipboard className="ico" />
       },
       'old_unread_notifications': {
         title: 'Старые уведомления',
         desc: 'Удалить уведомления старше одного года',
-        icon: '📅'
+        icon: <IconCalendar className="ico" />
       },
       'orphaned_notifications': {
         title: 'Уведомления без связей',
         desc: 'Удалить уведомления, ссылающиеся на несуществующие объекты',
-        icon: '🔗'
+        icon: <IconLink className="ico" />
       },
       'checks_without_res': {
         title: 'Проверки без РЭС',
         desc: 'Удалить записи истории проверок без привязки к РЭС',
-        icon: '📍'
+        icon: <IconMapPin className="ico" />
       },
       'broken_file_references': {
         title: 'Битые ссылки на файлы',
         desc: 'Очистить некорректные ссылки на файлы в истории проверок',
-        icon: '📎'
+        icon: <IconPaperclip className="ico" />
       },
       'stale_problem_vl': {
         title: 'Старые проблемные ВЛ',
         desc: 'Закрыть проблемные ВЛ без активности более 90 дней',
-        icon: '⚡'
+        icon: <IconZap className="ico" style={{color:'var(--amber)'}} />
       },
         'stale_notifications': {
       title: 'Неактуальные уведомления',
       desc: 'Удалить уведомления для ПУ, которые уже проверены без ошибок',
-      icon: '🔔'
+      icon: <IconBell className="ico" />
     },
         'missing_notifications': {
       title: 'Отсутствующие уведомления',
       desc: 'Создать уведомления для ПУ с ошибками, у которых нет уведомлений',
-      icon: '📢'
+      icon: <IconMegaphone className="ico" />
     }
     };
-    return descriptions[type] || { title: 'Неизвестная операция', desc: '', icon: '❓' };
+    return descriptions[type] || { title: 'Неизвестная операция', desc: '', icon: <IconHelp className="ico" /> };
   };
   
   return (
@@ -6345,7 +6346,7 @@ function DatabaseMaintenance() {
       {/* Красивый заголовок */}
       <div className="db-header">
         <div className="db-header-content">
-          <div className="db-header-icon">🔧</div>
+          <div className="db-header-icon"><IconWrench className="ico" /></div>
           <div className="db-header-text">
             <h3>Проверка целостности базы данных</h3>
             <p>Диагностика и устранение проблем в структуре данных</p>
@@ -6363,7 +6364,7 @@ function DatabaseMaintenance() {
             </>
           ) : (
             <>
-              <span>🔍</span>
+              <span><IconSearch className="ico" /></span>
               Запустить проверку
             </>
           )}
@@ -6373,7 +6374,7 @@ function DatabaseMaintenance() {
       {/* Резервная копия базы: скачать бэкап / восстановить из файла */}
       <div className="db-header" style={{ marginTop: 12 }}>
         <div className="db-header-content">
-          <div className="db-header-icon">💾</div>
+          <div className="db-header-icon"><IconDatabase className="ico" /></div>
           <div className="db-header-text">
             <h3>Резервная копия базы</h3>
             <p>Скачать полный бэкап (JSON) или восстановить данные из файла. Восстановление заменяет все данные.</p>
@@ -6381,10 +6382,10 @@ function DatabaseMaintenance() {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn-check-db" onClick={handleBackup} disabled={backuping || restoring}>
-            {backuping ? 'Скачивание...' : '⬇️ Скачать бэкап'}
+            {backuping ? 'Скачивание...' : 'Скачать бэкап'}
           </button>
           <label className="btn-check-db" style={{ cursor: restoring ? 'default' : 'pointer', opacity: restoring ? 0.6 : 1 }}>
-            {restoring ? 'Восстановление...' : '⬆️ Восстановить из файла'}
+            {restoring ? 'Восстановление...' : 'Восстановить из файла'}
             <input type="file" accept=".json,application/json" onChange={handleRestore} disabled={restoring || backuping} style={{ display: 'none' }} />
           </label>
         </div>
@@ -6405,7 +6406,7 @@ function DatabaseMaintenance() {
     {/* Общая статистика */}
     <div className="db-summary-grid">
       <div className="db-summary-card total">
-        <div className="summary-icon">📊</div>
+        <div className="summary-icon"><IconChart className="ico" /></div>
         <div className="summary-content">
           <h4>Всего проблем</h4>
           <p className="summary-value">{healthCheck.stats.totalIssues}</p>
@@ -6413,7 +6414,7 @@ function DatabaseMaintenance() {
       </div>
       
       <div className="db-summary-card error">
-        <div className="summary-icon">🔴</div>
+        <div className="summary-icon"><IconAlertCircle className="ico" style={{color:'var(--red)'}} /></div>
         <div className="summary-content">
           <h4>Критических</h4>
           <p className="summary-value">{healthCheck.stats.byType.error}</p>
@@ -6421,7 +6422,7 @@ function DatabaseMaintenance() {
       </div>
       
       <div className="db-summary-card warning">
-        <div className="summary-icon">⚠️</div>
+        <div className="summary-icon"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /></div>
         <div className="summary-content">
           <h4>Предупреждений</h4>
           <p className="summary-value">{healthCheck.stats.byType.warning}</p>
@@ -6429,19 +6430,19 @@ function DatabaseMaintenance() {
       </div>
       
       <div className="db-summary-card info">
-        <div className="summary-icon">ℹ️</div>
+        <div className="summary-icon"><IconInfo className="ico" style={{color:'var(--blue)'}} /></div>
         <div className="summary-content">
           <h4>Информация</h4>
           <p className="summary-value">{healthCheck.stats.byType.info}</p>
         </div>
       </div>
       
-      {/* ✅ ВСЕГДА показываем - зеленые если 0, красные если > 0 */}
+      {/* ВСЕГДА показываем - зеленые если 0, красные если > 0 */}
       <div className={`db-summary-card ${
         (healthCheck.stats.staleNotifications || 0) > 0 ? 'warning' : 'success'
       }`}>
         <div className="summary-icon">
-          {(healthCheck.stats.staleNotifications || 0) > 0 ? '🔔' : '✅'}
+          {(healthCheck.stats.staleNotifications || 0) > 0 ? <IconBell className="ico" /> : <IconCheck className="ico" style={{color:'var(--green)'}} />}
         </div>
         <div className="summary-content">
           <h4>Неактуальных уведомлений</h4>
@@ -6453,7 +6454,7 @@ function DatabaseMaintenance() {
         (healthCheck.stats.missingNotifications || 0) > 0 ? 'error' : 'success'
       }`}>
         <div className="summary-icon">
-          {(healthCheck.stats.missingNotifications || 0) > 0 ? '📢' : '✅'}
+          {(healthCheck.stats.missingNotifications || 0) > 0 ? <IconMegaphone className="ico" /> : <IconCheck className="ico" style={{color:'var(--green)'}} />}
         </div>
         <div className="summary-content">
           <h4>Отсутствующих уведомлений</h4>
@@ -6465,7 +6466,7 @@ function DatabaseMaintenance() {
           
           {/* Статистика записей */}
           <div className="db-records-section">
-            <h4>📈 Статистика базы данных</h4>
+            <h4><IconChart className="ico" /> Статистика базы данных</h4>
             <div className="db-records-grid">
               <div className="record-stat">
                 <span className="record-label">Структура сети:</span>
@@ -6497,13 +6498,13 @@ function DatabaseMaintenance() {
           {/* Обнаруженные проблемы */}
           {healthCheck.issues.length === 0 ? (
             <div className="db-no-issues">
-              <div className="no-issues-icon">✨</div>
+              <div className="no-issues-icon"><IconCheck className="ico" style={{color:'var(--green)'}} /></div>
               <h4>База данных в отличном состоянии!</h4>
               <p>Проблем не обнаружено. Все работает корректно.</p>
             </div>
           ) : (
             <div className="db-issues-section">
-              <h4>🔍 Обнаруженные проблемы</h4>
+              <h4><IconSearch className="ico" /> Обнаруженные проблемы</h4>
               <div className="db-issues-list">
   {healthCheck.issues.map((issue, idx) => {
     const cleanupInfo = getCleanupDescription(issue.type);
@@ -6522,13 +6523,13 @@ function DatabaseMaintenance() {
           <span className="issue-count-badge">{issue.count} записей</span>
         </div>
         
-        {/* ✅ ДОБАВЬ ЭТО ПОСЛЕ issue-header, ПЕРЕД старым details: */}
+        {/* ДОБАВЬ ЭТО ПОСЛЕ issue-header, ПЕРЕД старым details: */}
         
         {/* Специальное отображение для неактуальных уведомлений */}
         {issue.type === 'stale_notifications' && issue.items && issue.items.length > 0 && (
           <details className="issue-details">
             <summary>
-              <span>📋</span>
+              <span><IconClipboard className="ico" /></span>
               Показать неактуальные уведомления (первые 10)
             </summary>
             <div className="stale-notifs-list">
@@ -6537,22 +6538,22 @@ function DatabaseMaintenance() {
                   <div className="stale-notif-header">
                     <div>
                       <strong>ПУ #{item.puNumber}</strong>
-                      <span className="notif-type-badge">{item.type === 'error' ? '❌ Ошибка' : '⏳ АСКУЭ'}</span>
+                      <span className="notif-type-badge">{item.type === 'error' ? 'Ошибка' : 'АСКУЭ'}</span>
                     </div>
                     <span className={`stale-status ${item.currentStatus === 'checked_ok' ? 'ok' : 'not-found'}`}>
-                      {item.currentStatus === 'checked_ok' ? '✅ Проверен' : '❌ Не найден'}
+                      {item.currentStatus === 'checked_ok' ? 'Проверен' : 'Не найден'}
                     </span>
                   </div>
                   <div className="stale-notif-info">
-                    <p><strong>📍 Местоположение:</strong> {item.tpName} - {item.vlName}</p>
-                    <p><strong>🏢 РЭС:</strong> {item.resName}</p>
-                    <p><strong>📅 Уведомление создано:</strong> {new Date(item.notifCreated).toLocaleString('ru-RU')}</p>
+                    <p><strong><IconMapPin className="ico" /> Местоположение:</strong> {item.tpName} - {item.vlName}</p>
+                    <p><strong><IconBuilding className="ico" /> РЭС:</strong> {item.resName}</p>
+                    <p><strong><IconCalendar className="ico" /> Уведомление создано:</strong> {new Date(item.notifCreated).toLocaleString('ru-RU')}</p>
                     {item.lastCheck && (
-                      <p><strong>✅ Последняя успешная проверка:</strong> {new Date(item.lastCheck).toLocaleString('ru-RU')}</p>
+                      <p><strong><IconCheck className="ico" style={{color:'var(--green)'}} /> Последняя успешная проверка:</strong> {new Date(item.lastCheck).toLocaleString('ru-RU')}</p>
                     )}
                   </div>
                   <div className="stale-reason">
-                    💡 <strong>Причина:</strong> {item.reason}
+                    <IconLightbulb className="ico" /> <strong>Причина:</strong> {item.reason}
                   </div>
                 </div>
               ))}
@@ -6569,7 +6570,7 @@ function DatabaseMaintenance() {
 {issue.type === 'missing_notifications' && issue.items && issue.items.length > 0 && (
   <details className="issue-details">
     <summary>
-      <span>📋</span>
+      <span><IconClipboard className="ico" /></span>
       Показать ПУ без уведомлений (первые 10)
     </summary>
     <div className="missing-notifs-list">
@@ -6578,24 +6579,24 @@ function DatabaseMaintenance() {
           <div className="missing-notif-header">
             <div>
               <strong>ПУ #{item.puNumber}</strong>
-              <span className="status-badge status-error">❌ Ошибка</span>
+              <span className="status-badge status-error"><IconX className="ico" style={{color:'var(--red)'}} /> Ошибка</span>
             </div>
             <span className="missing-badge">
-              📢 Нет уведомления
+              <IconMegaphone className="ico" /> Нет уведомления
             </span>
           </div>
           <div className="missing-notif-info">
-            <p><strong>📍 Местоположение:</strong> {item.tpName} - {item.vlName}</p>
-            <p><strong>🏢 РЭС:</strong> {item.resName}</p>
-            <p><strong>🔴 Статус ПУ:</strong> {item.status}</p>
-            <p><strong>📅 Последняя проверка:</strong> {
+            <p><strong><IconMapPin className="ico" /> Местоположение:</strong> {item.tpName} - {item.vlName}</p>
+            <p><strong><IconBuilding className="ico" /> РЭС:</strong> {item.resName}</p>
+            <p><strong><IconAlertCircle className="ico" style={{color:'var(--red)'}} /> Статус ПУ:</strong> {item.status}</p>
+            <p><strong><IconCalendar className="ico" /> Последняя проверка:</strong> {
               item.lastCheck 
                 ? new Date(item.lastCheck).toLocaleString('ru-RU')
                 : 'Неизвестно'
             }</p>
           </div>
           <div className="missing-error-preview">
-            <strong>⚠️ Ошибка в статусе:</strong>
+            <strong><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Ошибка в статусе:</strong>
             <pre>{item.errorDetails?.substring(0, 200)}...</pre>
           </div>
         </div>
@@ -6613,7 +6614,7 @@ function DatabaseMaintenance() {
         {issue.type !== 'stale_notifications' && issue.items && issue.items.length > 0 && (
           <details className="issue-details">
             <summary>
-              <span>📋</span>
+              <span><IconClipboard className="ico" /></span>
               Показать примеры (первые 10)
             </summary>
             <ul className="issue-items-list">
@@ -6643,7 +6644,7 @@ function DatabaseMaintenance() {
               setShowCleanupModal(true);
             }}
           >
-            <span>🧹</span>
+            <span><IconBroom className="ico" /></span>
             Очистить
           </button>
         )}
@@ -6655,7 +6656,7 @@ function DatabaseMaintenance() {
           )}
           
           <div className="db-check-time">
-            <span>⏱️</span>
+            <span><IconClock className="ico" /></span>
             Последняя проверка: {new Date(healthCheck.checkedAt).toLocaleString('ru-RU')}
           </div>
         </>
@@ -6668,12 +6669,12 @@ function DatabaseMaintenance() {
             <div className="modal-header-modern">
               <div className="modal-icon-large">{getCleanupDescription(cleanupType).icon}</div>
               <h3>{getCleanupDescription(cleanupType).title}</h3>
-              <button className="close-btn" onClick={() => setShowCleanupModal(false)}>✕</button>
+              <button className="close-btn" onClick={() => setShowCleanupModal(false)}><IconX className="ico" /></button>
             </div>
             <div className="modal-body">
               <p className="cleanup-description">{getCleanupDescription(cleanupType).desc}</p>
               <div className="warning-box">
-                <span className="warning-icon">⚠️</span>
+                <span className="warning-icon"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /></span>
                 <div>
                   <strong>Внимание!</strong>
                   <p>Это действие нельзя отменить. Все удаленные данные будут потеряны безвозвратно.</p>
@@ -6681,7 +6682,7 @@ function DatabaseMaintenance() {
               </div>
               <div className="form-group">
                 <label>
-                  <span className="label-icon">🔒</span>
+                  <span className="label-icon"><IconLock className="ico" /></span>
                   Введите пароль администратора:
                 </label>
                 <input
@@ -6713,7 +6714,7 @@ function DatabaseMaintenance() {
                   </>
                 ) : (
                   <>
-                    <span>🧹</span>
+                    <span><IconBroom className="ico" /></span>
                     Очистить
                   </>
                 )}
@@ -6796,7 +6797,7 @@ export default function App() {
     window.addEventListener('message', onMessage);
     // Сообщаем платформе, что готовы принять токен (она ответит platform-auth).
     window.parent.postMessage({ type: 'app-ready' }, PLATFORM_ORIGIN);
-    // Токен так и не пришёл за 5с → обычная форма логина (fallback).
+    // Токен так и не пришёл за 5с обычная форма логина (fallback).
     const timer = setTimeout(() => setSsoPending(false), 5000);
     return () => { window.removeEventListener('message', onMessage); clearTimeout(timer); };
   }, []);
@@ -6833,10 +6834,10 @@ export default function App() {
   let inactivityTimer;
   let lastReset = 0;
   const INACTIVITY_TIME = 2 * 60 * 60 * 1000; // 2 часа
-  const RESET_THROTTLE = 30 * 1000; // ✅ PERF: сбрасываем таймер не чаще раза в 30 сек
+  const RESET_THROTTLE = 30 * 1000; // PERF: сбрасываем таймер не чаще раза в 30 сек
   
   const resetTimer = () => {
-    // ✅ PERF: раньше clearTimeout/setTimeout дёргались на КАЖДЫЙ mousemove/scroll
+    // PERF: раньше clearTimeout/setTimeout дёргались на КАЖДЫЙ mousemove/scroll
     // (тысячи раз в секунду) — вкладка подтормаживала. Теперь троттлинг.
     const now = Date.now();
     if (now - lastReset < RESET_THROTTLE) return;
