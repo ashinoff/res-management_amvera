@@ -2592,38 +2592,33 @@ async function getNotificationCounts(user) {
     attributes: ['id', 'type', 'message']
   });
 
-  // ✅ PERF: один индексированный запрос по userId вместо гигантского IN(...)
-  const readNotifications = await NotificationRead.findAll({
-    where: { userId: user.id },
-    attributes: ['notificationId']
-  });
-
-  const readIds = new Set(readNotifications.map(r => r.notificationId));
-
+  // Считаем ВСЕ ожидающие уведомления, а не только непрочитанные: бейдж должен
+  // висеть, пока ПУ реально не отработан. Эти уведомления удаляются при загрузке
+  // проверки по ПУ (см. Notification.destroy для pending_askue и error), поэтому
+  // счётчик падает именно при отработке, а не при просмотре. Пометка «прочитано»
+  // на счётчик больше не влияет — это нужно и для бейджа приложения на платформе.
   // ✅ Считаем уникальные ПУ+фаза по типам (не общее количество уведомлений!)
   const techKeys = new Set();
   const askueKeys = new Set();
 
   allNotifications.forEach(notif => {
-    if (!readIds.has(notif.id)) {
-      try {
-        const data = JSON.parse(notif.message);
-        const puNumber = data.puNumber;
+    try {
+      const data = JSON.parse(notif.message);
+      const puNumber = data.puNumber;
 
-        if (puNumber) {
-          const phaseKey = getPhaseSignature(notif.message);
-          const key = `${puNumber}_${phaseKey}`;
+      if (puNumber) {
+        const phaseKey = getPhaseSignature(notif.message);
+        const key = `${puNumber}_${phaseKey}`;
 
-          if (notif.type === 'error') techKeys.add(key);
-          else if (notif.type === 'pending_askue') askueKeys.add(key);
-        } else {
-          if (notif.type === 'error') techKeys.add(`id_${notif.id}`);
-          else if (notif.type === 'pending_askue') askueKeys.add(`id_${notif.id}`);
-        }
-      } catch {
+        if (notif.type === 'error') techKeys.add(key);
+        else if (notif.type === 'pending_askue') askueKeys.add(key);
+      } else {
         if (notif.type === 'error') techKeys.add(`id_${notif.id}`);
         else if (notif.type === 'pending_askue') askueKeys.add(`id_${notif.id}`);
       }
+    } catch {
+      if (notif.type === 'error') techKeys.add(`id_${notif.id}`);
+      else if (notif.type === 'pending_askue') askueKeys.add(`id_${notif.id}`);
     }
   });
 
