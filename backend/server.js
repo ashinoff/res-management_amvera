@@ -3603,12 +3603,17 @@ app.get('/api/admin/database-health',
       
       // 6. Проверка битых файлов в CheckHistory
       try {
+        // Колонка attachments имеет тип JSON — у него в Postgres нет оператора
+        // сравнения (ошибка 42883), поэтому сравниваем через каст в text
         const checksWithFiles = await CheckHistory.findAll({
           where: {
-            attachments: {
-              [Op.not]: null,
-              [Op.ne]: []
-            }
+            [Op.and]: [
+              { attachments: { [Op.not]: null } },
+              Sequelize.where(
+                Sequelize.cast(Sequelize.col('attachments'), 'text'),
+                { [Op.ne]: '[]' }
+              )
+            ]
           }
         });
         
@@ -3983,13 +3988,16 @@ app.post('/api/admin/database-cleanup',
           break;
           
         case 'broken_file_references':
-          // Чистим битые ссылки на файлы
+          // Чистим битые ссылки на файлы (JSON-колонка — сравнение через ::text)
           const checksWithFiles = await CheckHistory.findAll({
             where: {
-              attachments: {
-                [Op.not]: null,
-                [Op.ne]: []
-              }
+              [Op.and]: [
+                { attachments: { [Op.not]: null } },
+                Sequelize.where(
+                  Sequelize.cast(Sequelize.col('attachments'), 'text'),
+                  { [Op.ne]: '[]' }
+                )
+              ]
             },
             transaction
           });
