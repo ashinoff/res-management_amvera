@@ -4432,6 +4432,7 @@ function UserSettings() {
 
 // Подкомпонент обслуживания системы
 function MaintenanceSettings() {
+  const { user } = useContext(AuthContext);
   const [clearing, setClearing] = useState(false);
   const [showClearModal, setShowClearModal] = useState(false);
   const [clearPassword, setClearPassword] = useState('');
@@ -4465,11 +4466,13 @@ function MaintenanceSettings() {
     <div className="settings-section">
       <h3>Обслуживание системы</h3>
       
+      {/* Очистка данных — только для учётки admin */}
+      {user?.login === 'admin' && (
       <div className="maintenance-card danger">
         <h4><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Очистка данных системы</h4>
         <p>Удаляет историю, статусы проверок и уведомления.</p>
         <p className="info-text"><IconCheck className="ico" style={{color:'var(--green)'}} /> Структура сети НЕ удаляется!</p>
-        <button 
+        <button
           onClick={() => setShowClearModal(true)}
           disabled={clearing}
           className="danger-btn"
@@ -4477,6 +4480,7 @@ function MaintenanceSettings() {
           {clearing ? 'Удаление...' : 'Очистить данные'}
         </button>
       </div>
+      )}
       
       <div className="maintenance-card">
         <h4><IconChart className="ico" /> Статистика системы</h4>
