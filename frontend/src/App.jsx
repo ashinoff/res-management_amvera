@@ -4204,7 +4204,7 @@ function UserSettings() {
               </tr>
             </thead>
             <tbody>
-              {users.map(user => (
+              {[...users].sort((a, b) => (a.fio || '').localeCompare(b.fio || '', 'ru')).map(user => (
                 <tr key={user.id}>
                   <td>{user.fio}</td>
                   <td><strong>{user.login}</strong></td>
