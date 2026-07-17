@@ -1370,6 +1370,7 @@ function Notifications({ filterType, onSectionChange, selectedRes }) {
   const [uploadingPu, setUploadingPu] = useState(null);
   const [attachedFiles, setAttachedFiles] = useState([]); // ДОБАВЛЕНО!
   const [submitting, setSubmitting] = useState(false);
+  const [commentError, setCommentError] = useState(false); // подсветка «минимум 5 слов»
   const [selectedNotificationIds, setSelectedNotificationIds] = useState([]);
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [bulkDeletePassword, setBulkDeletePassword] = useState('');
@@ -1451,9 +1452,12 @@ const loadNotifications = useCallback(async () => {
   const handleCompleteWork = async () => {
     const wordCount = comment.trim().split(' ').filter(word => word.length > 0).length;
     if (wordCount < 5) {
-      alert('Комментарий должен содержать не менее 5 слов');
+      // Не молча блокируем, а зажигаем красную рамку и фразу — чтобы было понятно,
+      // почему кнопка не срабатывает (раньше клик по disabled ничего не давал).
+      setCommentError(true);
       return;
     }
+    setCommentError(false);
 
      setSubmitting(true);
     
@@ -1814,6 +1818,8 @@ const loadNotifications = useCallback(async () => {
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedNotification({ id: notif.id, data });
+                      setComment('');
+                      setCommentError(false);
                       setShowCompleteModal(true);
                     }}
                     title="Выполнить мероприятия"
@@ -2084,15 +2090,30 @@ const loadNotifications = useCallback(async () => {
               </div>
               
               <div className="form-group">
-                <label>Что было выполнено? (минимум 5 слов)</label>
+                <label style={commentError ? { color: '#dc2626', fontWeight: 600 } : undefined}>
+                  Что было выполнено? (минимум 5 слов)
+                </label>
                 <textarea
                   value={comment}
-                  onChange={(e) => setComment(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setComment(v);
+                    // как только набрано 5+ слов — гасим красную подсветку
+                    if (commentError && v.trim().split(' ').filter(w => w.length > 0).length >= 5) {
+                      setCommentError(false);
+                    }
+                  }}
                   placeholder="Опишите выполненные работы..."
                   rows={4}
+                  style={commentError ? {
+                    borderColor: '#dc2626',
+                    boxShadow: '0 0 0 3px rgba(220,38,38,0.2)',
+                    outline: 'none'
+                  } : undefined}
                 />
-                <small className="word-count">
+                <small className="word-count" style={commentError ? { color: '#dc2626', fontWeight: 600 } : undefined}>
                   Слов: {comment.trim().split(' ').filter(w => w.length > 0).length} из 5
+                  {commentError ? ' — нужно не менее 5 слов, чтобы завершить' : ''}
                 </small>
               </div>
               
@@ -2133,13 +2154,10 @@ const loadNotifications = useCallback(async () => {
               <button className="cancel-btn" onClick={() => setShowCompleteModal(false)}>
                 Отмена
                 </button>
-              <button 
-                className="confirm-btn" 
+              <button
+                className="confirm-btn"
                 onClick={handleCompleteWork}
-                  disabled={
-                  comment.trim().split(' ').filter(w => w.length > 0).length < 5 ||
-                  submitting
-                }
+                disabled={submitting}
               >
                 {submitting ? 'Отправка...' : 'Подтвердить выполнение'}
                 </button>
