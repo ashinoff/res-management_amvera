@@ -206,12 +206,11 @@ body {
 /* Осциллограф ПОВЕРХ текста (mix-blend screen — светится над тёмным фоном, белые
    буквы не темнит). Постоянной линии нет: волна рисуется бегущей искрой и тут же
    исчезает (виден только короткий «хвост» ~2 колебания). */
+/* Во всю ширину меню (компенсируем padding 24px) и выше/ниже букв (~0.5 см). */
 .osc-bg {
   position: absolute;
-  left: 0; right: 0; top: 0;
-  bottom: 16px;
-  width: 100%;
-  height: calc(100% - 16px);
+  left: -24px; right: -24px;
+  top: -18px; bottom: -14px;
   z-index: 2;
   pointer-events: none;
   mix-blend-mode: screen;
@@ -219,22 +218,23 @@ body {
 }
 .osc-bg.danger { color: #ff9aa2; } /* при перегрузе — тёплый ореол (тонко) */
 /* Бегущая искра: тонкая холодно-белая, короткий видимый сегмент (~2 гребня), */
-/* проходит слева-направо и исчезает; повторный запуск — re-mount по key. */
+/* проходит слева-направо РОВНО ОДИН раз и исчезает. Большой gap (2) — чтобы */
+/* соседние копии dash не появлялись в кадре (не «дорисовывало» второй хвост). */
 .osc-spark {
   stroke: #f2fbff;
   stroke-width: 1.2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 0.13 1;       /* короткий хвост ~2 колебания при 8 периодах */
-  stroke-dashoffset: 1;
+  stroke-dasharray: 0.13 2;
+  stroke-dashoffset: 0.13;        /* dash полностью за левым краем */
   filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 6px currentColor);
   animation: osc-spark 0.85s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 @keyframes osc-spark {
-  0%   { stroke-dashoffset: 1;     opacity: 0; }
+  0%   { stroke-dashoffset: 0.13; opacity: 0; }
   10%  { opacity: 1; }
   80%  { opacity: 1; }
-  100% { stroke-dashoffset: -0.13; opacity: 0; }
+  100% { stroke-dashoffset: -1;   opacity: 0; }  /* dash полностью за правым краем */
 }
 /* Текст заголовка — поверх синусоиды. */
 .monitor-title {
