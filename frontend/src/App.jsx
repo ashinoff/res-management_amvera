@@ -3405,6 +3405,7 @@ function PowerOverload({ selectedRes }) {
   const openRes = (c) => { setComment(''); setCommentError(false); setFiles([]); setActionModal({ c, mode: 'res' }); };
 
   const submitAskue = async () => {
+    if (!window.confirm('Подтвердите: ограничение по АСКУЭ выполнено?')) return;
     setSubmitting(true);
     try {
       await api.post(`/api/overload/${actionModal.c.id}/askue-complete`, { comment });
@@ -3483,13 +3484,7 @@ function PowerOverload({ selectedRes }) {
                       Этап: <strong>{STAGE_RU[c.stage]}</strong>
                     </div>
                   </div>
-                  <div className="notification-narrow-actions" onClick={(e) => e.stopPropagation()}>
-                    {user.role === 'admin' && c.stage === 'askue_limit' && (
-                      <button className="btn-complete-green" onClick={() => openAskue(c)}>Ограничение по АСКУЭ выполнено</button>
-                    )}
-                    {user.role === 'res_responsible' && c.stage === 'res_work' && (
-                      <button className="btn-complete-green" onClick={() => openRes(c)}>Мероприятия выполнены</button>
-                    )}
+                  <div className="notification-narrow-actions">
                     {c.stage === 'awaiting_recheck' && (
                       <span className="po-plaque">Ожидает перепроверки</span>
                     )}
@@ -3541,14 +3536,14 @@ function PowerOverload({ selectedRes }) {
                   <h4>Хронология</h4>
                   {c.askueCompletedAt ? (
                     <div className="po-step done">
-                      <strong>Ограничение по АСКУЭ</strong> — {c.askueUser?.fio || '—'}, {new Date(c.askueCompletedAt).toLocaleString('ru-RU')}
+                      <strong>Ограничение по АСКУЭ</strong> — <span className="po-done-word">выполнено</span> · {c.askueUser?.fio || '—'}, {new Date(c.askueCompletedAt).toLocaleString('ru-RU')}
                       {c.askueComment ? <div className="po-step-comment">{c.askueComment}</div> : null}
                     </div>
-                  ) : <div className="po-step pending"><strong>Ограничение по АСКУЭ</strong> — ожидается</div>}
+                  ) : <div className="po-step pending"><strong>Ограничение по АСКУЭ</strong> — <span className="po-wait">ожидается</span></div>}
 
                   {c.resCompletedAt ? (
                     <div className="po-step done">
-                      <strong>Мероприятия РЭС</strong> — {c.resUser?.fio || '—'}, {new Date(c.resCompletedAt).toLocaleString('ru-RU')}
+                      <strong>Мероприятия РЭС</strong> — <span className="po-done-word">выполнено</span> · {c.resUser?.fio || '—'}, {new Date(c.resCompletedAt).toLocaleString('ru-RU')}
                       {c.resComment ? <div className="po-step-comment">{c.resComment}</div> : null}
                       {Array.isArray(c.attachments) && c.attachments.length > 0 && (
                         <div className="po-attachments">
@@ -3558,16 +3553,16 @@ function PowerOverload({ selectedRes }) {
                         </div>
                       )}
                     </div>
-                  ) : <div className="po-step pending"><strong>Мероприятия РЭС</strong> — ожидается</div>}
+                  ) : <div className="po-step pending"><strong>Мероприятия РЭС</strong> — <span className="po-wait">ожидается</span></div>}
 
                   {c.recheckAt ? (
                     <div className={`po-step ${c.recheckResult === 'ok' ? 'done' : 'fail'}`}>
-                      <strong>Перепроверка профилем</strong> — {new Date(c.recheckAt).toLocaleString('ru-RU')}: {c.recheckResult === 'ok' ? 'перегруз устранён' : 'повторный перегруз'}
+                      <strong>Перепроверка профилем</strong> — {new Date(c.recheckAt).toLocaleString('ru-RU')}: {c.recheckResult === 'ok' ? <span className="po-done-word">перегруз устранён</span> : <span className="po-fail-word">повторный перегруз</span>}
                       {c.recheckPeakKw != null ? ` (пик ${f1(c.recheckPeakKw)} кВт)` : ''}
                     </div>
-                  ) : <div className="po-step pending"><strong>Перепроверка профилем</strong> — ожидается</div>}
+                  ) : <div className="po-step pending"><strong>Перепроверка профилем</strong> — <span className="po-wait">ожидается</span></div>}
 
-                  {c.closedAt && <div className="po-step done"><strong>Случай закрыт</strong> — {new Date(c.closedAt).toLocaleString('ru-RU')}</div>}
+                  {c.closedAt && <div className="po-step done"><strong>Случай закрыт</strong> — <span className="po-done-word">завершён</span> · {new Date(c.closedAt).toLocaleString('ru-RU')}</div>}
                 </div>
               </div>
               <div className="modal-footer">
@@ -3701,22 +3696,17 @@ const handleSendEmail = async () => {
     <div className="problem-vl-container">
       <h2><span className="svg-frame"><IconAlertTriangle size={24} /></span> Проблемные ВЛ</h2>
       
-      <div className="problem-info">
-        <p>В этом разделе отображаются ВЛ, которые не прошли проверку 2 и более раз после выполнения мероприятий РЭС.</p>
-        <p>Это требует особого внимания и возможного выезда на место.</p>
-      </div>
-      
-      <div className="problem-stats">
-        <div className="stat-card critical">
-          <h4>Активных проблем</h4>
-          <p className="stat-value">{problemVLs.filter(p => p.status === 'active').length}</p>
+      <div className="problem-info-row">
+        <div className="problem-info-text">
+          <p>В этом разделе отображаются ВЛ, которые не прошли проверку 2 и более раз после выполнения мероприятий РЭС.</p>
+          <p>Это требует особого внимания и возможного выезда на место.</p>
         </div>
-        <div className="stat-card">
-          <h4>Всего зарегистрировано</h4>
-          <p className="stat-value">{problemVLs.length}</p>
+        <div className="problem-active-counter">
+          <div className="pac-value">{problemVLs.filter(p => p.status === 'active').length}</div>
+          <div className="pac-label">Активных проблем</div>
         </div>
       </div>
-      
+
       {problemVLs.length === 0 ? (
   <div className="no-data">
     <p>
@@ -6618,6 +6608,7 @@ function Analytics() {
   const [analytics, setAnalytics] = useState([]);
   const [totals, setTotals] = useState({});
   const [vlWorkload, setVlWorkload] = useState([]);
+  const [overloadRows, setOverloadRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingDetailed, setLoadingDetailed] = useState(false);
   const [dateFrom, setDateFrom] = useState(
@@ -6629,8 +6620,22 @@ function Analytics() {
   useEffect(() => {
     loadAnalytics();
     loadVlWorkload();
+    loadOverload();
   }, [dateFrom, dateTo]);
-  
+
+  // ТП с перегрузом: секции, где пик ≥ лимита (ratioPct ≥ 100).
+  const loadOverload = async () => {
+    try {
+      const response = await api.get('/api/reports/overload');
+      const rows = (response.data || []).filter(r => r.ratioPct != null && r.ratioPct >= 100);
+      rows.sort((a, b) => (b.ratioPct || 0) - (a.ratioPct || 0));
+      setOverloadRows(rows);
+    } catch (error) {
+      console.error('Error loading overload report:', error);
+      setOverloadRows([]);
+    }
+  };
+
   const loadVlWorkload = async () => {
     try {
       const response = await api.get('/api/reports/detailed', {
@@ -6940,6 +6945,44 @@ function Analytics() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* ТП с перегрузом (по профилю мощности) */}
+      <h2 style={{ marginTop: '32px' }}><span className="svg-frame"><IconZap size={24} /></span> ТП с перегрузом</h2>
+      <p className="info-hint" style={{ marginBottom: '12px' }}>
+        <IconInfo className="ico" style={{ color: 'var(--blue)' }} /> Секции шин, где последний пик мощности достиг или превысил лимит Sном·cosφ
+      </p>
+      <div className="analytics-table">
+        {overloadRows.length === 0 ? (
+          <div className="no-data" style={{ padding: '16px' }}>
+            <span className="svg-frame" style={{ marginRight: 8 }}><IconCheck size={22} /></span>
+            Секций с перегрузом нет
+          </div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>РЭС</th><th>ТП</th><th>СШ</th><th>Sном, кВА</th><th>Лимит, кВт</th>
+                <th>Пик, кВт</th><th>%</th><th>Статус случая</th><th>Циклы</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overloadRows.map((r, idx) => (
+                <tr key={idx}>
+                  <td>{r.resName}</td>
+                  <td>{r.tpName}</td>
+                  <td>СШ-{r.sectionNumber}</td>
+                  <td>{r.tnKva}</td>
+                  <td>{r.limitKw}</td>
+                  <td style={{ color: 'var(--red)', fontWeight: 700 }}>{r.lastPeakKw ?? '—'}</td>
+                  <td style={{ color: 'var(--red)', fontWeight: 700 }}>{r.ratioPct != null ? r.ratioPct + '%' : '—'}</td>
+                  <td>{r.caseStage}</td>
+                  <td>{r.cycles || 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

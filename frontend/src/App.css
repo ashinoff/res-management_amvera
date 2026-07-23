@@ -6834,9 +6834,21 @@ tr.selected:hover,
 .po-timeline { margin-top: 14px; }
 .po-timeline h4 { margin: 0 0 8px; font-size: 14px; }
 .po-step { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px;
-  background: var(--surface-2); font-size: 13.5px; border-left: 3px solid var(--gray); }
-.po-step.done { border-left-color: var(--green); }
-.po-step.fail { border-left-color: var(--red); }
-.po-step.pending { border-left-color: var(--border-strong, #cbd5e1); color: var(--text-muted); }
+  background: var(--surface-2); font-size: 13.5px; }
+.po-step.pending { color: var(--text-muted); }
 .po-step-comment { margin-top: 4px; color: var(--text-muted); font-style: italic; }
+.po-wait { color: var(--amber); font-weight: 600; }
+.po-done-word { color: var(--green); font-weight: 600; }
+.po-fail-word { color: var(--red); font-weight: 600; }
+/* Главный «Пик N кВт» в модалке случая — красным. */
+.po-details-modal .tech-pmax-value { color: var(--red); }
 .po-attachments { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+
+/* ===== Проблемные ВЛ: компактная шапка со счётчиком справа ===== */
+.problem-info-row { display: flex; align-items: center; gap: 16px; justify-content: space-between;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.problem-info-text p { margin: 2px 0; font-size: 13px; color: var(--text-muted); }
+.problem-active-counter { text-align: center; flex-shrink: 0; padding: 4px 18px; border-left: 1px solid var(--border); }
+.problem-active-counter .pac-value { font-size: 30px; font-weight: 800; color: var(--red); line-height: 1; }
+.problem-active-counter .pac-label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
