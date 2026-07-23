@@ -382,6 +382,50 @@ const TpSection = sequelize.define('TpSection', {
   }
 });
 
+// 3c. Случай перегрузки секции (workflow мероприятий по превышению Pном, этап 3).
+// Живёт на секции (sectionId), не на ВЛ. Стадии: askue_limit → res_work →
+// awaiting_recheck → completed. cycles растёт при повторном перегрузе.
+const OverloadCase = sequelize.define('OverloadCase', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  sectionId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: { model: TpSection, key: 'id' }
+  },
+  resId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: { model: ResUnit, key: 'id' }
+  },
+  stage: {
+    type: DataTypes.ENUM('askue_limit', 'res_work', 'awaiting_recheck', 'completed'),
+    defaultValue: 'askue_limit'
+  },
+  cycles: { type: DataTypes.INTEGER, defaultValue: 1 },
+  // Снимок цифр на момент открытия / последнего перегруза
+  peakKw: { type: DataTypes.FLOAT, allowNull: true },
+  peakAt: { type: DataTypes.STRING, allowNull: true },
+  tnKva: { type: DataTypes.FLOAT, allowNull: true },
+  cosPhi: { type: DataTypes.FLOAT, allowNull: true },
+  limitKw: { type: DataTypes.FLOAT, allowNull: true },
+  ratio: { type: DataTypes.FLOAT, allowNull: true },
+  period: { type: DataTypes.STRING, allowNull: true },
+  // Этап АСКУЭ (ограничение)
+  askueUserId: { type: DataTypes.INTEGER, allowNull: true },
+  askueCompletedAt: { type: DataTypes.DATE, allowNull: true },
+  askueComment: { type: DataTypes.TEXT, allowNull: true },
+  // Этап РЭС (мероприятия + фото)
+  resUserId: { type: DataTypes.INTEGER, allowNull: true },
+  resCompletedAt: { type: DataTypes.DATE, allowNull: true },
+  resComment: { type: DataTypes.TEXT, allowNull: true },
+  attachments: { type: DataTypes.JSON, allowNull: true },
+  // Перепроверка профилем
+  recheckAt: { type: DataTypes.DATE, allowNull: true },
+  recheckPeakKw: { type: DataTypes.FLOAT, allowNull: true },
+  recheckResult: { type: DataTypes.ENUM('ok', 'still_overload'), allowNull: true },
+  closedAt: { type: DataTypes.DATE, allowNull: true }
+});
+
 // 4. Модель статусов ПУ (приборов учета)
 const PuStatus = sequelize.define('PuStatus', {
   id: {
@@ -782,6 +826,12 @@ TpSection.belongsTo(ResUnit, { foreignKey: 'resId' });
 ResUnit.hasMany(TpSection, { foreignKey: 'resId' });
 NetworkStructure.belongsTo(TpSection, { foreignKey: 'sectionId', as: 'section' });
 TpSection.hasMany(NetworkStructure, { foreignKey: 'sectionId', as: 'lines' });
+// Случаи перегрузки секции
+OverloadCase.belongsTo(TpSection, { foreignKey: 'sectionId', as: 'section' });
+TpSection.hasMany(OverloadCase, { foreignKey: 'sectionId', as: 'cases' });
+OverloadCase.belongsTo(ResUnit, { foreignKey: 'resId' });
+OverloadCase.belongsTo(User, { as: 'askueUser', foreignKey: 'askueUserId' });
+OverloadCase.belongsTo(User, { as: 'resUser', foreignKey: 'resUserId' });
 Notification.belongsTo(User, { as: 'fromUser', foreignKey: 'fromUserId' });
 Notification.belongsTo(User, { as: 'toUser', foreignKey: 'toUserId' });
 Notification.belongsTo(ResUnit, { foreignKey: 'resId' });
@@ -1292,10 +1342,21 @@ app.put('/api/network/sections/:id',
       if (sectionNumber !== undefined) updates.sectionNumber = parseInt(sectionNumber, 10);
       if (tnKva !== undefined) updates.tnKva = (tnKva === '' || tnKva === null) ? null : parseFloat(tnKva);
       if (cosPhi !== undefined) updates.cosPhi = (cosPhi === '' || cosPhi === null) ? 0.9 : parseFloat(cosPhi);
+      const techPuChanged = techPuNumber !== undefined &&
+        (techPuNumber ? String(techPuNumber).trim() : null) !== (section.techPuNumber || null);
       if (techPuNumber !== undefined) updates.techPuNumber = techPuNumber ? String(techPuNumber).trim() : null;
 
       await section.update(updates);
-      res.json({ success: true, section });
+
+      // Предупреждение: смена тех.ПУ при открытом случае перегруза.
+      let warning = null;
+      if (techPuChanged) {
+        const activeCase = await OverloadCase.count({
+          where: { sectionId: section.id, stage: { [Op.ne]: 'completed' } }
+        });
+        if (activeCase > 0) warning = 'По секции открыт случай перегруза';
+      }
+      res.json({ success: true, section, ...(warning ? { warning } : {}) });
     } catch (error) {
       if (error.name === 'SequelizeUniqueConstraintError') {
         return res.status(400).json({ error: 'Секция с таким номером уже есть у этой ТП' });
@@ -1320,9 +1381,157 @@ app.delete('/api/network/sections/:id',
         });
       }
 
+      // Нельзя удалять секцию с незакрытым случаем перегруза.
+      const activeCase = await OverloadCase.count({
+        where: { sectionId: section.id, stage: { [Op.ne]: 'completed' } }
+      });
+      if (activeCase > 0) {
+        return res.status(400).json({ error: 'Сначала закройте случай перегруза по секции' });
+      }
+
+      // Завершённые кейсы отвязываем (сохраняем историю без FK-сирот)? Нет — оставляем
+      // как есть; удаление секции с завершёнными кейсами оставит их без секции —
+      // но FK NOT NULL. Поэтому удаляем завершённые кейсы этой секции.
+      await OverloadCase.destroy({ where: { sectionId: section.id } });
+
       await section.destroy();
       res.json({ success: true, message: 'Секция удалена' });
     } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+});
+
+// ===== Случаи перегрузки секций (workflow, этап 3) =====
+
+// Список кейсов (res_responsible — только свой РЭС)
+app.get('/api/overload', authenticateToken, async (req, res) => {
+  try {
+    const { stage, resId } = req.query;
+    const where = {};
+    if (req.user.role === 'res_responsible') {
+      where.resId = req.user.resId;
+    } else if (resId) {
+      where.resId = parseInt(resId, 10);
+    }
+    if (stage) where.stage = stage;
+
+    const cases = await OverloadCase.findAll({
+      where,
+      include: [
+        { model: TpSection, as: 'section', attributes: ['id', 'tpName', 'sectionNumber', 'tnKva'] },
+        { model: ResUnit, attributes: ['id', 'name'] },
+        { model: User, as: 'askueUser', attributes: ['id', 'fio'] },
+        { model: User, as: 'resUser', attributes: ['id', 'fio'] }
+      ],
+      order: [['updatedAt', 'DESC']],
+      limit: 2000
+    });
+    res.json(cases);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// АСКУЭ выполнила ограничение → этап РЭС
+app.post('/api/overload/:caseId/askue-complete',
+  authenticateToken,
+  checkRole(['admin']),
+  async (req, res) => {
+    try {
+      const oc = await OverloadCase.findByPk(req.params.caseId, {
+        include: [{ model: TpSection, as: 'section', attributes: ['tpName', 'sectionNumber'] }]
+      });
+      if (!oc) return res.status(404).json({ error: 'Случай не найден' });
+      if (oc.stage !== 'askue_limit') {
+        return res.status(400).json({ error: 'Случай не на этапе АСКУЭ' });
+      }
+      const { comment } = req.body;
+      await oc.update({
+        stage: 'res_work',
+        askueUserId: req.user.id,
+        askueCompletedAt: new Date(),
+        askueComment: comment || null
+      });
+
+      // Уведомление стадии АСКУЭ убрать, создать для РЭС
+      await removeSectionOverloadNotifs(oc.sectionId);
+      const s = oc.section || {};
+      await Notification.create({
+        type: 'power_overload', resId: oc.resId, toUserId: null, fromUserId: req.user.id,
+        message: `Требуются мероприятия РЭС по перегрузу ${s.tpName} СШ-${s.sectionNumber}`,
+        errorData: {
+          sectionId: oc.sectionId, caseId: oc.id, stage: 'res_work',
+          tpName: s.tpName, sectionNumber: s.sectionNumber,
+          peakKw: oc.peakKw, peakAt: oc.peakAt, limitKw: oc.limitKw, ratio: oc.ratio,
+          tnKva: oc.tnKva, cosPhi: oc.cosPhi, period: oc.period
+        }
+      });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+});
+
+// РЭС выполнил мероприятия (комментарий + фото) → ожидает перепроверки
+app.post('/api/overload/:caseId/res-complete',
+  authenticateToken,
+  checkRole(['res_responsible', 'admin']),
+  upload.array('attachments', 5),
+  async (req, res) => {
+    const uploadedFiles = [];
+    try {
+      const { comment } = req.body;
+      if (!comment || typeof comment !== 'string') {
+        return res.status(400).json({ error: 'Комментарий обязателен' });
+      }
+      if (comment.trim().split(/\s+/).filter(w => w.length > 0).length < 5) {
+        return res.status(400).json({ error: 'Комментарий должен содержать не менее 5 слов' });
+      }
+
+      const oc = await OverloadCase.findByPk(req.params.caseId, {
+        include: [{ model: TpSection, as: 'section', attributes: ['tpName', 'sectionNumber'] }]
+      });
+      if (!oc) return res.status(404).json({ error: 'Случай не найден' });
+      if (oc.stage !== 'res_work') return res.status(400).json({ error: 'Случай не на этапе мероприятий РЭС' });
+      if (req.user.role === 'res_responsible' && oc.resId !== req.user.resId) {
+        return res.status(403).json({ error: 'Чужой РЭС' });
+      }
+
+      let attachments = [];
+      if (req.files && req.files.length > 0) {
+        try {
+          attachments = await Promise.all(req.files.map(file => uploadToCloudinary(file, req.body.type)));
+          uploadedFiles.push(...attachments.map(a => a.public_id));
+        } catch (uploadError) {
+          await cleanupCloudinary(uploadedFiles);
+          return res.status(502).json({ error: 'Не удалось загрузить файлы на сервер.' });
+        }
+      }
+
+      await oc.update({
+        stage: 'awaiting_recheck',
+        resUserId: req.user.id,
+        resCompletedAt: new Date(),
+        resComment: comment,
+        attachments
+      });
+
+      // Уведомление РЭС убрать, создать для АСКУЭ «ожидает перепроверки»
+      await removeSectionOverloadNotifs(oc.sectionId);
+      const s = oc.section || {};
+      await Notification.create({
+        type: 'power_overload', resId: oc.resId, toUserId: null, fromUserId: req.user.id,
+        message: `Мероприятия РЭС выполнены, ожидает перепроверки профилем: ${s.tpName} СШ-${s.sectionNumber}`,
+        errorData: {
+          sectionId: oc.sectionId, caseId: oc.id, stage: 'awaiting_recheck',
+          tpName: s.tpName, sectionNumber: s.sectionNumber,
+          peakKw: oc.peakKw, peakAt: oc.peakAt, limitKw: oc.limitKw, ratio: oc.ratio,
+          tnKva: oc.tnKva, cosPhi: oc.cosPhi, period: oc.period
+        }
+      });
+      res.json({ success: true });
+    } catch (error) {
+      await cleanupCloudinary(uploadedFiles);
       res.status(500).json({ error: error.message });
     }
 });
@@ -1395,44 +1604,86 @@ app.post('/api/upload/analyze',
           let overloadStatus = 'unknown';
           if (hasLimit) overloadStatus = (r.peakKw >= limitKw) ? 'overload' : 'ok';
 
+          const period = r.period || analysis.period || null;
+          const ratio = limitKw ? (r.peakKw / limitKw) : null;
+
           await section.update({
             lastPeakKw: r.peakKw,
             lastPeakAt: parsePeakAt(r.peakAt),
-            lastProfilePeriod: r.period || analysis.period || null,
+            lastProfilePeriod: period,
             overloadStatus
           });
           sectionsUpdated++;
 
-          // Дедуп: одна активная power_overload на секцию — удаляем старую.
-          await Notification.destroy({ where: { type: 'power_overload', networkStructureId: null, resId: section.resId, [Op.and]: [ sequelize.where(sequelize.cast(sequelize.col('errorData'), 'text'), { [Op.like]: `%"sectionId":${section.id}%` }) ] } }).catch(() => {});
+          if (!hasLimit) continue; // без Sном статус unknown — кейсы не ведём
+
+          // Активный кейс по секции (не завершённый)
+          const activeCase = await OverloadCase.findOne({
+            where: { sectionId: section.id, stage: { [Op.ne]: 'completed' } },
+            order: [['id', 'DESC']]
+          });
+
+          const snapshot = () => ({
+            peakKw: r.peakKw, peakAt: r.peakAt, tnKva: section.tnKva,
+            cosPhi, limitKw, ratio, period
+          });
+          const notifData = (caseId, stage) => ({
+            sectionId: section.id, caseId, stage,
+            tpName: section.tpName, sectionNumber: section.sectionNumber,
+            techPuNumber: section.techPuNumber,
+            peakKw: r.peakKw, peakAt: r.peakAt, tnKva: section.tnKva,
+            cosPhi, limitKw, ratio, period
+          });
 
           if (overloadStatus === 'overload') {
             overloadCount++;
-            const ratio = limitKw ? (r.peakKw / limitKw) : null;
-            const errorData = {
-              sectionId: section.id,
-              tpName: section.tpName,
-              sectionNumber: section.sectionNumber,
-              techPuNumber: section.techPuNumber,
-              peakKw: r.peakKw,
-              peakAt: r.peakAt,
-              tnKva: section.tnKva,
-              cosPhi,
-              limitKw,
-              ratio,
-              period: r.period || analysis.period || null
-            };
-            await Notification.create({
-              type: 'power_overload',
-              resId: section.resId,
-              toUserId: null,
-              fromUserId: userId,
-              message: `Превышение Pном: ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт при лимите ${limitKw} кВт`,
-              errorData
-            });
-            overloads.push(errorData);
+            if (!activeCase) {
+              // Новый случай перегруза → этап АСКУЭ
+              const oc = await OverloadCase.create({
+                sectionId: section.id, resId: section.resId,
+                stage: 'askue_limit', cycles: 1, ...snapshot()
+              });
+              await removeSectionOverloadNotifs(section.id);
+              await Notification.create({
+                type: 'power_overload', resId: section.resId, toUserId: null, fromUserId: userId,
+                message: `Превышение Pном: ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт при лимите ${limitKw} кВт`,
+                errorData: notifData(oc.id, 'askue_limit')
+              });
+            } else if (activeCase.stage === 'awaiting_recheck') {
+              // Перепроверка провалена → новый цикл, снова к АСКУЭ
+              await activeCase.update({
+                recheckAt: new Date(), recheckPeakKw: r.peakKw, recheckResult: 'still_overload',
+                stage: 'askue_limit', cycles: activeCase.cycles + 1, ...snapshot()
+              });
+              await removeSectionOverloadNotifs(section.id);
+              await Notification.create({
+                type: 'power_overload', resId: section.resId, toUserId: null, fromUserId: userId,
+                message: `Повторный перегруз после мероприятий (цикл ${activeCase.cycles + 1}): ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт`,
+                errorData: { ...notifData(activeCase.id, 'askue_limit'), cycle: activeCase.cycles + 1 }
+              });
+            } else {
+              // Кейс в askue_limit/res_work — обновляем цифры, уведомление не дублируем
+              await activeCase.update(snapshot());
+            }
+          } else {
+            // Секция ok
+            if (activeCase && activeCase.stage === 'awaiting_recheck') {
+              // Успех перепроверки
+              await activeCase.update({
+                recheckAt: new Date(), recheckPeakKw: r.peakKw, recheckResult: 'ok',
+                stage: 'completed', closedAt: new Date()
+              });
+              await removeSectionOverloadNotifs(section.id);
+              await Notification.create({
+                type: 'success', resId: section.resId, toUserId: null, fromUserId: userId,
+                message: `Перегруз ${section.tpName} СШ-${section.sectionNumber} устранён, пик ${r.peakKw} кВт при лимите ${limitKw} кВт`
+              });
+            } else if (activeCase) {
+              // Перегруз ушёл сам (кейс в askue_limit/res_work) — закрываем
+              await activeCase.update({ stage: 'completed', recheckResult: 'ok', closedAt: new Date() });
+              await removeSectionOverloadNotifs(section.id);
+            }
           }
-          // Если секция стала 'ok' — старая power_overload уже удалена выше (дедуп).
         }
 
         await uploadRecord.update({
@@ -2902,6 +3153,18 @@ async function getNotificationCounts(user) {
     });
   }
 
+  // Кейсы перегруза, требующие действия по роли (для меню «Превышение Pном»).
+  let powerOverloadCases = 0;
+  if (user.role === 'admin') {
+    powerOverloadCases = await OverloadCase.count({
+      where: { stage: { [Op.in]: ['askue_limit', 'awaiting_recheck'] } }
+    });
+  } else if (user.role === 'res_responsible') {
+    powerOverloadCases = await OverloadCase.count({
+      where: { stage: 'res_work', resId: user.resId }
+    });
+  }
+
   // ✅ PERF: считаем только те типы, которые реально участвуют в счётчиках
   whereClause.type = { [Op.in]: ['error', 'pending_askue'] };
 
@@ -2944,7 +3207,8 @@ async function getNotificationCounts(user) {
     tech_pending: techKeys.size,
     askue_pending: askueKeys.size,
     problem_vl: problemVLCount,
-    power_overload: powerOverloadCount
+    power_overload: powerOverloadCount,
+    powerOverload: powerOverloadCases
   };
 }
 
@@ -3092,6 +3356,22 @@ function runProfileAnalyzer(filePath) {
       catch (e) { resolve({ success: false, error: 'Не удалось разобрать результат анализатора' }); }
     });
   });
+}
+
+// Удаляет уведомления power_overload по секции + их отметки прочтения (без хвостов).
+async function removeSectionOverloadNotifs(sectionId) {
+  const notifs = await Notification.findAll({
+    where: {
+      type: 'power_overload',
+      [Op.and]: [sequelize.where(sequelize.cast(sequelize.col('errorData'), 'text'), { [Op.like]: `%"sectionId":${sectionId}%` })]
+    },
+    attributes: ['id']
+  });
+  const ids = notifs.map(n => n.id);
+  if (ids.length) {
+    await NotificationRead.destroy({ where: { notificationId: ids } }).catch(() => {});
+    await Notification.destroy({ where: { id: ids } }).catch(() => {});
+  }
 }
 
 // 'dd.mm.yyyy HH:MM' → Date (для lastPeakAt). Некорректная строка → null.
@@ -4895,7 +5175,10 @@ async function initializeDatabase() {
       `ALTER TABLE "NetworkStructures" ADD COLUMN IF NOT EXISTS "sectionId" INTEGER`,
       `CREATE INDEX IF NOT EXISTS idx_netstruct_section ON "NetworkStructures" ("sectionId")`,
       `CREATE INDEX IF NOT EXISTS idx_tpsection_res ON "TpSections" ("resId")`,
-      `CREATE UNIQUE INDEX IF NOT EXISTS idx_tpsection_unique ON "TpSections" ("resId", "tpName", "sectionNumber")`
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_tpsection_unique ON "TpSections" ("resId", "tpName", "sectionNumber")`,
+      // Случаи перегрузки секции (этап 3)
+      `CREATE INDEX IF NOT EXISTS idx_overloadcase_section ON "OverloadCases" ("sectionId")`,
+      `CREATE INDEX IF NOT EXISTS idx_overloadcase_res_stage ON "OverloadCases" ("resId", "stage")`
     ];
     for (const stmt of indexStatements) {
       try {

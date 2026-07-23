@@ -334,6 +334,26 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-23** — ЭТАП 3, Блок А (server.js): workflow перегруза. Модель
+  **`OverloadCase`** (sectionId FK, resId FK, stage askue_limit/res_work/
+  awaiting_recheck/completed, cycles, снимок peakKw/peakAt/tnKva/cosPhi/limitKw/
+  ratio/period, askue*/res* поля, attachments JSON, recheck*, closedAt) +
+  ассоциации + индексы IF NOT EXISTS (sectionId; resId,stage). Профиль-ветка
+  переписана на кейсы: overload+нет кейса→создать askue_limit+уведомление;
+  overload+кейс askue_limit/res_work→обновить цифры (без дубля уведомления);
+  overload+awaiting_recheck→перепроверка провалена (still_overload, stage→
+  askue_limit, cycles+1, новое уведомление «повторный перегруз, цикл N»);
+  ok+awaiting_recheck→успех (completed, closedAt, уведомление power_overload
+  удалить, создать success в РЭС); ok+askue_limit/res_work→закрыть кейс. Хелпер
+  `removeSectionOverloadNotifs` чистит уведомления + NotificationRead. Эндпоинты:
+  `GET /api/overload?stage=&resId=` (res_responsible — свой РЭС), `POST
+  /api/overload/:id/askue-complete` (admin, askue_limit→res_work + уведомление
+  РЭС), `POST /api/overload/:id/res-complete` (res/admin, multipart комментарий+
+  фото Cloudinary, res_work→awaiting_recheck + уведомление АСКУЭ). Защита секций:
+  DELETE→400 при активном кейсе (завершённые кейсы удаляются вместе с секцией),
+  PUT techPuNumber→warning при активном кейсе. `getNotificationCounts` +поле
+  `powerOverload` (admin=askue_limit+awaiting_recheck, res=res_work своего РЭСа),
+  существующие поля не тронуты. node --check — ОК. Блоки Б/В/Г — следующими.
 - **2026-07-23** — «Структура сети»: перепривязка/отвязка ВЛ к секции. Раньше
   селект «Секция…» был только у ВЛ в блоке «ВЛ без секции» — после первой привязки
   сменить/снять секцию было нельзя. Теперь в колонке секции у КАЖДОЙ строки ВЛ
