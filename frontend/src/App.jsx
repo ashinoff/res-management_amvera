@@ -142,9 +142,10 @@ function LoginForm({ onLogin }) {
 // ГЛАВНОЕ МЕНЮ
 // =====================================================
 
-// Глубокая синусоида за текстом заголовка (viewBox 0 0 120 44, 3 периода). Один раз.
+// Высокочастотная глубокая синусоида (осциллограф) на всю высоту заголовка
+// (viewBox 0 0 120 44, 8 периодов, амплитуда почти во всю высоту). Считается один раз.
 const OSC_PATH = (() => {
-  const w = 120, mid = 22, amp = 15, periods = 3, n = 96;
+  const w = 120, mid = 22, amp = 19, periods = 8, n = 240;
   let d = '';
   for (let i = 0; i <= n; i++) {
     const x = (w * i / n).toFixed(2);
@@ -244,7 +245,6 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
       <div className="monitor-head">
         <svg className={`osc-bg ${oscDanger ? 'danger' : 'ok'}`} viewBox="0 0 120 44"
              preserveAspectRatio="none" aria-hidden="true">
-          <path className="osc-base" d={OSC_PATH} fill="none" pathLength="1" />
           {sweepTick > 0 && (
             <path key={sweepTick} className="osc-spark" d={OSC_PATH} fill="none" pathLength="1" />
           )}

@@ -203,8 +203,9 @@ body {
   padding-bottom: 16px;
   border-bottom: 1px solid rgba(255,255,255,0.1);
 }
-/* Синусоида ПОВЕРХ текста (mix-blend screen — светится над тёмным фоном, белые
-   буквы не темнит), яркий «энергетический» цвет со свечением. */
+/* Осциллограф ПОВЕРХ текста (mix-blend screen — светится над тёмным фоном, белые
+   буквы не темнит). Постоянной линии нет: волна рисуется бегущей искрой и тут же
+   исчезает (виден только короткий «хвост» ~2 колебания). */
 .osc-bg {
   position: absolute;
   left: 0; right: 0; top: 0;
@@ -212,38 +213,28 @@ body {
   width: 100%;
   height: calc(100% - 16px);
   z-index: 2;
-  color: #2bff88;          /* яркий неон-зелёный (норма) */
-  transition: color 0.12s;
   pointer-events: none;
   mix-blend-mode: screen;
+  color: #8fe3ff;                 /* холодный энерго-голубой ореол свечения */
 }
-.osc-bg.danger { color: #ff4d5e; }  /* яркий неон-красный (перегруз) */
-/* Базовая волна — яркая, со свечением, читается поверх надписи. */
-.osc-base {
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.85;
-  filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 5px currentColor);
-}
-/* Электрический пробег: яркая дуга с сильным свечением, конечная анимация; */
-/* повторный запуск — re-mount по key (sweepTick). */
+.osc-bg.danger { color: #ff9aa2; } /* при перегрузе — тёплый ореол (тонко) */
+/* Бегущая искра: тонкая холодно-белая, короткий видимый сегмент (~2 гребня), */
+/* проходит слева-направо и исчезает; повторный запуск — re-mount по key. */
 .osc-spark {
-  stroke: #ffffff;
-  stroke-width: 2.6;
+  stroke: #f2fbff;
+  stroke-width: 1.2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 0.16 1;
+  stroke-dasharray: 0.13 1;       /* короткий хвост ~2 колебания при 8 периодах */
   stroke-dashoffset: 1;
-  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 8px currentColor) drop-shadow(0 0 12px currentColor);
-  animation: osc-spark 0.95s ease-out forwards;
+  filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 6px currentColor);
+  animation: osc-spark 0.85s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 @keyframes osc-spark {
   0%   { stroke-dashoffset: 1;     opacity: 0; }
-  12%  { opacity: 1; }
-  85%  { opacity: 1; }
-  100% { stroke-dashoffset: -0.16; opacity: 0; }
+  10%  { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { stroke-dashoffset: -0.13; opacity: 0; }
 }
 /* Текст заголовка — поверх синусоиды. */
 .monitor-title {
@@ -260,7 +251,6 @@ body {
 .monitor-text .mt-2 { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; color: #a9bcd4; }
 @media (prefers-reduced-motion: reduce) {
   .osc-spark { display: none; }
-  .osc-base { opacity: 0.9; }
 }
 
 .main-menu button {
