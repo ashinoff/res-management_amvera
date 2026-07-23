@@ -142,6 +142,10 @@ function LoginForm({ onLogin }) {
 // ГЛАВНОЕ МЕНЮ
 // =====================================================
 
+// Номер секции шин римскими (1..5 → I..V); прочее — как есть.
+const ROMAN = { 1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V' };
+const toRoman = (n) => ROMAN[n] || String(n);
+
 // Высокочастотная глубокая синусоида (осциллограф) на всю высоту заголовка
 // (viewBox 0 0 120 44, 8 периодов, амплитуда почти во всю высоту). Считается один раз.
 const OSC_PATH = (() => {
@@ -387,7 +391,7 @@ function NetworkStructure({ onSectionChange } = {}) {
   };
 
   const deleteSection = async (section) => {
-    if (!window.confirm(`Удалить секцию СШ-${section.sectionNumber}?`)) return;
+    if (!window.confirm(`Удалить секцию СШ-${toRoman(section.sectionNumber)}?`)) return;
     try {
       await api.delete(`/api/network/sections/${section.id}`);
       await loadSections();
@@ -954,7 +958,7 @@ const executeClearHistory = async () => {
                           либо пункт «— Без секции» (отвязать) у привязанной. */}
                       <option value="">{item.sectionId ? '— Без секции' : 'Секция…'}</option>
                       {tpSections.map(s => (
-                        <option key={s.id} value={s.id}>СШ-{s.sectionNumber}</option>
+                        <option key={s.id} value={s.id}>СШ-{toRoman(s.sectionNumber)}</option>
                       ))}
                     </select>
                   )}
@@ -997,20 +1001,21 @@ const executeClearHistory = async () => {
                 {/* Секции ТП */}
                 {tpSections.map(section => {
                   const lines = tpItems.filter(i => i.sectionId === section.id);
-                  const parts = [`СШ-${section.sectionNumber}`];
+                  const parts = [`СШ-${toRoman(section.sectionNumber)}`];
                   if (section.tnKva != null) parts.push(`${section.tnKva} кВА`);
                   if (section.techPuNumber) parts.push(`тех.учёт № ${section.techPuNumber}`);
                   // Живая подпись перегруза (этап 2): пик · время · лимит (1 знак).
                   const cosPhi = section.cosPhi != null ? section.cosPhi : 0.9;
                   const limitKw = section.tnKva != null ? section.tnKva * cosPhi : null;
                   const fmt1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
-                  const peakParts = [];
-                  if (section.lastPeakKw != null) peakParts.push(`пик ${fmt1(section.lastPeakKw)} кВт`);
+                  const hasPeak = section.lastPeakKw != null;
+                  const pkPct = (hasPeak && limitKw) ? (section.lastPeakKw / limitKw) * 100 : null;
+                  const pkCls = pkPct == null ? '' : pkPct > 100 ? 'red' : pkPct >= 90 ? 'amber' : 'green';
+                  let peakDate = '';
                   if (section.lastPeakAt) {
                     const d = new Date(section.lastPeakAt);
-                    if (!isNaN(d.getTime())) peakParts.push(d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
+                    if (!isNaN(d.getTime())) peakDate = d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
                   }
-                  if (limitKw != null) peakParts.push(`лимит ${fmt1(limitKw)} кВт`);
                   const sectionNameCol = (
                     <span className="section-title-inline">
                       <span className={`status-box status-box--sm ${overloadClass(section.overloadStatus)}`}
@@ -1018,8 +1023,12 @@ const executeClearHistory = async () => {
                             title="Сведения о техучёте"
                             onClick={(e) => { e.stopPropagation(); openTechModal(section); }}></span>
                       <span className="section-title">{parts.join(' · ')}</span>
-                      {peakParts.length > 0 && (
-                        <span className="section-peak muted">{peakParts.join(' · ')}</span>
+                      {hasPeak && (
+                        <span className="section-peak muted">
+                          пик <span className={`peak-num ${pkCls}`}>{fmt1(section.lastPeakKw)}</span> кВт
+                          {peakDate ? ` · ${peakDate}` : ''}
+                          {limitKw != null ? ` · лимит ${fmt1(limitKw)} кВт` : ''}
+                        </span>
                       )}
                     </span>
                   );
@@ -1082,7 +1091,7 @@ const executeClearHistory = async () => {
           <div className="modal-backdrop" onClick={() => setTechModal(null)}>
             <div className="modal-content tech-details-modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
-                <h3>{s.tpName} · СШ-{s.sectionNumber}</h3>
+                <h3>{s.tpName} · СШ-{toRoman(s.sectionNumber)}</h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span className={`tech-pill ${status.cls}`}>{status.t}</span>
                   <button className="close-btn" onClick={() => setTechModal(null)}><IconX className="ico" /></button>
@@ -1091,7 +1100,7 @@ const executeClearHistory = async () => {
               <div className="modal-body">
                 <div className="modal-info">
                   <p><strong>ТП:</strong> {s.tpName}</p>
-                  <p><strong>Секция шин:</strong> СШ-{s.sectionNumber}</p>
+                  <p><strong>Секция шин:</strong> СШ-{toRoman(s.sectionNumber)}</p>
                   <p><strong>№ ПУ техучёта:</strong> {s.techPuNumber || '—'}</p>
                 </div>
 
@@ -1163,8 +1172,13 @@ const executeClearHistory = async () => {
             <div className="modal-body">
               <div className="form-group">
                 <label>Номер секции шин</label>
-                <input type="number" value={sectionForm.sectionNumber}
-                  onChange={(e) => setSectionForm({ ...sectionForm, sectionNumber: e.target.value })} />
+                <select value={sectionForm.sectionNumber}
+                  onChange={(e) => setSectionForm({ ...sectionForm, sectionNumber: e.target.value })}>
+                  <option value="">— выберите —</option>
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <option key={n} value={n}>СШ-{toRoman(n)}</option>
+                  ))}
+                </select>
               </div>
               <div className="form-group">
                 <label>Sном тр-ра, кВА</label>
@@ -1302,32 +1316,30 @@ const executeClearHistory = async () => {
 )}
 
 {/* Плавающие кнопки действий структуры (этап 3, блок В) */}
-      <div className="structure-fab-stack">
-        {user.role === 'admin' && selectedIds.length > 0 && (
-          <>
-            <button className="fab-btn fab-danger" title="Удалить выбранные" onClick={() => setShowDeleteModal(true)}>
-              <IconTrash className="ico" />
-              <span className="fab-badge">{selectedIds.length}</span>
-            </button>
-            <button className="fab-btn fab-warn" title="Очистить историю выбранных" onClick={handleClearTpHistory}>
-              <IconBroom className="ico" />
-              <span className="fab-badge">{selectedIds.length}</span>
-            </button>
-          </>
-        )}
-        {/* Появляются вместе с кнопкой «наверх» (при прокрутке). */}
-        {showScrollTop && (
-          <>
-            <button className="fab-btn fab-blue" title="Обновить структуру" disabled={loading}
-              onClick={() => { setLoading(true); loadNetworkStructure(); }}>
-              <IconRefresh className="ico" />
-            </button>
-            <button className="fab-btn fab-green" title="Выгрузка в Excel" onClick={exportStructureToExcel}>
-              <IconDownload className="ico" />
-            </button>
-          </>
-        )}
-      </div>
+      {/* Все плавающие кнопки появляются вместе с кнопкой «наверх» (при прокрутке). */}
+      {showScrollTop && (
+        <div className="structure-fab-stack">
+          {user.role === 'admin' && selectedIds.length > 0 && (
+            <>
+              <button className="fab-btn fab-danger" title="Удалить выбранные" onClick={() => setShowDeleteModal(true)}>
+                <IconTrash className="ico" />
+                <span className="fab-badge">{selectedIds.length}</span>
+              </button>
+              <button className="fab-btn fab-warn" title="Очистить историю выбранных" onClick={handleClearTpHistory}>
+                <IconBroom className="ico" />
+                <span className="fab-badge">{selectedIds.length}</span>
+              </button>
+            </>
+          )}
+          <button className="fab-btn fab-blue" title="Обновить структуру" disabled={loading}
+            onClick={() => { setLoading(true); loadNetworkStructure(); }}>
+            <IconRefresh className="ico" />
+          </button>
+          <button className="fab-btn fab-green" title="Выгрузка в Excel" onClick={exportStructureToExcel}>
+            <IconDownload className="ico" />
+          </button>
+        </div>
+      )}
 
       {showScrollTop && (
         <button
@@ -1448,31 +1460,11 @@ function FileUpload() {
   const [dragActive, setDragActive] = useState(false);
 
   const fileTypes = [
-  { 
-    id: 'rim_single', 
-    label: 'Счетчики РИМ',
-    icon: <span className="svg-frame"><IconMeter size={24} /></span>,
-    description: 'Один файл = один ПУ'
-  },
-  { 
-    id: 'nartis', 
-    label: 'Счетчики Нартис',
-    icon: <span className="svg-frame"><IconMeter size={24} /></span>,
-    description: 'Один файл = один ПУ'
-  },
-  {
-    id: 'energomera',
-    label: 'Счетчики Энергомера',
-    icon: <span className="svg-frame"><IconMeter size={24} /></span>,
-    description: 'Один файл = один ПУ'
-  },
-  {
-    id: 'profile',
-    label: 'Профиль мощности (Пирамида)',
-    icon: <span className="svg-frame"><IconChart size={24} /></span>,
-    description: 'Матчинг по ПУ техучёта секций'
-  }
-];
+    { id: 'rim_single', label: 'РИМ', description: 'журнал напряжения' },
+    { id: 'nartis', label: 'Нартис', description: 'журнал напряжения' },
+    { id: 'energomera', label: 'Энергомера', description: 'журнал напряжения' },
+    { id: 'profile', label: 'Профиль мощности', description: 'Пирамида сети' }
+  ];
 
   const handleFileSelect = (e) => {
     setFiles(Array.from(e.target.files));
@@ -1674,48 +1666,30 @@ for (let i = 0; i < files.length; i++) {
 
   return (
     <div className="file-upload-container">
-      <div className="upload-header">
+      {/* Предупреждение — красный светящийся контур */}
+      <div className="upload-warning">
+        <span className="upload-warning-ico"><IconAlertTriangle size={20} /></span>
+        <span>Имя файла должно совпадать с номером ПУ</span>
+      </div>
+
+      {/* Заголовок — по левому краю, вместе с SVG-логотипом */}
+      <div className="upload-header left">
         <h2><span className="svg-frame"><IconUpload size={24} /></span> Загрузка файлов для анализа</h2>
         <p className="upload-subtitle">Загружайте Excel файлы с данными счетчиков для автоматической проверки</p>
       </div>
 
-      {/* Информационная панель */}
-      <div className="upload-info-panel">
-        <div className="info-card">
-  <div className="info-icon">
-    <span className="svg-frame"><IconMapPin size={24} /></span>
-  </div>
-  <div className="info-content">
-    <h4>Текущий РЭС</h4>
-    <p>{user.resName || 'Ваш РЭС'}</p>
-  </div>
-</div>
-        <div className="info-card">
-  <div className="info-icon">
-    <span className="svg-frame"><IconAlertTriangle size={24} /></span>
-  </div>
-  <div className="info-content">
-    <h4>ВАЖНО!!!</h4>
-    <p>Имя файла должно совпадать с номером ПУ</p>
-  </div>
-</div>
-      </div>
-
-      {/* Выбор типа файла */}
+      {/* Выбор типа загрузки */}
       <div className="file-type-selection">
-        <h3>1. Выберите тип счетчика</h3>
+        <h3>Тип загрузки</h3>
         <div className="file-types-grid">
           {fileTypes.map(type => (
-            <div 
+            <div
               key={type.id}
               className={`file-type-card ${selectedType === type.id ? 'selected' : ''}`}
               onClick={() => setSelectedType(type.id)}
             >
-              <div className="type-icon">{type.icon}</div>
-              <div className="type-info">
-                <h4>{type.label}</h4>
-                <p>{type.description}</p>
-              </div>
+              <h4 className="ft-label">{type.label}</h4>
+              <p className="ft-sub">{type.description}</p>
             </div>
           ))}
         </div>
@@ -1724,7 +1698,7 @@ for (let i = 0; i < files.length; i++) {
       {/* Зона загрузки файлов */}
       {selectedType && (
         <div className="file-drop-section">
-          <h3>2. Загрузите файлы</h3>
+          <h3>Загрузите файл</h3>
           <div 
             className={`drop-zone ${dragActive ? 'drag-active' : ''} ${files.length > 0 ? 'has-files' : ''}`}
             onDragEnter={handleDrag}
@@ -2478,7 +2452,7 @@ const loadNotifications = useCallback(async () => {
                   </div>
                   <div className="notification-main-info">
                     <div className="notification-location">
-                      <span className="label">ТП:</span> {data.tpName} · <strong>СШ-{data.sectionNumber}</strong>
+                      <span className="label">ТП:</span> {data.tpName} · <strong>СШ-{toRoman(data.sectionNumber)}</strong>
                     </div>
                     <div className="notification-pu">
                       пик <strong>{f1(data.peakKw)} кВт</strong> при лимите <strong>{f1(data.limitKw)} кВт</strong>
@@ -2615,7 +2589,7 @@ const loadNotifications = useCallback(async () => {
                 return (
                   <div className="askue-details-content">
                     <h4><IconAlertTriangle className="ico" style={{ color: 'var(--red)' }} /> Превышение номинальной мощности</h4>
-                    <div className="detail-row"><strong>ТП:</strong> {d.tpName} · СШ-{d.sectionNumber}</div>
+                    <div className="detail-row"><strong>ТП:</strong> {d.tpName} · СШ-{toRoman(d.sectionNumber)}</div>
                     <div className="detail-row"><strong>ПУ техучёта:</strong> {d.techPuNumber || '—'}</div>
                     <div className="detail-row"><strong>Пик:</strong> {f1(d.peakKw)} кВт{d.peakAt ? ` (${d.peakAt})` : ''}</div>
                     <div className="detail-row"><strong>Лимит:</strong> {f1(d.limitKw)} кВт {ratioPct != null ? `(${ratioPct}% от лимита)` : ''}</div>
@@ -3205,7 +3179,7 @@ function Reports() {
                   <tr key={idx}>
                     <td>{item.resName}</td>
                     <td>{item.tpName}</td>
-                    <td>СШ-{item.sectionNumber}</td>
+                    <td>СШ-{toRoman(item.sectionNumber)}</td>
                     <td>{item.tnKva}</td>
                     <td>{item.cosPhi}</td>
                     <td>{item.limitKw}</td>
@@ -3533,7 +3507,7 @@ function PowerOverload({ selectedRes }) {
                     <span className={`status-box ${indClass}`}></span>
                   </div>
                   <div className="notification-narrow-info">
-                    <div className="notification-tp">{s.tpName} · СШ-{s.sectionNumber}
+                    <div className="notification-tp">{s.tpName} · СШ-{toRoman(s.sectionNumber)}
                       {c.cycles > 1 && <span className="po-cycle-badge">повтор {c.cycles}</span>}
                     </div>
                     <div className="notification-narrow-details">
@@ -3571,7 +3545,7 @@ function PowerOverload({ selectedRes }) {
           <div className="modal-backdrop" onClick={() => setDetailsCase(null)}>
             <div className="modal-content po-details-modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
-                <h3>{s.tpName} · СШ-{s.sectionNumber}</h3>
+                <h3>{s.tpName} · СШ-{toRoman(s.sectionNumber)}</h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span className={`tech-pill ${status.cls}`}>{status.t}</span>
                   <button className="close-btn" onClick={() => setDetailsCase(null)}><IconX className="ico" /></button>
@@ -3656,7 +3630,7 @@ function PowerOverload({ selectedRes }) {
               </div>
               <div className="modal-body">
                 <div className="modal-info">
-                  <p><strong>ТП:</strong> {s.tpName} · СШ-{s.sectionNumber}</p>
+                  <p><strong>ТП:</strong> {s.tpName} · СШ-{toRoman(s.sectionNumber)}</p>
                   <p><strong>Пик:</strong> {f1(actionModal.c.peakKw)} кВт · лимит {f1(actionModal.c.limitKw)} кВт</p>
                 </div>
                 <div className="form-group">
@@ -7035,7 +7009,7 @@ function Analytics() {
                 <tr key={idx}>
                   <td>{r.resName}</td>
                   <td>{r.tpName}</td>
-                  <td>СШ-{r.sectionNumber}</td>
+                  <td>СШ-{toRoman(r.sectionNumber)}</td>
                   <td>{r.tnKva}</td>
                   <td>{r.limitKw}</td>
                   <td style={{ color: 'var(--red)', fontWeight: 700 }}>{r.lastPeakKw ?? '—'}</td>
