@@ -628,25 +628,25 @@ const executeClearHistory = async () => {
       );
     }
     
+    // Всегда рендерим ровно один квадрат + строку номера фиксированной высоты,
+    // чтобы во всех строках было ровно 3 квадрата в идеальных вертикальных колонках.
     return (
-      <div 
+      <div
         className="pu-cell"
         onDoubleClick={() => startEdit(item, position)}
         title={user.role === 'admin' ? 'Двойной клик для редактирования' : ''}
       >
         {puNumber ? (
-          <>
-            <div 
-              className={`status-box ${getStatusColor(
-                item.PuStatuses?.find(s => s.puNumber === puNumber && s.position === position)?.status || 'not_checked'
-              )}`}
-              onClick={() => handleCellClick(item, position)}
-            />
-            <span className="pu-number">{puNumber}</span>
-          </>
+          <div
+            className={`status-box ${getStatusColor(
+              item.PuStatuses?.find(s => s.puNumber === puNumber && s.position === position)?.status || 'not_checked'
+            )}`}
+            onClick={() => handleCellClick(item, position)}
+          />
         ) : (
           <div className="status-box status-empty">X</div>
         )}
+        <span className="pu-number pu-num-line" title={puNumber || ''}>{puNumber || ''}</span>
       </div>
     );
   };
@@ -844,42 +844,60 @@ const executeClearHistory = async () => {
           const overloadClass = (st) =>
             st === 'ok' ? 'status-ok' : st === 'overload' ? 'status-error' : 'status-unchecked';
 
-          // Строка одной ВЛ: чекбокс (admin) + название + начало/середина/конец.
+          // Строка одной ВЛ в единой сетке net-grid: [чекбокс][наименование]
+          // [начало][середина][конец][селект секции][действия]. Колонки фиксированы
+          // → квадраты всех строк совпадают по вертикали.
           const renderVlRow = (item, showSectionSelect) => {
             const tpSections = sections.filter(s => s.tpName === item.tpName);
             return (
-              <div key={item.id} className={`vl-row ${selectedIds.includes(item.id) ? 'selected' : ''}`}>
-                {user.role === 'admin' && (
-                  <input
-                    type="checkbox"
-                    className="vl-check"
-                    checked={selectedIds.includes(item.id)}
-                    onChange={() => handleSelectRow(item.id)}
-                  />
-                )}
-                <span className="vl-name">{item.vlName}</span>
-                <div className="vl-cells">
-                  {renderPuCell(item, 'start')}
-                  {renderPuCell(item, 'middle')}
-                  {renderPuCell(item, 'end')}
+              <div key={item.id} className={`net-grid vl-row ${selectedIds.includes(item.id) ? 'selected' : ''}`}>
+                <div className="col-check">
+                  {user.role === 'admin' && (
+                    <input
+                      type="checkbox"
+                      className="vl-check"
+                      checked={selectedIds.includes(item.id)}
+                      onChange={() => handleSelectRow(item.id)}
+                    />
+                  )}
                 </div>
-                {showSectionSelect && user.role === 'admin' && (
-                  <select
-                    className="vl-section-select"
-                    value=""
-                    onChange={(e) => assignSection(item, e.target.value)}
-                    disabled={tpSections.length === 0}
-                    title={tpSections.length === 0 ? 'Сначала добавьте секцию этой ТП' : 'Привязать к секции'}
-                  >
-                    <option value="">Секция…</option>
-                    {tpSections.map(s => (
-                      <option key={s.id} value={s.id}>СШ-{s.sectionNumber}</option>
-                    ))}
-                  </select>
-                )}
+                <span className="vl-name" title={item.vlName}>{item.vlName}</span>
+                {renderPuCell(item, 'start')}
+                {renderPuCell(item, 'middle')}
+                {renderPuCell(item, 'end')}
+                <div className="col-section">
+                  {showSectionSelect && user.role === 'admin' && (
+                    <select
+                      className="vl-section-select"
+                      value=""
+                      onChange={(e) => assignSection(item, e.target.value)}
+                      disabled={tpSections.length === 0}
+                      title={tpSections.length === 0 ? 'Сначала добавьте секцию этой ТП' : 'Привязать к секции'}
+                    >
+                      <option value="">Секция…</option>
+                      {tpSections.map(s => (
+                        <option key={s.id} value={s.id}>СШ-{s.sectionNumber}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div className="col-actions"></div>
               </div>
             );
           };
+
+          // Строка-заголовок колонок ПУ (подписи Начало/Середина/Конец).
+          const colHeader = (nameCol, actionsCol) => (
+            <div className="net-grid net-grid-head">
+              <div className="col-check"></div>
+              <div className="vl-name section-title-cell">{nameCol}</div>
+              <div className="pu-col-label">Начало</div>
+              <div className="pu-col-label">Середина</div>
+              <div className="pu-col-label">Конец</div>
+              <div className="col-section"></div>
+              <div className="col-actions">{actionsCol}</div>
+            </div>
+          );
 
           return uniqueTps.map(tp => {
             const tpItems = filteredData.filter(i => i.tpName === tp);
@@ -915,26 +933,29 @@ const executeClearHistory = async () => {
                     if (!isNaN(d.getTime())) peakParts.push(d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
                   }
                   if (limitKw != null) peakParts.push(`лимит ${fmt1(limitKw)} кВт`);
+                  const sectionNameCol = (
+                    <span className="section-title-inline">
+                      <span className={`status-box status-box--sm ${overloadClass(section.overloadStatus)}`}
+                            title="Индикатор техучёта (перегруз)"></span>
+                      <span className="section-title">{parts.join(' · ')}</span>
+                      {peakParts.length > 0 && (
+                        <span className="section-peak muted">{peakParts.join(' · ')}</span>
+                      )}
+                    </span>
+                  );
+                  const sectionActions = user.role === 'admin' ? (
+                    <>
+                      <button className="link-btn" onClick={() => openSectionModal(tp, resId, section)}>
+                        <IconEdit className="ico" />
+                      </button>
+                      <button className="link-btn" onClick={() => deleteSection(section)}>
+                        <IconTrash className="ico" style={{ color: 'var(--red)' }} />
+                      </button>
+                    </>
+                  ) : null;
                   return (
                     <div key={section.id} className="section-block">
-                      <div className="section-head">
-                        <span className={`status-box ${overloadClass(section.overloadStatus)}`}
-                              title="Индикатор техучёта (перегруз)"></span>
-                        <span className="section-title">{parts.join(' · ')}</span>
-                        {peakParts.length > 0 && (
-                          <span className="section-peak muted">{peakParts.join(' · ')}</span>
-                        )}
-                        {user.role === 'admin' && (
-                          <span className="section-actions">
-                            <button className="link-btn" onClick={() => openSectionModal(tp, resId, section)}>
-                              <IconEdit className="ico" />
-                            </button>
-                            <button className="link-btn" onClick={() => deleteSection(section)}>
-                              <IconTrash className="ico" style={{ color: 'var(--red)' }} />
-                            </button>
-                          </span>
-                        )}
-                      </div>
+                      {colHeader(sectionNameCol, sectionActions)}
                       <div className="section-lines">
                         {lines.length === 0
                           ? <div className="section-empty">Нет привязанных ВЛ</div>
@@ -947,9 +968,7 @@ const executeClearHistory = async () => {
                 {/* ВЛ без секции */}
                 {unassigned.length > 0 && (
                   <div className="section-block section-block--none">
-                    <div className="section-head">
-                      <span className="section-title muted">ВЛ без секции ({unassigned.length})</span>
-                    </div>
+                    {colHeader(<span className="section-title muted">ВЛ без секции ({unassigned.length})</span>, null)}
                     <div className="section-lines">
                       {unassigned.map(item => renderVlRow(item, true))}
                     </div>
