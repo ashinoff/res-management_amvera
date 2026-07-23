@@ -340,17 +340,24 @@ function NetworkStructure() {
   };
 
   // Привязка/отвязка ВЛ к секции
-  const assignSection = async (item, sectionId) => {
+  // Привязка/перепривязка/отвязка ВЛ к секции. Оптимистично двигаем ВЛ между
+  // группами локально (без перезагрузки), при ошибке — откат + сообщение.
+  const assignSection = async (item, rawSectionId) => {
+    const newSectionId = (rawSectionId === '' || rawSectionId == null) ? null : parseInt(rawSectionId, 10);
+    const prev = item.sectionId ?? null;
+    if (newSectionId === prev) return;
+
+    setNetworkData(data => data.map(d => d.id === item.id ? { ...d, sectionId: newSectionId } : d));
     try {
       await api.put(`/api/network/structure/${item.id}`, {
         startPu: item.startPu,
         middlePu: item.middlePu,
         endPu: item.endPu,
-        sectionId: sectionId || null
+        sectionId: newSectionId
       });
-      await loadNetworkStructure();
-      await loadSections();
     } catch (error) {
+      // Откат локального перемещения.
+      setNetworkData(data => data.map(d => d.id === item.id ? { ...d, sectionId: prev } : d));
       alert('Ошибка: ' + (error.response?.data?.error || error.message));
     }
   };
@@ -866,15 +873,18 @@ const executeClearHistory = async () => {
                 {renderPuCell(item, 'middle')}
                 {renderPuCell(item, 'end')}
                 <div className="col-section">
-                  {showSectionSelect && user.role === 'admin' && (
+                  {user.role === 'admin' && (
                     <select
                       className="vl-section-select"
-                      value=""
-                      onChange={(e) => assignSection(item, e.target.value)}
+                      value={item.sectionId ?? ''}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => { e.stopPropagation(); assignSection(item, e.target.value); }}
                       disabled={tpSections.length === 0}
-                      title={tpSections.length === 0 ? 'Сначала добавьте секцию этой ТП' : 'Привязать к секции'}
+                      title={tpSections.length === 0 ? 'Сначала добавьте секцию этой ТП' : 'Секция ВЛ'}
                     >
-                      <option value="">Секция…</option>
+                      {/* value="" — плейсхолдер «Секция…» у непривязанной ВЛ,
+                          либо пункт «— Без секции» (отвязать) у привязанной. */}
+                      <option value="">{item.sectionId ? '— Без секции' : 'Секция…'}</option>
                       {tpSections.map(s => (
                         <option key={s.id} value={s.id}>СШ-{s.sectionNumber}</option>
                       ))}
