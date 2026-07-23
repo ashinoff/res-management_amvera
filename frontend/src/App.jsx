@@ -1098,7 +1098,10 @@ const executeClearHistory = async () => {
                 {hasData ? (
                   <>
                     <div className="tech-pmax">
-                      <div className="tech-pmax-value">Pmax {f1(s.lastPeakKw)} кВт</div>
+                      <div className="tech-pmax-value">
+                        Pmax {f1(s.lastPeakKw)} кВт
+                        {pct != null && <span className={`tech-pmax-pct ${barCls}`}>{Math.round(pct)}%</span>}
+                      </div>
                       <div className="tech-pmax-sub">
                         {s.lastPeakAt ? new Date(s.lastPeakAt).toLocaleString('ru-RU') : '—'}
                         {s.lastProfilePeriod ? ` · период ${s.lastProfilePeriod}` : ''}
@@ -3571,7 +3574,9 @@ function PowerOverload({ selectedRes }) {
               </div>
               <div className="modal-body">
                 <div className="tech-pmax">
-                  <div className="tech-pmax-value">Пик {f1(c.peakKw)} кВт</div>
+                  <div className="tech-pmax-value">Пик {f1(c.peakKw)} кВт
+                    {ratioPct != null && <span className={`tech-pmax-pct ${ratioPct > 100 ? 'red' : ratioPct >= 90 ? 'amber' : 'green'}`}>{ratioPct}%</span>}
+                  </div>
                   <div className="tech-pmax-sub">
                     лимит {f1(c.limitKw)} кВт{ratioPct != null ? ` · ${ratioPct}% от лимита` : ''}
                     {c.peakAt ? ` · ${c.peakAt}` : ''}
