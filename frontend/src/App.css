@@ -6746,3 +6746,25 @@ tr.selected:hover,
 /* Мобильная ширина: горизонтальный скролл карточки ТП, сетка не ломается. */
 .tp-card { overflow-x: auto; }
 .net-grid { min-width: 680px; }
+
+/* ===== Меню «Превышение Pном» (этап 3) ===== */
+.po-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.po-tab {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: #fff; cursor: pointer; font-size: 13px;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.po-tab:hover { border-color: var(--navy); background: var(--surface-2); }
+.po-tab.active { border-color: var(--accent); background: var(--accent-soft); color: var(--navy); font-weight: 600; }
+.po-list { display: flex; flex-direction: column; gap: 10px; }
+.po-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+.po-card-main { min-width: 0; }
+.po-card-title { font-weight: 600; font-size: 14px; }
+.po-card-stage { font-size: 12.5px; margin-top: 2px; }
+.po-card-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.po-cycle-badge {
+  margin-left: 8px; font-size: 11px; font-weight: 600; color: var(--red);
+  background: var(--red-bg, #fdeaea); border-radius: 10px; padding: 1px 8px;
+}
+.po-plaque { font-size: 12.5px; color: var(--text-muted); }
+.po-attachments { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }

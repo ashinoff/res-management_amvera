@@ -334,6 +334,17 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-23** — ЭТАП 3, Блок Б (App.jsx): меню «Превышение Pном» (иконка
+  IconZap, роли admin/res_responsible, бейдж `counts.powerOverload`) между
+  «Проблемные ВЛ» и «Загруженные документы»; роут `case 'power_overload'` →
+  `<PowerOverload>`. Компонент: вкладки Активные/Завершённые, карточки в стиле
+  `.notification-compact.problem-card` (клик=детали-модалка с хронологией
+  АСКУЭ/РЭС/фото/перепроверка); действия по роли/этапу — admin+askue_limit →
+  «Ограничение по АСКУЭ выполнено» (комментарий необязателен), res_responsible+
+  res_work → «Мероприятия выполнены» (модалка комментарий≥5 слов + фото,
+  multipart на `/api/overload/:id/res-complete`), awaiting_recheck → плашка
+  «Ожидает перепроверки». Бейдж цикла «повтор N» при cycles>1. CSS `.po-*` без
+  анимаций. `npm run build` — ОК. Блоки В/Г — следующими.
 - **2026-07-23** — ЭТАП 3, Блок А (server.js): workflow перегруза. Модель
   **`OverloadCase`** (sectionId FK, resId FK, stage askue_limit/res_work/
   awaiting_recheck/completed, cycles, снимок peakKw/peakAt/tnKva/cosPhi/limitKw/
