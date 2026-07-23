@@ -195,60 +195,69 @@ body {
   border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 
-/* Заголовок сайдбара «Мониторинг напряжения» + осциллограмма-индикатор */
+/* Заголовок сайдбара «Мониторинг напряжения»: логотип + текст, глубокая синусоида
+   за текстом; электрический «пробег» со свечением по каждому обновлению counts. */
 .monitor-head {
+  position: relative;
   margin-bottom: 28px;
   padding-bottom: 16px;
   border-bottom: 1px solid rgba(255,255,255,0.1);
 }
-.monitor-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  text-align: center;
-  line-height: 1.15;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.osc {
-  display: block;
+/* Синусоида-фон — строго за текстом заголовка. */
+.osc-bg {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  bottom: 16px;
   width: 100%;
-  height: 14px;
-  margin-top: 10px;
+  height: calc(100% - 16px);
+  z-index: 0;
   color: var(--green);
   transition: color 0.12s;
+  pointer-events: none;
 }
-.osc.danger { color: var(--red); }
-.osc-line {
+.osc-bg.danger { color: var(--red); }
+/* Базовая волна — приглушённая, чтобы читалась «за» надписью. */
+.osc-base {
   stroke: currentColor;
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  transition: stroke 0.12s;
+  opacity: 0.14;
 }
-/* 1) Прочерчивание слева направо при монтировании — один раз, без infinite. */
-.osc-draw {
-  stroke-dasharray: 1;
+/* Электрический пробег: яркая короткая дуга со свечением, конечная анимация; */
+/* повторный запуск — re-mount по key (sweepTick). */
+.osc-spark {
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 0.16 1;
   stroke-dashoffset: 1;
-  animation: osc-draw 0.9s ease-out forwards;
+  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 7px currentColor);
+  animation: osc-spark 0.95s ease-out forwards;
 }
-@keyframes osc-draw { to { stroke-dashoffset: 0; } }
-/* 2) «Пробег» блика по линии на каждый успешный полл — конечная анимация, */
-/*    повторный запуск через re-mount по key (sweepTick). */
-.osc-sweep {
-  stroke: #e6f4ff;
-  stroke-width: 2.5;
-  stroke-dasharray: 0.14 1;
-  stroke-dashoffset: 1;
-  animation: osc-sweep 0.8s linear forwards;
+@keyframes osc-spark {
+  0%   { stroke-dashoffset: 1;     opacity: 0; }
+  12%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { stroke-dashoffset: -0.16; opacity: 0; }
 }
-@keyframes osc-sweep {
-  from { stroke-dashoffset: 1; opacity: 0.9; }
-  to   { stroke-dashoffset: -0.14; opacity: 0; }
+/* Текст заголовка — поверх синусоиды. */
+.monitor-title {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
+.monitor-logo svg { display: block; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35)); }
+.monitor-text { display: flex; flex-direction: column; line-height: 1.05; }
+.monitor-text .mt-1 { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; color: #fff; }
+.monitor-text .mt-2 { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; color: #a9bcd4; }
 @media (prefers-reduced-motion: reduce) {
-  .osc-draw { animation: none; stroke-dashoffset: 0; }
-  .osc-sweep { display: none; }
+  .osc-spark { display: none; }
+  .osc-base { opacity: 0.26; }
 }
 
 .main-menu button {

@@ -142,9 +142,9 @@ function LoginForm({ onLogin }) {
 // ГЛАВНОЕ МЕНЮ
 // =====================================================
 
-// Путь синусоиды для осциллограммы (viewBox 0 0 120 14, ~2.25 периода). Считается один раз.
+// Глубокая синусоида за текстом заголовка (viewBox 0 0 120 44, 3 периода). Один раз.
 const OSC_PATH = (() => {
-  const w = 120, mid = 7, amp = 4.5, periods = 2.25, n = 64;
+  const w = 120, mid = 22, amp = 15, periods = 3, n = 96;
   let d = '';
   for (let i = 0; i <= n; i++) {
     const x = (w * i / n).toFixed(2);
@@ -153,6 +153,23 @@ const OSC_PATH = (() => {
   }
   return d.trim();
 })();
+
+// Логотип «Мониторинг напряжения» с платформы (ResmTile: зелёно-бирюзовая плитка,
+// белая «пульс»-линия). Инлайн-SVG.
+const RESM_LOGO = (
+  <svg viewBox="0 0 512 512" width="34" height="34" aria-hidden="true">
+    <defs>
+      <linearGradient id="resmGradSb" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stopColor="#22c55e" />
+        <stop offset="1" stopColor="#0e7490" />
+      </linearGradient>
+    </defs>
+    <rect width="512" height="512" rx="112" fill="url(#resmGradSb)" />
+    <g transform="translate(88 88) scale(14)" fill="none" stroke="#fff" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    </g>
+  </svg>
+);
 
 function MainMenu({ activeSection, onSectionChange, userRole }) {
   const [notificationCounts, setNotificationCounts] = useState({
@@ -225,14 +242,20 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
   return (
     <nav className="main-menu">
       <div className="monitor-head">
-        <h3 className="monitor-title">Мониторинг<br />напряжения</h3>
-        <svg className={`osc ${oscDanger ? 'danger' : 'ok'}`} viewBox="0 0 120 14"
+        <svg className={`osc-bg ${oscDanger ? 'danger' : 'ok'}`} viewBox="0 0 120 44"
              preserveAspectRatio="none" aria-hidden="true">
-          <path className="osc-line osc-draw" d={OSC_PATH} fill="none" pathLength="1" />
+          <path className="osc-base" d={OSC_PATH} fill="none" pathLength="1" />
           {sweepTick > 0 && (
-            <path key={sweepTick} className="osc-line osc-sweep" d={OSC_PATH} fill="none" pathLength="1" />
+            <path key={sweepTick} className="osc-spark" d={OSC_PATH} fill="none" pathLength="1" />
           )}
         </svg>
+        <div className="monitor-title">
+          <span className="monitor-logo">{RESM_LOGO}</span>
+          <span className="monitor-text">
+            <span className="mt-1">МОНИТОРИНГ</span>
+            <span className="mt-2">напряжения</span>
+          </span>
+        </div>
       </div>
       {visibleItems.map(item => (
         <button
