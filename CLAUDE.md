@@ -334,6 +334,15 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-23** — ЭТАП 3, Блок В (App.jsx/App.css): плавающие кнопки экрана
+  «Структура сети». Вертикальный стек круглых SVG-кнопок (`.structure-fab-stack`,
+  fixed справа, над кружком «наверх», gap 10px, 50px): всегда «Выгрузка в Excel»
+  (`exportStructureToExcel`, IconDownload) и «Обновить структуру»
+  (`loadNetworkStructure`, IconRefresh); при выбранных чекбоксах (admin) — «Очистить
+  историю» (IconBroom, `handleClearTpHistory`) и «Удалить выбранные» (IconTrash,
+  `setShowDeleteModal`) с бейджем-счётчиком (`.fab-badge`). Те же обработчики, что
+  у верхней панели (её не трогал). title-hover, transition только адресные, без
+  infinite. `npm run build` — ОК. Блок Г — следующий.
 - **2026-07-23** — ЭТАП 3, Блок Б (App.jsx): меню «Превышение Pном» (иконка
   IconZap, роли admin/res_responsible, бейдж `counts.powerOverload`) между
   «Проблемные ВЛ» и «Загруженные документы»; роут `case 'power_overload'` →

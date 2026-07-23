@@ -1140,9 +1140,31 @@ const executeClearHistory = async () => {
   </div>
 )}
 
-{/* ДОБАВЬ КНОПКУ СЮДА: */}
+{/* Плавающие кнопки действий структуры (этап 3, блок В) */}
+      <div className="structure-fab-stack">
+        {user.role === 'admin' && selectedIds.length > 0 && (
+          <>
+            <button className="fab-btn fab-danger" title="Удалить выбранные" onClick={() => setShowDeleteModal(true)}>
+              <IconTrash className="ico" />
+              <span className="fab-badge">{selectedIds.length}</span>
+            </button>
+            <button className="fab-btn" title="Очистить историю выбранных" onClick={handleClearTpHistory}>
+              <IconBroom className="ico" />
+              <span className="fab-badge">{selectedIds.length}</span>
+            </button>
+          </>
+        )}
+        <button className="fab-btn" title="Обновить структуру" disabled={loading}
+          onClick={() => { setLoading(true); loadNetworkStructure(); }}>
+          <IconRefresh className="ico" />
+        </button>
+        <button className="fab-btn" title="Выгрузка в Excel" onClick={exportStructureToExcel}>
+          <IconDownload className="ico" />
+        </button>
+      </div>
+
       {showScrollTop && (
-        <button 
+        <button
     className="scroll-to-top"
     onClick={() => {
       const contentElement = document.querySelector('.content');

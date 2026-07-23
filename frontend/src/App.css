@@ -6768,3 +6768,25 @@ tr.selected:hover,
 }
 .po-plaque { font-size: 12.5px; color: var(--text-muted); }
 .po-attachments { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+
+/* ===== Плавающие кнопки структуры сети (этап 3, блок В) ===== */
+.structure-fab-stack {
+  position: fixed; right: 30px; bottom: 90px; z-index: 1000;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.fab-btn {
+  position: relative; width: 50px; height: 50px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--navy); color: #fff;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background .12s, opacity .12s, border-color .12s;
+}
+.fab-btn:hover { background: var(--accent); }
+.fab-btn:disabled { opacity: .5; cursor: default; }
+.fab-btn.fab-danger { background: var(--red); }
+.fab-btn.fab-danger:hover { background: #b91c1c; }
+.fab-badge {
+  position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 9px; background: var(--amber, #e08a00); color: #fff;
+  font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+}
