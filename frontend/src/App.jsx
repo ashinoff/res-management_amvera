@@ -224,8 +224,10 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
 // КОМПОНЕНТ СТРУКТУРЫ СЕТИ
 // =====================================================
 
-function NetworkStructure() {
+function NetworkStructure({ onSectionChange } = {}) {
   const [networkData, setNetworkData] = useState([]);
+  const [techModal, setTechModal] = useState(null); // секция для «Сведения о техучёте»
+  const [techCase, setTechCase] = useState(null);   // активный кейс секции (если есть)
   const [loading, setLoading] = useState(true);
   const [searchTp, setSearchTp] = useState('');
   const { user, selectedRes } = useContext(AuthContext);
@@ -361,6 +363,17 @@ function NetworkStructure() {
       setNetworkData(data => data.map(d => d.id === item.id ? { ...d, sectionId: prev } : d));
       alert('Ошибка: ' + (error.response?.data?.error || error.message));
     }
+  };
+
+  // Клик по квадрату техучёта секции → модалка сведений + подтягиваем активный кейс.
+  const openTechModal = async (section) => {
+    setTechModal(section);
+    setTechCase(null);
+    try {
+      const { data } = await api.get('/api/overload', { params: { resId: section.resId } });
+      const active = (data || []).find(c => c.sectionId === section.id && c.stage !== 'completed');
+      if (active) setTechCase(active);
+    } catch (e) { /* без кейса — не критично */ }
   };
 
   useEffect(() => {
@@ -947,7 +960,9 @@ const executeClearHistory = async () => {
                   const sectionNameCol = (
                     <span className="section-title-inline">
                       <span className={`status-box status-box--sm ${overloadClass(section.overloadStatus)}`}
-                            title="Индикатор техучёта (перегруз)"></span>
+                            style={{ cursor: 'pointer' }}
+                            title="Сведения о техучёте"
+                            onClick={(e) => { e.stopPropagation(); openTechModal(section); }}></span>
                       <span className="section-title">{parts.join(' · ')}</span>
                       {peakParts.length > 0 && (
                         <span className="section-peak muted">{peakParts.join(' · ')}</span>
@@ -990,6 +1005,64 @@ const executeClearHistory = async () => {
           });
         })()}
       </div>
+
+      {/* Сведения о техучёте секции */}
+      {techModal && (() => {
+        const s = techModal;
+        const cosPhi = s.cosPhi != null ? s.cosPhi : 0.9;
+        const limitKw = s.tnKva != null ? s.tnKva * cosPhi : null;
+        const f1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
+        const statusLabel = s.overloadStatus === 'overload'
+          ? { t: 'Перегруз', c: 'var(--red)' }
+          : s.overloadStatus === 'ok'
+          ? { t: 'Норма', c: 'var(--green)' }
+          : { t: 'Нет данных', c: 'var(--text-muted)' };
+        const STAGE_RU = { askue_limit: 'Ограничение по АСКУЭ', res_work: 'Мероприятия РЭС', awaiting_recheck: 'Ожидает перепроверки' };
+        return (
+          <div className="modal-backdrop" onClick={() => setTechModal(null)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>{s.tpName} · СШ-{s.sectionNumber}</h3>
+                <button className="close-btn" onClick={() => setTechModal(null)}><IconX className="ico" /></button>
+              </div>
+              <div className="modal-body">
+                <div className="detail-row"><strong>№ ПУ техучёта:</strong> {s.techPuNumber || '—'}</div>
+                <div className="detail-row"><strong>Sном тр-ра:</strong> {s.tnKva != null ? `${s.tnKva} кВА` : '—'}</div>
+                <div className="detail-row"><strong>cosφ:</strong> {cosPhi}</div>
+                <div className="detail-row"><strong>Лимит:</strong> {f1(limitKw)} кВт</div>
+                <div className="detail-row"><strong>Статус:</strong> <span style={{ color: statusLabel.c, fontWeight: 600 }}>{statusLabel.t}</span></div>
+                {s.lastPeakKw != null ? (
+                  <>
+                    <div className="highlight-box">
+                      <strong>Pmax:</strong> {f1(s.lastPeakKw)} кВт
+                      {s.lastPeakAt ? ` от ${new Date(s.lastPeakAt).toLocaleString('ru-RU')}` : ''}
+                    </div>
+                    {s.lastProfilePeriod && <div className="detail-row"><strong>Период выгрузки:</strong> {s.lastProfilePeriod}</div>}
+                  </>
+                ) : (
+                  <div className="detail-row muted">Профиль мощности не загружался</div>
+                )}
+                {techCase && (
+                  <div className="highlight-box">
+                    <strong>Случай перегруза:</strong> {STAGE_RU[techCase.stage] || techCase.stage}
+                    {typeof onSectionChange === 'function' && (
+                      <div style={{ marginTop: 6 }}>
+                        <button className="link-btn" style={{ color: 'var(--accent)', textDecoration: 'underline' }}
+                          onClick={() => { setTechModal(null); onSectionChange('power_overload'); }}>
+                          Перейти в «Превышение Pном»
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button className="action-btn" onClick={() => setTechModal(null)}>Закрыть</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Форма секции шин ТП */}
       {sectionModal && (
@@ -1352,6 +1425,7 @@ function FileUpload() {
     let sectionsUpdated = 0, overloadCount = 0;
     const unmatched = [];
     const fileErrors = [];
+    const details = [];
     for (let i = 0; i < files.length; i++) {
       setUploadProgress({ current: i + 1, total: files.length });
       const formData = new FormData();
@@ -1364,6 +1438,7 @@ function FileUpload() {
         sectionsUpdated += response.data.sectionsUpdated || 0;
         overloadCount += response.data.overloadCount || 0;
         (response.data.unmatched || []).forEach(pu => unmatched.push(pu));
+        (response.data.details || []).forEach(d => details.push(d));
       } catch (error) {
         fileErrors.push({ fileName: files[i].name, error: error.response?.data?.error || 'Ошибка загрузки' });
       }
@@ -1373,6 +1448,7 @@ function FileUpload() {
       sectionsUpdated,
       overloadCount,
       unmatched,
+      details,
       errors: fileErrors
     });
     setFiles([]);
@@ -1651,6 +1727,43 @@ for (let i = 0; i < files.length; i++) {
             <div style={{ color: 'var(--red)', marginTop: 8 }}>
               {uploadResult.errors.map((e, i) => <div key={i}>{e.fileName}: {e.error}</div>)}
             </div>
+          )}
+
+          {uploadResult.details && uploadResult.details.length > 0 && (
+            <details className="profile-details">
+              <summary>Детали расчёта ({uploadResult.details.length})</summary>
+              <div className="scroll" style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th>ПУ</th><th>Секция</th><th>peakRaw</th><th>Кт</th><th>peakKw</th>
+                      <th>Дата пика</th><th>Sном</th><th>cosφ</th><th>Лимит</th><th>Решение</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {uploadResult.details.map((d, i) => {
+                      const f1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
+                      const cls = d.decision === 'overload' ? 'var(--red)' : d.decision === 'ok' ? 'var(--green)' : 'var(--text-muted)';
+                      const RU = { overload: 'Перегруз', ok: 'Норма', unknown: 'Нет Sном', not_matched: 'Не сопоставлен' };
+                      return (
+                        <tr key={i}>
+                          <td>{d.puNumber}</td>
+                          <td>{d.tpSection || '—'}</td>
+                          <td>{f1(d.peakRaw)}</td>
+                          <td>{d.kt ?? '—'}</td>
+                          <td><strong>{f1(d.peakKw)}</strong></td>
+                          <td>{d.peakAt || '—'}</td>
+                          <td>{d.tnKva != null ? f1(d.tnKva) : '—'}</td>
+                          <td>{d.cosPhi != null ? d.cosPhi : '—'}</td>
+                          <td>{f1(d.limitKw)}</td>
+                          <td style={{ color: cls, fontWeight: 600 }}>{RU[d.decision] || d.decision}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           )}
         </div>
       )}
@@ -7505,7 +7618,7 @@ export default function App() {
 const renderContent = () => {
   switch (activeSection) {
     case 'structure':
-      return <NetworkStructure />;
+      return <NetworkStructure onSectionChange={setActiveSection} />;
     case 'upload':
       return <FileUpload />;
     case 'tech_pending':

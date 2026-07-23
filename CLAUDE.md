@@ -334,6 +334,25 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-23** — Фикс профиля: перегруз не выявлялся при заниженном Sном.
+  ГЛАВНЫЙ БАГ (b): openpyxl отдаёт номера ПУ как float → `str()` давал
+  «1294249.0», не матчилось с techPuNumber «1294249» → секция не обновлялась,
+  overload не срабатывал. Анализатор: `_pu_str` нормализует номер (int/float→
+  без «.0»), matched-нормализация и на сервере (`normPu`, обе стороны). (a)
+  Подтверждено: анализатор умножает peakKw=peakRaw×Кт один раз, сервер сравнивает
+  и пишет `lastPeakKw` по peakKw (не peakRaw) — двойного/нулевого умножения нет.
+  (c) Секции POST/PUT принимают запятую (`parseFloat(replace(',','.'))`) +
+  `Number.isFinite` (иначе tnKva→null, cosPhi→0.9); в анализе `hasLimit` требует
+  `isFinite(tnKva)&&>0` → unknown, не 0. Диагностика (штатная): ответ
+  `/api/upload/analyze` для profile содержит `details[]` по каждому ПУ
+  {puNumber,matched,sectionId,tpSection,peakRaw,kt,peakKw,peakAt,tnKva,cosPhi,
+  limitKw,decision}; `console.log('[PROFILE]...')`; фронт — свёрнутая таблица
+  «Детали расчёта» (1 знак, decision цветом). Зелёный статус (`status-ok`)
+  теперь отображается (был скрыт из-за бага матчинга). Модалка «Сведения о
+  техучёте» по клику на квадрат секции (stopPropagation): №ПУ/Sном/cosφ/лимит,
+  Pmax+дата+период, статус цветом, активный кейс + ссылка «Перейти в Превышение
+  Pном» (проброшен `onSectionChange` в NetworkStructure). node --check,
+  py_compile, npm run build — ОК; юнит анализатора peakKw=peakRaw×200 сходится.
 - **2026-07-23** — ЭТАП 3, Блок Г (server.js/App.jsx): отчёты по перегрузу.
   Бэкенд: `GET /api/reports/overload` (все секции с заданным Sном + данные
   последнего кейса: РЭС/ТП/СШ/Sном/cosφ/лимит/пик/дата/%/статус случая/даты

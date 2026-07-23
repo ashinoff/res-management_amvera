@@ -46,6 +46,21 @@ def _num(v):
         return None
 
 
+def _pu_str(v):
+    """Номер ПУ в строку без хвоста '.0' (openpyxl отдаёт числа как float)."""
+    if v is None:
+        return ''
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    if isinstance(v, int):
+        return str(v)
+    s = str(v).strip()
+    # «1294249.0» → «1294249»
+    if s.endswith('.0') and s[:-2].isdigit():
+        s = s[:-2]
+    return s
+
+
 def _parse_kt(v):
     """«200/1» → 200.0 (Ктт×Ктн). При невозможности — 1.0."""
     if v is None:
@@ -134,7 +149,7 @@ def _read_sheet(ws):
     max_col = ws.max_column
     while col <= max_col:
         pu = ws.cell(row=PU_ROW, column=col).value
-        pu_s = str(pu).strip() if pu is not None else ''
+        pu_s = _pu_str(pu)
         if pu_s != '':
             kt = _parse_kt(ws.cell(row=KT_ROW, column=col).value)
             meta[col] = {'pu': pu_s, 'kt': kt}

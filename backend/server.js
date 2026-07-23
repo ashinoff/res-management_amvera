@@ -1310,12 +1310,16 @@ app.post('/api/network/sections',
         return res.status(400).json({ error: 'Обязательны РЭС, ТП и номер секции' });
       }
 
+      // Десятичный разделитель — запятая или точка; невалид → null (Sном) / 0.9 (cosφ).
+      const pfKva = (tnKva === '' || tnKva == null) ? null : parseFloat(String(tnKva).replace(',', '.'));
+      const pfCos = (cosPhi === '' || cosPhi == null) ? 0.9 : parseFloat(String(cosPhi).replace(',', '.'));
+
       const section = await TpSection.create({
         resId,
         tpName: String(tpName).trim(),
         sectionNumber: parseInt(sectionNumber, 10),
-        tnKva: (tnKva === '' || tnKva === undefined) ? null : parseFloat(tnKva),
-        cosPhi: (cosPhi === '' || cosPhi === undefined) ? 0.9 : parseFloat(cosPhi),
+        tnKva: Number.isFinite(pfKva) ? pfKva : null,
+        cosPhi: Number.isFinite(pfCos) ? pfCos : 0.9,
         techPuNumber: techPuNumber ? String(techPuNumber).trim() : null
       });
 
@@ -1340,8 +1344,14 @@ app.put('/api/network/sections/:id',
       const { sectionNumber, tnKva, cosPhi, techPuNumber } = req.body;
       const updates = {};
       if (sectionNumber !== undefined) updates.sectionNumber = parseInt(sectionNumber, 10);
-      if (tnKva !== undefined) updates.tnKva = (tnKva === '' || tnKva === null) ? null : parseFloat(tnKva);
-      if (cosPhi !== undefined) updates.cosPhi = (cosPhi === '' || cosPhi === null) ? 0.9 : parseFloat(cosPhi);
+      if (tnKva !== undefined) {
+        const v = (tnKva === '' || tnKva === null) ? null : parseFloat(String(tnKva).replace(',', '.'));
+        updates.tnKva = Number.isFinite(v) ? v : null;
+      }
+      if (cosPhi !== undefined) {
+        const v = (cosPhi === '' || cosPhi === null) ? 0.9 : parseFloat(String(cosPhi).replace(',', '.'));
+        updates.cosPhi = Number.isFinite(v) ? v : 0.9;
+      }
       const techPuChanged = techPuNumber !== undefined &&
         (techPuNumber ? String(techPuNumber).trim() : null) !== (section.techPuNumber || null);
       if (techPuNumber !== undefined) updates.techPuNumber = techPuNumber ? String(techPuNumber).trim() : null;
@@ -1581,11 +1591,18 @@ app.post('/api/upload/analyze',
         const results = analysis.results || [];
         const analyzerWarnings = analysis.warnings || []; // ПУ без данных на обоих листах
 
-        // Индекс секций по techPuNumber (trim). Одна секция = один тех.ПУ.
+        // Нормализация номера ПУ для матчинга: строка, trim, без хвоста «.0».
+        const normPu = (v) => {
+          let s = String(v == null ? '' : v).trim();
+          if (s.endsWith('.0') && /^\d+\.0$/.test(s)) s = s.slice(0, -2);
+          return s;
+        };
+
+        // Индекс секций по techPuNumber (нормализовано). Одна секция = один тех.ПУ.
         const allSections = await TpSection.findAll({ where: { techPuNumber: { [Op.ne]: null } } });
         const sectionByTechPu = {};
         allSections.forEach(s => {
-          const key = String(s.techPuNumber || '').trim();
+          const key = normPu(s.techPuNumber);
           if (key) sectionByTechPu[key] = s;
         });
 
@@ -1593,19 +1610,40 @@ app.post('/api/upload/analyze',
         let overloadCount = 0;
         const unmatched = [];       // ПУ профиля без секции в структуре
         const overloads = [];       // сводка перегрузов
+        const details = [];         // диагностика расчёта по каждому ПУ (штатная)
 
         for (const r of results) {
-          const section = sectionByTechPu[String(r.puNumber).trim()];
-          if (!section) { unmatched.push(r.puNumber); continue; }
+          const section = sectionByTechPu[normPu(r.puNumber)];
+          if (!section) {
+            unmatched.push(r.puNumber);
+            details.push({
+              puNumber: r.puNumber, matched: false, sectionId: null, tpSection: null,
+              peakRaw: r.peakRaw, kt: r.kt, peakKw: r.peakKw, peakAt: r.peakAt,
+              tnKva: null, cosPhi: null, limitKw: null, decision: 'not_matched'
+            });
+            console.log(`[PROFILE] ПУ ${r.puNumber} peakRaw=${r.peakRaw} kt=${r.kt} peakKw=${r.peakKw} — не сопоставлен с секцией`);
+            continue;
+          }
 
-          const cosPhi = (section.cosPhi != null) ? section.cosPhi : 0.9;
-          const hasLimit = section.tnKva != null;
+          // tnKva/cosPhi: заданными считаем только конечные числа (> 0 для Sном),
+          // иначе unknown (НЕ 0). cosPhi по умолчанию 0.9 при пустом.
+          const cosPhi = Number.isFinite(section.cosPhi) ? section.cosPhi : 0.9;
+          const hasLimit = Number.isFinite(section.tnKva) && section.tnKva > 0;
           const limitKw = hasLimit ? section.tnKva * cosPhi : null;
           let overloadStatus = 'unknown';
           if (hasLimit) overloadStatus = (r.peakKw >= limitKw) ? 'overload' : 'ok';
 
           const period = r.period || analysis.period || null;
           const ratio = limitKw ? (r.peakKw / limitKw) : null;
+
+          details.push({
+            puNumber: r.puNumber, matched: true, sectionId: section.id,
+            tpSection: `${section.tpName} СШ-${section.sectionNumber}`,
+            peakRaw: r.peakRaw, kt: r.kt, peakKw: r.peakKw, peakAt: r.peakAt,
+            tnKva: hasLimit ? section.tnKva : null, cosPhi: hasLimit ? cosPhi : null,
+            limitKw, decision: overloadStatus
+          });
+          console.log(`[PROFILE] ПУ ${r.puNumber} → ${section.tpName} СШ-${section.sectionNumber}: peakRaw=${r.peakRaw} kt=${r.kt} peakKw=${r.peakKw} tnKva=${section.tnKva} cosPhi=${cosPhi} limitKw=${limitKw} → ${overloadStatus}`);
 
           await section.update({
             lastPeakKw: r.peakKw,
@@ -1699,7 +1737,8 @@ app.post('/api/upload/analyze',
           sectionsUpdated,
           overloadCount,
           unmatched: [...unmatched, ...analyzerWarnings],
-          overloads
+          overloads,
+          details
         });
       }
 
