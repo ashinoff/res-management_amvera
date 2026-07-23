@@ -334,6 +334,32 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-23** — Профиль мощности, ЭТАП 2/3 (workflow мероприятий — этап 3, НЕ
+  здесь). Анализатор `backend/analyzers/profile_analyzer.py` (openpyxl): выгрузка
+  «ПРОФИЛЬ МОЩНОСТИ ДЛЯ 1С», листы «30 мин»/«60 мин»; ПУ по колонкам с C (строка 5),
+  kt=Ктт×Ктн (строка 6), данные с 9 до «Итого»; «24:00» → 00:00 след. суток.
+  Методика (зафиксирована): 60-мин ряд как есть, иначе 30-мин час H:00=(H:30+
+  (H+1):00)/2 (пропуск=0); пик=max, peakKw=max×kt, energy=sum×kt. JSON:
+  results[{puNumber,kt,peakRaw,peakKw,peakAt,energyKwh,source,period}]+warnings.
+  Проверено: ПУ 1294249 → peakRaw 1.059=(2.118+0)/2 @01.06 01:00, peakKw ×200=211.8;
+  60-мин «как есть» + 24:00. server.js: enum Notification +'power_overload' (модель
+  + `ALTER TYPE ... ADD VALUE IF NOT EXISTS` в initializeDatabase, имя типа из
+  pg_catalog, только Postgres, autocommit — повторный старт не падает).
+  `/api/upload/analyze` type='profile' (resId не нужен): `runProfileAnalyzer` →
+  матчинг puNumber↔`TpSection.techPuNumber` (trim); limitKw=tnKva×cosPhi,
+  overloadStatus=tnKva? (peakKw≥limit?overload:ok):unknown; обновляет lastPeakKw/
+  lastPeakAt(`parsePeakAt`)/lastProfilePeriod/overloadStatus; при overload —
+  Notification power_overload (resId секции, toUserId=null, errorData с sectionId/
+  peakKw/limitKw/ratio/period), дедуп по sectionId (cast errorData::text LIKE);
+  ok→старую удаляем; ПУ без секции+warnings → `unmatched` (не ошибка). UploadHistory
+  fileType 'profile', processedCount=секций, errorCount=перегрузов.
+  `getNotificationCounts`/badge: +power_overload для admin. Фронт: тип «Профиль
+  мощности (Пирамида)» (resId не шлётся), сводка «секций N · перегрузов M · не
+  привязано K (список)»; живой индикатор секции (red/green/gray) + подпись «пик X
+  кВт · время · лимит Y кВт» (1 знак); карточка+модалка power_overload у админа
+  (клик=детали, без кнопок действий — этап 3). Проверки: node --check, py_compile,
+  npm run build — ОК (живой старт с БД локально не гонялся — нет драйвера; ALTER
+  TYPE идемпотентен и под try/catch).
 - **2026-07-23** — Секции шин ТП, ЭТАП 1/3 (только модель + экраны структуры; БЕЗ
   анализатора профилей и workflow — следующие коммиты). Бэкенд (`server.js`):
   новая модель **`TpSection`** (resId FK, tpName, sectionNumber, tnKva=Sном кВА,

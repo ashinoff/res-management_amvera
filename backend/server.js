@@ -463,7 +463,7 @@ const Notification = sequelize.define('Notification', {
     }
   },
   type: {
-    type: DataTypes.ENUM('error', 'success', 'info', 'pending_check', 'pending_askue', 'problem_vl'), // ← ЗДЕСЬ ДОБАВИТЬ 'problem_vl'
+    type: DataTypes.ENUM('error', 'success', 'info', 'pending_check', 'pending_askue', 'problem_vl', 'power_overload'),
     allowNull: false
   },
   message: {
@@ -1078,7 +1078,7 @@ app.get('/api/platform/badge', async (req, res) => {
 
     const counts = await getNotificationCounts(user);
     let count = 0;
-    if (user.role === 'admin') count = counts.tech_pending + counts.askue_pending + counts.problem_vl;
+    if (user.role === 'admin') count = counts.tech_pending + counts.askue_pending + counts.problem_vl + (counts.power_overload || 0);
     else if (user.role === 'res_responsible') count = counts.tech_pending;
     else if (user.role === 'uploader') count = counts.askue_pending;
     res.json({ count });
@@ -1350,6 +1350,107 @@ app.post('/api/upload/analyze',
       console.log('Request body:', req.body);
       console.log('Final resId:', resId);
       console.log('File:', req.file?.originalName);
+
+      // ── Профиль мощности (Пирамида) — матчинг по ПУ техучёта, resId не нужен ──
+      if (type === 'profile') {
+        uploadRecord = await UploadHistory.create({
+          userId,
+          resId: resId || null,
+          fileName: req.file.originalname,
+          fileType: 'profile',
+          status: 'processing'
+        });
+
+        const analysis = await runProfileAnalyzer(req.file.path);
+        try { fs.unlinkSync(req.file.path); } catch (e) {}
+
+        if (!analysis || !analysis.success) {
+          await uploadRecord.update({ status: 'failed' });
+          return res.status(400).json({ success: false, error: analysis?.error || 'Ошибка анализа профиля' });
+        }
+
+        const results = analysis.results || [];
+        const analyzerWarnings = analysis.warnings || []; // ПУ без данных на обоих листах
+
+        // Индекс секций по techPuNumber (trim). Одна секция = один тех.ПУ.
+        const allSections = await TpSection.findAll({ where: { techPuNumber: { [Op.ne]: null } } });
+        const sectionByTechPu = {};
+        allSections.forEach(s => {
+          const key = String(s.techPuNumber || '').trim();
+          if (key) sectionByTechPu[key] = s;
+        });
+
+        let sectionsUpdated = 0;
+        let overloadCount = 0;
+        const unmatched = [];       // ПУ профиля без секции в структуре
+        const overloads = [];       // сводка перегрузов
+
+        for (const r of results) {
+          const section = sectionByTechPu[String(r.puNumber).trim()];
+          if (!section) { unmatched.push(r.puNumber); continue; }
+
+          const cosPhi = (section.cosPhi != null) ? section.cosPhi : 0.9;
+          const hasLimit = section.tnKva != null;
+          const limitKw = hasLimit ? section.tnKva * cosPhi : null;
+          let overloadStatus = 'unknown';
+          if (hasLimit) overloadStatus = (r.peakKw >= limitKw) ? 'overload' : 'ok';
+
+          await section.update({
+            lastPeakKw: r.peakKw,
+            lastPeakAt: parsePeakAt(r.peakAt),
+            lastProfilePeriod: r.period || analysis.period || null,
+            overloadStatus
+          });
+          sectionsUpdated++;
+
+          // Дедуп: одна активная power_overload на секцию — удаляем старую.
+          await Notification.destroy({ where: { type: 'power_overload', networkStructureId: null, resId: section.resId, [Op.and]: [ sequelize.where(sequelize.cast(sequelize.col('errorData'), 'text'), { [Op.like]: `%"sectionId":${section.id}%` }) ] } }).catch(() => {});
+
+          if (overloadStatus === 'overload') {
+            overloadCount++;
+            const ratio = limitKw ? (r.peakKw / limitKw) : null;
+            const errorData = {
+              sectionId: section.id,
+              tpName: section.tpName,
+              sectionNumber: section.sectionNumber,
+              techPuNumber: section.techPuNumber,
+              peakKw: r.peakKw,
+              peakAt: r.peakAt,
+              tnKva: section.tnKva,
+              cosPhi,
+              limitKw,
+              ratio,
+              period: r.period || analysis.period || null
+            };
+            await Notification.create({
+              type: 'power_overload',
+              resId: section.resId,
+              toUserId: null,
+              fromUserId: userId,
+              message: `Превышение Pном: ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт при лимите ${limitKw} кВт`,
+              errorData
+            });
+            overloads.push(errorData);
+          }
+          // Если секция стала 'ok' — старая power_overload уже удалена выше (дедуп).
+        }
+
+        await uploadRecord.update({
+          processedCount: sectionsUpdated,
+          errorCount: overloadCount,
+          status: 'completed'
+        });
+
+        return res.json({
+          success: true,
+          message: 'Профиль обработан',
+          type: 'profile',
+          sectionsUpdated,
+          overloadCount,
+          unmatched: [...unmatched, ...analyzerWarnings],
+          overloads
+        });
+      }
 
       if (!resId) {
         return res.status(400).json({ error: 'Не выбран РЭС для загрузки' });
@@ -2790,9 +2891,14 @@ async function getNotificationCounts(user) {
 
   // Для проблемных ВЛ считаем только активные (только для admin)
   let problemVLCount = 0;
+  let powerOverloadCount = 0;
   if (user.role === 'admin') {
     problemVLCount = await ProblemVL.count({
       where: { status: 'active' }  // Только активные!
+    });
+    // Перегрузы секций (профиль мощности) — для АСКУЭ/админа.
+    powerOverloadCount = await Notification.count({
+      where: { type: 'power_overload' }
     });
   }
 
@@ -2837,7 +2943,8 @@ async function getNotificationCounts(user) {
   return {
     tech_pending: techKeys.size,
     askue_pending: askueKeys.size,
-    problem_vl: problemVLCount
+    problem_vl: problemVLCount,
+    power_overload: powerOverloadCount
   };
 }
 
@@ -2959,6 +3066,43 @@ app.post('/api/documents/delete-bulk',
 // =====================================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ АНАЛИЗА
 // =====================================================
+
+// Запуск анализатора профиля мощности (Пирамида). Контракт как у остальных:
+// spawn python, JSON в stdout. Возвращает распарсенный объект {success,results,warnings}.
+function runProfileAnalyzer(filePath) {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(process.cwd(), 'analyzers', 'profile_analyzer.py');
+    if (!fs.existsSync(scriptPath)) {
+      return resolve({ success: false, error: 'profile_analyzer.py не найден' });
+    }
+    let python;
+    try {
+      python = spawn('python3', [scriptPath, filePath]);
+    } catch (e) {
+      try { python = spawn('python', [scriptPath, filePath]); }
+      catch (e2) { return resolve({ success: false, error: 'Python недоступен' }); }
+    }
+    let out = '', err = '';
+    python.stdout.on('data', d => { out += d.toString(); });
+    python.stderr.on('data', d => { err += d.toString(); });
+    python.on('error', () => resolve({ success: false, error: 'Python недоступен' }));
+    python.on('close', (code) => {
+      if (code !== 0) return resolve({ success: false, error: `Ошибка анализа (код ${code}): ${err}` });
+      try { resolve(JSON.parse(out)); }
+      catch (e) { resolve({ success: false, error: 'Не удалось разобрать результат анализатора' }); }
+    });
+  });
+}
+
+// 'dd.mm.yyyy HH:MM' → Date (для lastPeakAt). Некорректная строка → null.
+function parsePeakAt(s) {
+  if (!s) return null;
+  const m = String(s).trim().match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const [, dd, mm, yyyy, hh, mi] = m;
+  const dt = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(mi));
+  return isNaN(dt.getTime()) ? null : dt;
+}
 
 async function analyzeFile(filePath, type, originalFileName = null, requiredPeriod = null, userId = null) {
   return new Promise((resolve, reject) => {
@@ -4761,7 +4905,33 @@ async function initializeDatabase() {
       }
     }
     console.log('Performance indexes ensured');
-    
+
+    // Новое значение enum уведомлений 'power_overload' (перегруз секции по профилю).
+    // sequelize.sync ENUM не расширяет → ALTER TYPE ... ADD VALUE IF NOT EXISTS.
+    // Точное имя типа берём из pg_catalog (обычно enum_Notifications_type).
+    // Только Postgres; ADD VALUE не выполняется внутри транзакции — sequelize.query
+    // работает в autocommit, поэтому ок. Повторный старт не падает (IF NOT EXISTS).
+    if (sequelize.getDialect() === 'postgres') {
+      try {
+        const [typeRows] = await sequelize.query(`
+          SELECT t.typname FROM pg_type t
+          JOIN pg_attribute a ON a.atttypid = t.oid
+          JOIN pg_class c ON c.oid = a.attrelid
+          WHERE c.relname = 'Notifications' AND a.attname = 'type'
+          LIMIT 1
+        `);
+        const typeName = typeRows && typeRows[0] && typeRows[0].typname;
+        if (typeName) {
+          await sequelize.query(
+            `ALTER TYPE "${typeName}" ADD VALUE IF NOT EXISTS 'power_overload'`
+          );
+          console.log(`Enum ${typeName} ensured 'power_overload'`);
+        }
+      } catch (enumErr) {
+        console.warn('Enum power_overload ensure skipped:', enumErr.message);
+      }
+    }
+
     // Создаем РЭСы если их нет
     const resCount = await ResUnit.count();
     if (resCount === 0) {

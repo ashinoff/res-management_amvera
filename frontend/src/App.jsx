@@ -904,12 +904,26 @@ const executeClearHistory = async () => {
                   const parts = [`СШ-${section.sectionNumber}`];
                   if (section.tnKva != null) parts.push(`${section.tnKva} кВА`);
                   if (section.techPuNumber) parts.push(`тех.учёт № ${section.techPuNumber}`);
+                  // Живая подпись перегруза (этап 2): пик · время · лимит (1 знак).
+                  const cosPhi = section.cosPhi != null ? section.cosPhi : 0.9;
+                  const limitKw = section.tnKva != null ? section.tnKva * cosPhi : null;
+                  const fmt1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
+                  const peakParts = [];
+                  if (section.lastPeakKw != null) peakParts.push(`пик ${fmt1(section.lastPeakKw)} кВт`);
+                  if (section.lastPeakAt) {
+                    const d = new Date(section.lastPeakAt);
+                    if (!isNaN(d.getTime())) peakParts.push(d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
+                  }
+                  if (limitKw != null) peakParts.push(`лимит ${fmt1(limitKw)} кВт`);
                   return (
                     <div key={section.id} className="section-block">
                       <div className="section-head">
                         <span className={`status-box ${overloadClass(section.overloadStatus)}`}
                               title="Индикатор техучёта (перегруз)"></span>
                         <span className="section-title">{parts.join(' · ')}</span>
+                        {peakParts.length > 0 && (
+                          <span className="section-peak muted">{peakParts.join(' · ')}</span>
+                        )}
                         {user.role === 'admin' && (
                           <span className="section-actions">
                             <button className="link-btn" onClick={() => openSectionModal(tp, resId, section)}>
@@ -1228,11 +1242,17 @@ function FileUpload() {
     icon: <span className="svg-frame"><IconMeter size={24} /></span>,
     description: 'Один файл = один ПУ'
   },
-  { 
-    id: 'energomera', 
+  {
+    id: 'energomera',
     label: 'Счетчики Энергомера',
     icon: <span className="svg-frame"><IconMeter size={24} /></span>,
     description: 'Один файл = один ПУ'
+  },
+  {
+    id: 'profile',
+    label: 'Профиль мощности (Пирамида)',
+    icon: <span className="svg-frame"><IconChart size={24} /></span>,
+    description: 'Матчинг по ПУ техучёта секций'
   }
 ];
 
@@ -1271,7 +1291,46 @@ function FileUpload() {
     alert('Выберите тип файла и файлы для загрузки');
     return;
   }
-  
+
+  // ── Профиль мощности (Пирамида): resId не нужен, матчинг по ПУ техучёта ──
+  if (selectedType === 'profile') {
+    setUploading(true);
+    setUploadResult(null);
+    setUploadProgress({ current: 0, total: files.length });
+    let sectionsUpdated = 0, overloadCount = 0;
+    const unmatched = [];
+    const fileErrors = [];
+    for (let i = 0; i < files.length; i++) {
+      setUploadProgress({ current: i + 1, total: files.length });
+      const formData = new FormData();
+      formData.append('file', files[i]);
+      formData.append('type', 'profile');
+      try {
+        const response = await api.post('/api/upload/analyze', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        sectionsUpdated += response.data.sectionsUpdated || 0;
+        overloadCount += response.data.overloadCount || 0;
+        (response.data.unmatched || []).forEach(pu => unmatched.push(pu));
+      } catch (error) {
+        fileErrors.push({ fileName: files[i].name, error: error.response?.data?.error || 'Ошибка загрузки' });
+      }
+    }
+    setUploadResult({
+      profile: true,
+      sectionsUpdated,
+      overloadCount,
+      unmatched,
+      errors: fileErrors
+    });
+    setFiles([]);
+    setSelectedType('');
+    setUploading(false);
+    window.dispatchEvent(new CustomEvent('structureUpdated'));
+    window.dispatchEvent(new CustomEvent('notificationsUpdated'));
+    return;
+  }
+
   // Определяем resId
   let resIdToUse;
   if (user.role === 'admin') {
@@ -1526,10 +1585,21 @@ for (let i = 0; i < files.length; i++) {
         </div>
       )}
 
-      {/* Результаты остаются как были */}
-      {uploadResult && (
-        <div className={`upload-result ${uploadResult.success ? 'success' : 'error'}`}>
-          {/* ... существующий код результатов ... */}
+      {/* Результат загрузки профиля мощности */}
+      {uploadResult && uploadResult.profile && (
+        <div className="upload-result success">
+          <h3>Профиль мощности обработан</h3>
+          <p>Секций обновлено: <strong>{uploadResult.sectionsUpdated}</strong></p>
+          <p>Перегрузов: <strong style={{ color: uploadResult.overloadCount > 0 ? 'var(--red)' : 'inherit' }}>{uploadResult.overloadCount}</strong></p>
+          <p>Не привязано к структуре ПУ: <strong>{uploadResult.unmatched.length}</strong></p>
+          {uploadResult.unmatched.length > 0 && (
+            <p className="pu-number" style={{ wordBreak: 'break-all' }}>{uploadResult.unmatched.join(', ')}</p>
+          )}
+          {uploadResult.errors.length > 0 && (
+            <div style={{ color: 'var(--red)', marginTop: 8 }}>
+              {uploadResult.errors.map((e, i) => <div key={i}>{e.fileName}: {e.error}</div>)}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1948,11 +2018,14 @@ const loadNotifications = useCallback(async () => {
             setDetailsNotification({ ...notif, data });
             setShowDetailsModal(true);
           } catch (e) { /* некорректный формат — игнорируем */ }
+        } else if (notif.type === 'power_overload') {
+          setDetailsNotification({ ...notif, data: notif.errorData || {} });
+          setShowDetailsModal(true);
         } else if (notif.type === 'problem_vl') {
           if (typeof onSectionChange === 'function') onSectionChange('problem_vl');
         }
       }}
-      title={notif.type === 'error' || notif.type === 'pending_askue' ? 'Открыть подробности' : notif.type === 'problem_vl' ? 'Перейти к проблемным ВЛ' : undefined}
+      title={notif.type === 'error' || notif.type === 'pending_askue' || notif.type === 'power_overload' ? 'Открыть подробности' : notif.type === 'problem_vl' ? 'Перейти к проблемным ВЛ' : undefined}
     >
       {/* ЧЕКБОКС ТЕПЕРЬ СНАРУЖИ И СЛЕВА */}
       {user.role === 'admin' && (
@@ -2131,6 +2204,33 @@ const loadNotifications = useCallback(async () => {
         }
       })()}
             
+            {/* ПЕРЕГРУЗ СЕКЦИИ ПО ПРОФИЛЮ МОЩНОСТИ (этап 2) */}
+            {notif.type === 'power_overload' && (() => {
+              const data = notif.errorData || {};
+              const f1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
+              const ratioPct = data.ratio != null ? Math.round(data.ratio * 100) : null;
+              return (
+                <div className="notification-compact-content problem-vl">
+                  <div className="problem-vl-alert">
+                    <span className="critical-icon"><IconAlertTriangle className="ico" style={{ color: 'var(--red)' }} /></span>
+                    <div className="problem-vl-header">
+                      <h4>Превышение Pном</h4>
+                      {ratioPct != null && <span className="failure-count">{ratioPct}% от лимита</span>}
+                    </div>
+                  </div>
+                  <div className="notification-main-info">
+                    <div className="notification-location">
+                      <span className="label">ТП:</span> {data.tpName} · <strong>СШ-{data.sectionNumber}</strong>
+                    </div>
+                    <div className="notification-pu">
+                      пик <strong>{f1(data.peakKw)} кВт</strong> при лимите <strong>{f1(data.limitKw)} кВт</strong>
+                      {data.peakAt ? <> · {data.peakAt}</> : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* УСПЕШНЫЕ УВЕДОМЛЕНИЯ */}
             {notif.type === 'success' && (
               <div className="notification-compact-content success">
@@ -2249,8 +2349,25 @@ const loadNotifications = useCallback(async () => {
                   </div>
                 </>
               )}
+
+              {detailsNotification.type === 'power_overload' && (() => {
+                const d = detailsNotification.data || {};
+                const f1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
+                const ratioPct = d.ratio != null ? Math.round(d.ratio * 100) : null;
+                return (
+                  <div className="askue-details-content">
+                    <h4><IconAlertTriangle className="ico" style={{ color: 'var(--red)' }} /> Превышение номинальной мощности</h4>
+                    <div className="detail-row"><strong>ТП:</strong> {d.tpName} · СШ-{d.sectionNumber}</div>
+                    <div className="detail-row"><strong>ПУ техучёта:</strong> {d.techPuNumber || '—'}</div>
+                    <div className="detail-row"><strong>Пик:</strong> {f1(d.peakKw)} кВт{d.peakAt ? ` (${d.peakAt})` : ''}</div>
+                    <div className="detail-row"><strong>Лимит:</strong> {f1(d.limitKw)} кВт {ratioPct != null ? `(${ratioPct}% от лимита)` : ''}</div>
+                    <div className="detail-row"><strong>Sном тр-ра:</strong> {d.tnKva != null ? `${d.tnKva} кВА` : '—'} · cosφ {d.cosPhi ?? '—'}</div>
+                    {d.period && <div className="detail-row"><strong>Период:</strong> {d.period}</div>}
+                  </div>
+                );
+              })()}
             </div>
-            
+
             <div className="modal-footer">
               <button className="action-btn" onClick={() => setShowDetailsModal(false)}>
                 Закрыть
