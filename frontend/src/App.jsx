@@ -1026,7 +1026,7 @@ const executeClearHistory = async () => {
         const srcRu = s.lastProfileSource === '60' ? '60 мин' : s.lastProfileSource === '30' ? '30 мин' : '—';
         return (
           <div className="modal-backdrop" onClick={() => setTechModal(null)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-content tech-details-modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
                 <h3>{s.tpName} · СШ-{s.sectionNumber}</h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1035,6 +1035,12 @@ const executeClearHistory = async () => {
                 </div>
               </div>
               <div className="modal-body">
+                <div className="modal-info">
+                  <p><strong>ТП:</strong> {s.tpName}</p>
+                  <p><strong>Секция шин:</strong> СШ-{s.sectionNumber}</p>
+                  <p><strong>№ ПУ техучёта:</strong> {s.techPuNumber || '—'}</p>
+                </div>
+
                 {hasData ? (
                   <>
                     <div className="tech-pmax">
@@ -1053,21 +1059,19 @@ const executeClearHistory = async () => {
                     </div>
 
                     <div className="tech-grid">
-                      <div><span className="k">№ ПУ техучёта</span><span className="v">{s.techPuNumber || '—'}</span></div>
-                      <div><span className="k">Sном, кВА</span><span className="v">{s.tnKva != null ? s.tnKva : '—'}</span></div>
+                      <div><span className="k">Sном тр-ра, кВА</span><span className="v">{s.tnKva != null ? s.tnKva : '—'}</span></div>
                       <div><span className="k">cosφ</span><span className="v">{cosPhi}</span></div>
                       <div><span className="k">Лимит, кВт</span><span className="v">{f1(limitKw)}</span></div>
-                      <div><span className="k">Источник</span><span className="v">{srcRu}</span></div>
+                      <div><span className="k">Источник ряда</span><span className="v">{srcRu}</span></div>
                       <div><span className="k">Дата загрузки профиля</span><span className="v">{s.lastProfileAt ? new Date(s.lastProfileAt).toLocaleString('ru-RU') : '—'}</span></div>
                     </div>
 
                     {techCase && (
                       <div className="highlight-box">
-                        <strong>Случай перегруза:</strong> {STAGE_RU[techCase.stage] || techCase.stage}
+                        <strong>Открыт случай перегруза:</strong> {STAGE_RU[techCase.stage] || techCase.stage}
                         {typeof onSectionChange === 'function' && (
-                          <div style={{ marginTop: 6 }}>
-                            <button className="link-btn" style={{ color: 'var(--accent)', textDecoration: 'underline' }}
-                              onClick={() => { setTechModal(null); onSectionChange('power_overload'); }}>
+                          <div style={{ marginTop: 8 }}>
+                            <button className="action-btn" onClick={() => { setTechModal(null); onSectionChange('power_overload'); }}>
                               Перейти в «Превышение Pном»
                             </button>
                           </div>
@@ -1079,6 +1083,7 @@ const executeClearHistory = async () => {
                   <div className="tech-empty">
                     <span className="svg-frame"><IconZap size={24} /></span>
                     <p>Профиль мощности не загружался</p>
+                    <p className="muted" style={{ fontSize: 12.5 }}>Загрузите «Профиль мощности (Пирамида)» в разделе «Загрузить файлы», чтобы увидеть Pmax и статус загрузки секции.</p>
                   </div>
                 )}
               </div>
@@ -3451,72 +3456,127 @@ function PowerOverload({ selectedRes }) {
       {shown.length === 0 ? (
         <div className="no-issues"><IconCheck className="ico" style={{ color: 'var(--green)' }} /> Случаев нет</div>
       ) : (
-        <div className="po-list">
-          {shown.map(c => (
-            <div key={c.id} className="notification-compact problem-card po-card"
-                 onClick={() => setDetailsCase(c)} title="Открыть детали">
-              <div className="po-card-main">
-                <div className="po-card-title">
-                  {cardHeader(c)}
-                  {c.cycles > 1 && <span className="po-cycle-badge">повтор {c.cycles}</span>}
+        <div className="notifications-list">
+          {shown.map(c => {
+            const s = c.section || {};
+            const ratioPct = c.ratio != null ? Math.round(c.ratio * 100) : null;
+            const indClass = c.stage === 'completed' ? 'status-ok'
+              : c.stage === 'awaiting_recheck' ? 'status-pending' : 'status-error';
+            return (
+              <div key={c.id} className="notification-compact power_overload"
+                   onClick={() => setDetailsCase(c)} title="Открыть подробности">
+                <div className="notification-narrow-content">
+                  <div className="po-indicator">
+                    <span className={`status-box ${indClass}`}></span>
+                  </div>
+                  <div className="notification-narrow-info">
+                    <div className="notification-tp">{s.tpName} · СШ-{s.sectionNumber}
+                      {c.cycles > 1 && <span className="po-cycle-badge">повтор {c.cycles}</span>}
+                    </div>
+                    <div className="notification-narrow-details">
+                      <span className="label">РЭС:</span> {c.ResUnit?.name || '—'} |
+                      <span className="label"> Пик:</span> {f1(c.peakKw)} кВт |
+                      <span className="label"> Лимит:</span> {f1(c.limitKw)} кВт
+                      {ratioPct != null ? ` (${ratioPct}%)` : ''}
+                    </div>
+                    <div className="notification-pu-number">
+                      Этап: <strong>{STAGE_RU[c.stage]}</strong>
+                    </div>
+                  </div>
+                  <div className="notification-narrow-actions" onClick={(e) => e.stopPropagation()}>
+                    {user.role === 'admin' && c.stage === 'askue_limit' && (
+                      <button className="btn-complete-green" onClick={() => openAskue(c)}>Ограничение по АСКУЭ выполнено</button>
+                    )}
+                    {user.role === 'res_responsible' && c.stage === 'res_work' && (
+                      <button className="btn-complete-green" onClick={() => openRes(c)}>Мероприятия выполнены</button>
+                    )}
+                    {c.stage === 'awaiting_recheck' && (
+                      <span className="po-plaque">Ожидает перепроверки</span>
+                    )}
+                  </div>
                 </div>
-                <div className="po-card-stage muted">{STAGE_RU[c.stage]} · {c.ResUnit?.name || ''}</div>
               </div>
-
-              <div className="po-card-actions" onClick={(e) => e.stopPropagation()}>
-                {user.role === 'admin' && c.stage === 'askue_limit' && (
-                  <button className="btn-complete-green" onClick={() => openAskue(c)}>Ограничение по АСКУЭ выполнено</button>
-                )}
-                {user.role === 'res_responsible' && c.stage === 'res_work' && (
-                  <button className="btn-complete-green" onClick={() => openRes(c)}>Мероприятия выполнены</button>
-                )}
-                {c.stage === 'awaiting_recheck' && (
-                  <span className="po-plaque">Ожидает перепроверки профилем</span>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* Детали кейса */}
+      {/* Детали кейса — крупная содержательная модалка */}
       {detailsCase && (() => {
         const c = detailsCase; const s = c.section || {};
+        const ratioPct = c.ratio != null ? Math.round(c.ratio * 100) : null;
+        const status = c.stage === 'completed'
+          ? { t: c.recheckResult === 'ok' ? 'Устранён' : 'Завершён', cls: 'status-ok' }
+          : c.stage === 'awaiting_recheck'
+          ? { t: 'Ожидает перепроверки', cls: 'status-pending' }
+          : { t: 'Перегруз', cls: 'status-error' };
         return (
           <div className="modal-backdrop" onClick={() => setDetailsCase(null)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-content po-details-modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
                 <h3>{s.tpName} · СШ-{s.sectionNumber}</h3>
-                <button className="close-btn" onClick={() => setDetailsCase(null)}><IconX className="ico" /></button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span className={`tech-pill ${status.cls}`}>{status.t}</span>
+                  <button className="close-btn" onClick={() => setDetailsCase(null)}><IconX className="ico" /></button>
+                </div>
               </div>
               <div className="modal-body">
-                <div className="detail-row"><strong>Этап:</strong> {STAGE_RU[c.stage]}{c.cycles > 1 ? ` · повтор ${c.cycles}` : ''}</div>
-                <div className="detail-row"><strong>Пик:</strong> {f1(c.peakKw)} кВт{c.peakAt ? ` (${c.peakAt})` : ''}</div>
-                <div className="detail-row"><strong>Лимит:</strong> {f1(c.limitKw)} кВт ({c.ratio != null ? Math.round(c.ratio * 100) : '—'}%)</div>
-                <div className="detail-row"><strong>Sном тр-ра:</strong> {c.tnKva != null ? `${c.tnKva} кВА` : '—'} · cosφ {c.cosPhi ?? '—'}</div>
-                {c.period && <div className="detail-row"><strong>Период:</strong> {c.period}</div>}
-                {c.askueCompletedAt && (
-                  <div className="highlight-box"><strong>АСКУЭ:</strong> {c.askueUser?.fio || '—'}, {new Date(c.askueCompletedAt).toLocaleString('ru-RU')}{c.askueComment ? ` — ${c.askueComment}` : ''}</div>
-                )}
-                {c.resCompletedAt && (
-                  <div className="highlight-box"><strong>РЭС:</strong> {c.resUser?.fio || '—'}, {new Date(c.resCompletedAt).toLocaleString('ru-RU')}{c.resComment ? ` — ${c.resComment}` : ''}</div>
-                )}
-                {Array.isArray(c.attachments) && c.attachments.length > 0 && (
-                  <div className="detail-row">
-                    <strong>Фото:</strong>
-                    <div className="po-attachments">
-                      {c.attachments.map((a, i) => (
-                        <a key={i} href={fileProxyUrl(a, true)} target="_blank" rel="noreferrer">Файл {i + 1}</a>
-                      ))}
-                    </div>
+                <div className="tech-pmax">
+                  <div className="tech-pmax-value">Пик {f1(c.peakKw)} кВт</div>
+                  <div className="tech-pmax-sub">
+                    лимит {f1(c.limitKw)} кВт{ratioPct != null ? ` · ${ratioPct}% от лимита` : ''}
+                    {c.peakAt ? ` · ${c.peakAt}` : ''}
                   </div>
-                )}
-                {c.recheckAt && (
-                  <div className="detail-row"><strong>Перепроверка:</strong> {new Date(c.recheckAt).toLocaleString('ru-RU')} — {c.recheckResult === 'ok' ? 'устранён' : 'повторный перегруз'}{c.recheckPeakKw != null ? ` (пик ${f1(c.recheckPeakKw)} кВт)` : ''}</div>
-                )}
-                {c.closedAt && <div className="detail-row"><strong>Закрыт:</strong> {new Date(c.closedAt).toLocaleString('ru-RU')}</div>}
+                </div>
+
+                <div className="tech-grid">
+                  <div><span className="k">Этап</span><span className="v">{STAGE_RU[c.stage]}{c.cycles > 1 ? ` · повтор ${c.cycles}` : ''}</span></div>
+                  <div><span className="k">РЭС</span><span className="v">{c.ResUnit?.name || '—'}</span></div>
+                  <div><span className="k">Sном, кВА</span><span className="v">{c.tnKva != null ? c.tnKva : '—'}</span></div>
+                  <div><span className="k">cosφ</span><span className="v">{c.cosPhi ?? '—'}</span></div>
+                  {c.period && <div><span className="k">Период выгрузки</span><span className="v">{c.period}</span></div>}
+                </div>
+
+                <div className="po-timeline">
+                  <h4>Хронология</h4>
+                  {c.askueCompletedAt ? (
+                    <div className="po-step done">
+                      <strong>Ограничение по АСКУЭ</strong> — {c.askueUser?.fio || '—'}, {new Date(c.askueCompletedAt).toLocaleString('ru-RU')}
+                      {c.askueComment ? <div className="po-step-comment">{c.askueComment}</div> : null}
+                    </div>
+                  ) : <div className="po-step pending"><strong>Ограничение по АСКУЭ</strong> — ожидается</div>}
+
+                  {c.resCompletedAt ? (
+                    <div className="po-step done">
+                      <strong>Мероприятия РЭС</strong> — {c.resUser?.fio || '—'}, {new Date(c.resCompletedAt).toLocaleString('ru-RU')}
+                      {c.resComment ? <div className="po-step-comment">{c.resComment}</div> : null}
+                      {Array.isArray(c.attachments) && c.attachments.length > 0 && (
+                        <div className="po-attachments">
+                          {c.attachments.map((a, i) => (
+                            <a key={i} href={fileProxyUrl(a, true)} target="_blank" rel="noreferrer">Файл {i + 1}</a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : <div className="po-step pending"><strong>Мероприятия РЭС</strong> — ожидается</div>}
+
+                  {c.recheckAt ? (
+                    <div className={`po-step ${c.recheckResult === 'ok' ? 'done' : 'fail'}`}>
+                      <strong>Перепроверка профилем</strong> — {new Date(c.recheckAt).toLocaleString('ru-RU')}: {c.recheckResult === 'ok' ? 'перегруз устранён' : 'повторный перегруз'}
+                      {c.recheckPeakKw != null ? ` (пик ${f1(c.recheckPeakKw)} кВт)` : ''}
+                    </div>
+                  ) : <div className="po-step pending"><strong>Перепроверка профилем</strong> — ожидается</div>}
+
+                  {c.closedAt && <div className="po-step done"><strong>Случай закрыт</strong> — {new Date(c.closedAt).toLocaleString('ru-RU')}</div>}
+                </div>
               </div>
               <div className="modal-footer">
+                {user.role === 'admin' && c.stage === 'askue_limit' && (
+                  <button className="confirm-btn" onClick={() => openAskue(c)}>Ограничение по АСКУЭ выполнено</button>
+                )}
+                {user.role === 'res_responsible' && c.stage === 'res_work' && (
+                  <button className="confirm-btn" onClick={() => openRes(c)}>Мероприятия выполнены</button>
+                )}
                 <button className="action-btn" onClick={() => setDetailsCase(null)}>Закрыть</button>
               </div>
             </div>
@@ -3524,42 +3584,52 @@ function PowerOverload({ selectedRes }) {
         );
       })()}
 
-      {/* Действие: АСКУЭ (комментарий необязателен) / РЭС (комментарий + фото) */}
-      {actionModal && (
-        <div className="modal-backdrop" onClick={() => setActionModal(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{actionModal.mode === 'askue' ? 'Ограничение по АСКУЭ выполнено' : 'Мероприятия РЭС выполнены'}</h3>
-              <button className="close-btn" onClick={() => setActionModal(null)}><IconX className="ico" /></button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label style={commentError ? { color: '#dc2626', fontWeight: 600 } : undefined}>
-                  Комментарий{actionModal.mode === 'res' ? ' (минимум 5 слов)' : ' (необязательно)'}
-                </label>
-                <textarea rows={4} value={comment}
-                  onChange={(e) => { setComment(e.target.value); if (commentError && e.target.value.trim().split(/\s+/).filter(w => w.length > 0).length >= 5) setCommentError(false); }}
-                  style={commentError ? { borderColor: '#dc2626', boxShadow: '0 0 0 3px rgba(220,38,38,0.2)', outline: 'none' } : undefined} />
+      {/* Действие: АСКУЭ (комментарий) / РЭС (комментарий + фото) */}
+      {actionModal && (() => {
+        const s = actionModal.c.section || {};
+        const isRes = actionModal.mode === 'res';
+        return (
+          <div className="modal-backdrop" onClick={() => setActionModal(null)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>{isRes ? 'Мероприятия РЭС выполнены' : 'Ограничение по АСКУЭ выполнено'}</h3>
+                <button className="close-btn" onClick={() => setActionModal(null)}><IconX className="ico" /></button>
               </div>
-              {actionModal.mode === 'res' && (
-                <div className="form-group">
-                  <label>Фото/документы (макс. 5)</label>
-                  <input type="file" multiple accept="image/*,application/pdf"
-                    onChange={(e) => setFiles(Array.from(e.target.files).slice(0, 5))} />
-                  {files.length > 0 && <p className="muted">Выбрано файлов: {files.length}</p>}
+              <div className="modal-body">
+                <div className="modal-info">
+                  <p><strong>ТП:</strong> {s.tpName} · СШ-{s.sectionNumber}</p>
+                  <p><strong>Пик:</strong> {f1(actionModal.c.peakKw)} кВт · лимит {f1(actionModal.c.limitKw)} кВт</p>
                 </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="cancel-btn" onClick={() => setActionModal(null)}>Отмена</button>
-              <button className="confirm-btn" disabled={submitting}
-                onClick={actionModal.mode === 'askue' ? submitAskue : submitRes}>
-                {submitting ? 'Отправка...' : 'Подтвердить'}
-              </button>
+                <div className="form-group">
+                  <label style={commentError ? { color: '#dc2626', fontWeight: 600 } : undefined}>
+                    {isRes ? 'Что выполнено? (минимум 5 слов)' : 'Комментарий (необязательно)'}
+                  </label>
+                  <textarea rows={5} value={comment}
+                    placeholder={isRes ? 'Опишите выполненные мероприятия…' : 'Например: введено ограничение мощности по АСКУЭ'}
+                    onChange={(e) => { setComment(e.target.value); if (commentError && e.target.value.trim().split(/\s+/).filter(w => w.length > 0).length >= 5) setCommentError(false); }}
+                    style={commentError ? { borderColor: '#dc2626', boxShadow: '0 0 0 3px rgba(220,38,38,0.2)', outline: 'none' } : undefined} />
+                  {isRes && <small className="muted">Слов: {comment.trim().split(/\s+/).filter(w => w.length > 0).length} из 5</small>}
+                </div>
+                {isRes && (
+                  <div className="form-group">
+                    <label>Фото/документы (макс. 5)</label>
+                    <input type="file" multiple accept="image/*,application/pdf"
+                      onChange={(e) => setFiles(Array.from(e.target.files).slice(0, 5))} />
+                    {files.length > 0 && <p className="muted">Выбрано файлов: {files.length}</p>}
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button className="cancel-btn" onClick={() => setActionModal(null)}>Отмена</button>
+                <button className="confirm-btn" disabled={submitting}
+                  onClick={isRes ? submitRes : submitAskue}>
+                  {submitting ? 'Отправка...' : 'Подтвердить'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
