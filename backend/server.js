@@ -566,7 +566,7 @@ const UploadHistory = sequelize.define('UploadHistory', {
     allowNull: false
   },
   fileType: {
-    type: DataTypes.ENUM('rim_single', 'rim_mass', 'nartis', 'energomera'),
+    type: DataTypes.ENUM('rim_single', 'rim_mass', 'nartis', 'energomera', 'profile'),
     allowNull: false
   },
   processedCount: {
@@ -785,7 +785,7 @@ const PuUploadHistory = sequelize.define('PuUploadHistory', {
     allowNull: false
   },
   fileType: {
-    type: DataTypes.ENUM('rim_single', 'rim_mass', 'nartis', 'energomera'),
+    type: DataTypes.ENUM('rim_single', 'rim_mass', 'nartis', 'energomera', 'profile'),
     allowNull: false
   },
   periodStart: {
@@ -1580,13 +1580,20 @@ app.post('/api/upload/analyze',
 
       // ── Профиль мощности (Пирамида) — матчинг по ПУ техучёта, resId не нужен ──
       if (type === 'profile') {
-        uploadRecord = await UploadHistory.create({
-          userId,
-          resId: resId || null,
-          fileName: req.file.originalname,
-          fileType: 'profile',
-          status: 'processing'
-        });
+        try {
+          uploadRecord = await UploadHistory.create({
+            userId,
+            resId: resId || null,
+            fileName: req.file.originalname,
+            fileType: 'profile',
+            status: 'processing'
+          });
+        } catch (createErr) {
+          // Не глотаем: раньше это выглядело как «профиль ничего не нашёл».
+          console.error('[PROFILE] UploadHistory.create failed:', createErr.message);
+          try { fs.unlinkSync(req.file.path); } catch (e) {}
+          return res.status(400).json({ success: false, error: `Не удалось создать запись загрузки: ${createErr.message}` });
+        }
 
         const analysis = await runProfileAnalyzer(req.file.path);
         try { fs.unlinkSync(req.file.path); } catch (e) {}
@@ -5330,6 +5337,31 @@ async function initializeDatabase() {
         }
       } catch (enumErr) {
         console.warn('Enum power_overload ensure skipped:', enumErr.message);
+      }
+
+      // Значение 'profile' в enum колонок fileType (UploadHistories и
+      // PuUploadHistories). Без него загрузка type='profile' падала на
+      // UploadHistory.create («invalid input value for enum ... "profile"»).
+      // Имена enum-типов берём из pg_catalog по колонке fileType каждой таблицы.
+      for (const table of ['UploadHistories', 'PuUploadHistories']) {
+        try {
+          const [rows] = await sequelize.query(`
+            SELECT t.typname FROM pg_type t
+            JOIN pg_attribute a ON a.atttypid = t.oid
+            JOIN pg_class c ON c.oid = a.attrelid
+            WHERE c.relname = '${table}' AND a.attname = 'fileType'
+            LIMIT 1
+          `);
+          const typeName = rows && rows[0] && rows[0].typname;
+          if (typeName) {
+            await sequelize.query(
+              `ALTER TYPE "${typeName}" ADD VALUE IF NOT EXISTS 'profile'`
+            );
+            console.log(`Enum ${typeName} ensured 'profile'`);
+          }
+        } catch (enumErr) {
+          console.warn(`Enum profile ensure skipped for ${table}:`, enumErr.message);
+        }
       }
     }
 

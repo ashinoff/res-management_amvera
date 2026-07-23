@@ -334,6 +334,19 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-23** — КОРЕНЬ бага «профиль не выявляет перегруз» (подтверждён живым
+  тестом на Postgres): `UploadHistory.create` при type='profile' падал —
+  `invalid input value for enum "enum_UploadHistories_fileType": "profile"`, до
+  анализатора дело не доходило. Фикс: (1) в ОБЕ модели с fileType-enum
+  (`UploadHistory`, `PuUploadHistory`) добавлено значение `'profile'`. (2) В
+  `initializeDatabase` (Postgres-блок, по образцу power_overload) для таблиц
+  `UploadHistories`/`PuUploadHistories` имя enum-типа берётся из pg_catalog по
+  колонке fileType → `ALTER TYPE "<имя>" ADD VALUE IF NOT EXISTS 'profile'`
+  (идемпотентно, try/catch, двойной старт не падает). (3) В профиль-ветке
+  `UploadHistory.create` обёрнут в try/catch — при падении 400 с текстом +
+  `console.error('[PROFILE] …')`, больше не выглядит как «ничего не нашлось».
+  Логика анализатора/матчинга/кейсов верна (проверено заказчиком: лимит 225→
+  пик 328.4 overload+кейс; 360→212.2 ok). node --check — ОК.
 - **2026-07-23** — КРИТ. фикс скорости анализатора + таймаут + редизайн модалки
   техучёта. (1) `profile_analyzer.py`: убран `read_only=True`, `_read_sheet`
   переписан на ОДИН проход `iter_rows(values_only=True)` (строки 5/6 — шапка,
