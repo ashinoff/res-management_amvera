@@ -1666,17 +1666,9 @@ for (let i = 0; i < files.length; i++) {
 
   return (
     <div className="file-upload-container">
-      {/* Предупреждение — красный светящийся контур */}
-      <div className="upload-warning">
-        <span className="upload-warning-ico"><IconAlertTriangle size={20} /></span>
-        <span>Имя файла должно совпадать с номером ПУ</span>
-      </div>
-
-      {/* Заголовок — по левому краю, вместе с SVG-логотипом */}
-      <div className="upload-header left">
-        <h2><span className="svg-frame"><IconUpload size={24} /></span> Загрузка файлов для анализа</h2>
-        <p className="upload-subtitle">Загружайте Excel файлы с данными счетчиков для автоматической проверки</p>
-      </div>
+      <h2><span className="svg-frame"><IconUpload size={24} /></span> Загрузка файлов для анализа</h2>
+      <p className="upload-note">Имя файла должно совпадать с номером ПУ</p>
+      <p className="upload-subtitle">Загружайте Excel файлы с данными счетчиков для автоматической проверки</p>
 
       {/* Выбор типа загрузки */}
       <div className="file-type-selection">
@@ -1695,63 +1687,35 @@ for (let i = 0; i < files.length; i++) {
         </div>
       </div>
 
-      {/* Зона загрузки файлов */}
+      {/* Выбор файла — компактная строка */}
       {selectedType && (
-        <div className="file-drop-section">
-          <h3>Загрузите файл</h3>
-          <div 
-            className={`drop-zone ${dragActive ? 'drag-active' : ''} ${files.length > 0 ? 'has-files' : ''}`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-          >
-            <input 
-              type="file" 
+        <div className="file-pick-section">
+          <h3>Файл</h3>
+          <div className="file-pick-row">
+            <input
+              type="file"
               id="file-input"
               accept=".xlsx,.xls,.csv"
               multiple
               onChange={handleFileSelect}
               style={{ display: 'none' }}
             />
-            
-            {files.length === 0 ? (
-              <>
-                <div className="drop-icon"><IconFolder className="ico" /></div>
-                <h4>Перетащите файлы сюда</h4>
-                <p>или</p>
-                <label htmlFor="file-input" className="btn btn-primary">
-                  Выберите файлы
-                </label>
-                <p className="drop-hint">Поддерживаются форматы: .xlsx, .xls, .csv</p>
-              </>
-            ) : (
-              <div className="files-list">
-                <h4>Выбрано файлов: {files.length}</h4>
-                <div className="files-grid">
-                  {files.map((file, idx) => (
-                    <div key={idx} className="file-item-card">
-                      <div className="file-icon"><IconFileText className="ico" /></div>
-                      <div className="file-details">
-                        <p className="file-name">{file.name}</p>
-                        <p className="file-size">{(file.size / 1024).toFixed(1)} KB</p>
-                        <p className="pu-number">ПУ: {file.name.split('.')[0]}</p>
-                      </div>
-                      <button 
-                        className="remove-file-btn"
-                        onClick={() => removeFile(idx)}
-                      >
-                        <IconX className="ico" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <label htmlFor="file-input" className="btn btn-secondary">
-                  Добавить еще файлы
-                </label>
-              </div>
-            )}
+            <label htmlFor="file-input" className="btn btn-secondary file-pick-btn">
+              <IconFolder className="ico" /> Выбрать файл
+            </label>
+            <span className="file-pick-hint">.xlsx, .xls, .csv</span>
           </div>
+          {files.length > 0 && (
+            <div className="file-chips">
+              {files.map((file, idx) => (
+                <span key={idx} className="file-chip">
+                  <IconFileText className="ico" />
+                  <span className="file-chip-name" title={file.name}>{file.name}</span>
+                  <button className="file-chip-x" onClick={() => removeFile(idx)}><IconX className="ico" /></button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

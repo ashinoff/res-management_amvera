@@ -3869,10 +3869,19 @@ tr.selected {
    УЛУЧШЕННАЯ СТРАНИЦА ЗАГРУЗКИ ФАЙЛОВ
    ===================================================== */
 
+/* Как все страницы: карточка на всю ширину, заголовок слева. */
 .file-upload-container {
-  max-width: 1200px;
-  margin: 0 auto;
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
 }
+.file-upload-container > h2 {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 6px;
+}
+.upload-note { margin: 0 0 2px; color: var(--red); font-size: 13px; }
+.file-upload-container .upload-subtitle { margin: 0 0 20px; color: var(--text-muted); font-size: 13.5px; text-align: left; }
 
 .upload-header {
   text-align: center;
@@ -6949,3 +6958,35 @@ tr.selected:hover,
 .file-type-card { flex-direction: column; align-items: center; text-align: center; gap: 4px; padding: 16px 14px; }
 .file-type-card .ft-label { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: 0.02em; color: var(--text); text-transform: none; }
 .file-type-card .ft-sub { margin: 0; font-size: 12.5px; color: var(--text-muted); }
+
+/* ===== Загрузка файлов: 4 кнопки в ряд, тонко, без «дёрганья» ===== */
+.file-type-selection h3, .file-pick-section h3 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+.file-types-grid { grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.file-type-card {
+  flex-direction: column; align-items: center; text-align: center; gap: 3px;
+  padding: 12px 10px; border: 1px solid var(--border); border-radius: 10px;
+  transition: border-color .12s, background .12s;   /* без transform — не дёргается */
+}
+.file-type-card:hover { border-color: var(--accent); transform: none; box-shadow: none; background: var(--surface-2); }
+.file-type-card.selected { border-color: var(--accent); background: var(--accent-soft); }
+.file-type-card .ft-label { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: 0.01em; color: var(--text); text-transform: none; }
+.file-type-card .ft-sub { margin: 0; font-size: 12px; font-weight: 400; color: var(--text-muted); }
+
+/* Компактный выбор файла */
+.file-pick-section { margin-top: 18px; }
+.file-pick-row { display: flex; align-items: center; gap: 12px; }
+.file-pick-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 13px; }
+.file-pick-hint { color: var(--text-muted); font-size: 12px; }
+.file-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.file-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-2); font-size: 12.5px; max-width: 260px;
+}
+.file-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-chip-x { background: none; border: none; cursor: pointer; display: inline-flex; padding: 0; color: var(--text-muted); }
+.file-chip-x:hover { color: var(--red); }
+
+@media (max-width: 900px) {
+  .file-types-grid { grid-template-columns: repeat(2, 1fr); }
+}
