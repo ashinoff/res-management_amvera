@@ -6790,3 +6790,25 @@ tr.selected:hover,
   padding: 0 5px; border-radius: 9px; background: var(--amber, #e08a00); color: #fff;
   font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center;
 }
+
+/* ===== Модалка «Сведения о техучёте» ===== */
+.tech-pill { padding: 3px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700; color: #fff; }
+.tech-pill.status-ok { background: var(--green); }
+.tech-pill.status-error { background: var(--red); }
+.tech-pill.status-unchecked { background: var(--gray); }
+.tech-pmax { text-align: center; margin: 6px 0 14px; }
+.tech-pmax-value { font-size: 30px; font-weight: 800; letter-spacing: -0.01em; }
+.tech-pmax-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+.tech-bar { height: 14px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; }
+.tech-bar-fill { height: 100%; border-radius: 999px; }
+.tech-bar-fill.green { background: var(--green); }
+.tech-bar-fill.amber { background: var(--amber); }
+.tech-bar-fill.red { background: var(--red); }
+.tech-bar-fill.gray { background: var(--gray); }
+.tech-bar-label { text-align: center; font-size: 12.5px; color: var(--text-muted); margin: 6px 0 14px; }
+.tech-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
+.tech-grid > div { display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.tech-grid .k { font-size: 11.5px; color: var(--text-muted); }
+.tech-grid .v { font-size: 14px; font-weight: 600; }
+.tech-empty { text-align: center; padding: 24px 0; color: var(--text-muted); }
+.tech-empty p { margin-top: 8px; }

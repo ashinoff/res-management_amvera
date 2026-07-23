@@ -140,29 +140,44 @@ def _find_sheet(wb, needle):
 
 def _read_sheet(ws):
     """Возвращает {col_index: {'pu': str, 'kt': float}} и {col_index: {dt: kw_raw}}.
-    dt — метка времени (24:00 → следующие сутки), kw_raw — значение без kt."""
+    dt — метка времени (24:00 → следующие сутки), kw_raw — значение без kt.
+
+    ОДИН проход через iter_rows(values_only=True): случайный ws.cell(row,col) в
+    openpyxl (особенно read-only) перепарсивает лист на каждый вызов → квадратично
+    на реальном файле (1449×8). Здесь строки читаются последовательно, метаданные
+    (ПУ/Ктт·Ктн) берём из строк 5/6, данные — с 9-й до «Итого»."""
     if ws is None:
         return {}, {}, []
-    # Шапка: ПУ и Ктт/Ктн по колонкам
-    meta = {}
-    col = FIRST_PU_COL
-    max_col = ws.max_column
-    while col <= max_col:
-        pu = ws.cell(row=PU_ROW, column=col).value
-        pu_s = _pu_str(pu)
-        if pu_s != '':
-            kt = _parse_kt(ws.cell(row=KT_ROW, column=col).value)
-            meta[col] = {'pu': pu_s, 'kt': kt}
-        col += 1
 
-    # Данные
-    series = {c: {} for c in meta}   # col -> {dt: kw_raw}
+    meta = {}                 # col -> {'pu': str, 'kt': float}
+    series = {}               # col -> {dt: kw_raw}
     dates = []
-    row = DATA_START
-    max_row = ws.max_row
-    while row <= max_row:
-        a = ws.cell(row=row, column=1).value
-        b = ws.cell(row=row, column=2).value
+    pu_row_vals = None
+    kt_row_vals = None
+
+    for idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if idx == PU_ROW:
+            pu_row_vals = row
+            continue
+        if idx == KT_ROW:
+            kt_row_vals = row
+            continue
+        if idx < DATA_START:
+            continue
+
+        # Первая строка данных — строим карту колонок из уже прочитанных шапок.
+        if not meta and pu_row_vals is not None:
+            ncols = max(len(pu_row_vals), len(kt_row_vals) if kt_row_vals else 0)
+            for col in range(FIRST_PU_COL, ncols + 1):
+                pu_cell = pu_row_vals[col - 1] if col - 1 < len(pu_row_vals) else None
+                pu_s = _pu_str(pu_cell)
+                if pu_s:
+                    kt_cell = kt_row_vals[col - 1] if (kt_row_vals and col - 1 < len(kt_row_vals)) else None
+                    meta[col] = {'pu': pu_s, 'kt': _parse_kt(kt_cell)}
+                    series[col] = {}
+
+        a = row[0] if len(row) > 0 else None
+        b = row[1] if len(row) > 1 else None
         a_s = str(a).strip().lower() if a is not None else ''
         if a_s.startswith('итого'):
             break
@@ -172,10 +187,9 @@ def _read_sheet(ws):
             if d is not None:
                 dates.append(d)
             for c in meta:
-                val = _num(ws.cell(row=row, column=c).value)
+                val = _num(row[c - 1]) if c - 1 < len(row) else None
                 if val is not None:
                     series[c][dt] = val
-        row += 1
 
     return meta, series, dates
 
@@ -197,7 +211,9 @@ def _hourly_from_30(dt_map):
 
 
 def analyze(filepath):
-    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+    # НЕ read_only: файлы небольшие (обычная загрузка ~0.5 c), а read-only делает
+    # случайный доступ к ячейкам квадратичным. Данные читаем одним проходом.
+    wb = openpyxl.load_workbook(filepath, data_only=True)
     ws60 = _find_sheet(wb, '60')
     ws30 = _find_sheet(wb, '30')
 
@@ -264,6 +280,12 @@ def analyze(filepath):
 
 
 if __name__ == '__main__':
+    # UTF-8 в stdout независимо от locale контейнера (иначе en-dash в period при
+    # POSIX/C-локали упал бы с UnicodeEncodeError и Node получил бы пустой вывод).
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
     if len(sys.argv) < 2:
         print(json.dumps({'success': False, 'error': 'No file path provided'}))
         sys.exit(1)

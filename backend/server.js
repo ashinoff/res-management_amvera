@@ -379,6 +379,14 @@ const TpSection = sequelize.define('TpSection', {
   lastProfilePeriod: {
     type: DataTypes.STRING,
     allowNull: true
+  },
+  lastProfileSource: {
+    type: DataTypes.STRING,      // '60' | '30' — источник часового ряда
+    allowNull: true
+  },
+  lastProfileAt: {
+    type: DataTypes.DATE,        // когда профиль последний раз обновил секцию
+    allowNull: true
   }
 });
 
@@ -1649,6 +1657,8 @@ app.post('/api/upload/analyze',
             lastPeakKw: r.peakKw,
             lastPeakAt: parsePeakAt(r.peakAt),
             lastProfilePeriod: period,
+            lastProfileSource: r.source || null,
+            lastProfileAt: new Date(),
             overloadStatus
           });
           sectionsUpdated++;
@@ -3441,14 +3451,24 @@ function runProfileAnalyzer(filePath) {
       try { python = spawn('python', [scriptPath, filePath]); }
       catch (e2) { return resolve({ success: false, error: 'Python недоступен' }); }
     }
-    let out = '', err = '';
+    let out = '', err = '', done = false;
+    const finish = (v) => { if (done) return; done = true; clearTimeout(timer); resolve(v); };
+
+    // Таймаут: зависание анализатора больше не выглядит как «молча ничего не нашлось».
+    const timer = setTimeout(() => {
+      try { python.kill('SIGKILL'); } catch (e) {}
+      console.error('[PROFILE] анализатор не уложился в 120 с — SIGKILL');
+      finish({ success: false, error: 'Анализатор не уложился в 120 с' });
+    }, 120000);
+
     python.stdout.on('data', d => { out += d.toString(); });
     python.stderr.on('data', d => { err += d.toString(); });
-    python.on('error', () => resolve({ success: false, error: 'Python недоступен' }));
+    python.on('error', () => finish({ success: false, error: 'Python недоступен' }));
     python.on('close', (code) => {
-      if (code !== 0) return resolve({ success: false, error: `Ошибка анализа (код ${code}): ${err}` });
-      try { resolve(JSON.parse(out)); }
-      catch (e) { resolve({ success: false, error: 'Не удалось разобрать результат анализатора' }); }
+      if (err) console.error('[PROFILE] stderr:', err);
+      if (code !== 0) return finish({ success: false, error: `Ошибка анализа (код ${code}): ${err}` });
+      try { finish(JSON.parse(out)); }
+      catch (e) { finish({ success: false, error: 'Не удалось разобрать результат анализатора' }); }
     });
   });
 }
@@ -5273,7 +5293,10 @@ async function initializeDatabase() {
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_tpsection_unique ON "TpSections" ("resId", "tpName", "sectionNumber")`,
       // Случаи перегрузки секции (этап 3)
       `CREATE INDEX IF NOT EXISTS idx_overloadcase_section ON "OverloadCases" ("sectionId")`,
-      `CREATE INDEX IF NOT EXISTS idx_overloadcase_res_stage ON "OverloadCases" ("resId", "stage")`
+      `CREATE INDEX IF NOT EXISTS idx_overloadcase_res_stage ON "OverloadCases" ("resId", "stage")`,
+      // Источник ряда и дата обновления профиля на секции (для модалки техучёта)
+      `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileSource" VARCHAR(10)`,
+      `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileAt" TIMESTAMP WITH TIME ZONE`
     ];
     for (const stmt of indexStatements) {
       try {

@@ -1012,47 +1012,73 @@ const executeClearHistory = async () => {
         const cosPhi = s.cosPhi != null ? s.cosPhi : 0.9;
         const limitKw = s.tnKva != null ? s.tnKva * cosPhi : null;
         const f1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
-        const statusLabel = s.overloadStatus === 'overload'
-          ? { t: 'Перегруз', c: 'var(--red)' }
+        const hasData = s.lastPeakKw != null;
+        const status = s.overloadStatus === 'overload'
+          ? { t: 'Перегруз', cls: 'status-error' }
           : s.overloadStatus === 'ok'
-          ? { t: 'Норма', c: 'var(--green)' }
-          : { t: 'Нет данных', c: 'var(--text-muted)' };
+          ? { t: 'Норма', cls: 'status-ok' }
+          : { t: 'Нет данных', cls: 'status-unchecked' };
         const STAGE_RU = { askue_limit: 'Ограничение по АСКУЭ', res_work: 'Мероприятия РЭС', awaiting_recheck: 'Ожидает перепроверки' };
+        // Шкала загрузки: 0..120% лимита → 0..100% ширины полосы.
+        const pct = (limitKw && hasData) ? (s.lastPeakKw / limitKw) * 100 : null;
+        const barW = pct != null ? Math.min(pct, 120) * 100 / 120 : 0;
+        const barCls = pct == null ? 'gray' : pct > 100 ? 'red' : pct >= 90 ? 'amber' : 'green';
+        const srcRu = s.lastProfileSource === '60' ? '60 мин' : s.lastProfileSource === '30' ? '30 мин' : '—';
         return (
           <div className="modal-backdrop" onClick={() => setTechModal(null)}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
                 <h3>{s.tpName} · СШ-{s.sectionNumber}</h3>
-                <button className="close-btn" onClick={() => setTechModal(null)}><IconX className="ico" /></button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span className={`tech-pill ${status.cls}`}>{status.t}</span>
+                  <button className="close-btn" onClick={() => setTechModal(null)}><IconX className="ico" /></button>
+                </div>
               </div>
               <div className="modal-body">
-                <div className="detail-row"><strong>№ ПУ техучёта:</strong> {s.techPuNumber || '—'}</div>
-                <div className="detail-row"><strong>Sном тр-ра:</strong> {s.tnKva != null ? `${s.tnKva} кВА` : '—'}</div>
-                <div className="detail-row"><strong>cosφ:</strong> {cosPhi}</div>
-                <div className="detail-row"><strong>Лимит:</strong> {f1(limitKw)} кВт</div>
-                <div className="detail-row"><strong>Статус:</strong> <span style={{ color: statusLabel.c, fontWeight: 600 }}>{statusLabel.t}</span></div>
-                {s.lastPeakKw != null ? (
+                {hasData ? (
                   <>
-                    <div className="highlight-box">
-                      <strong>Pmax:</strong> {f1(s.lastPeakKw)} кВт
-                      {s.lastPeakAt ? ` от ${new Date(s.lastPeakAt).toLocaleString('ru-RU')}` : ''}
+                    <div className="tech-pmax">
+                      <div className="tech-pmax-value">Pmax {f1(s.lastPeakKw)} кВт</div>
+                      <div className="tech-pmax-sub">
+                        {s.lastPeakAt ? new Date(s.lastPeakAt).toLocaleString('ru-RU') : '—'}
+                        {s.lastProfilePeriod ? ` · период ${s.lastProfilePeriod}` : ''}
+                      </div>
                     </div>
-                    {s.lastProfilePeriod && <div className="detail-row"><strong>Период выгрузки:</strong> {s.lastProfilePeriod}</div>}
-                  </>
-                ) : (
-                  <div className="detail-row muted">Профиль мощности не загружался</div>
-                )}
-                {techCase && (
-                  <div className="highlight-box">
-                    <strong>Случай перегруза:</strong> {STAGE_RU[techCase.stage] || techCase.stage}
-                    {typeof onSectionChange === 'function' && (
-                      <div style={{ marginTop: 6 }}>
-                        <button className="link-btn" style={{ color: 'var(--accent)', textDecoration: 'underline' }}
-                          onClick={() => { setTechModal(null); onSectionChange('power_overload'); }}>
-                          Перейти в «Превышение Pном»
-                        </button>
+
+                    <div className="tech-bar">
+                      <div className={`tech-bar-fill ${barCls}`} style={{ width: `${barW}%` }} />
+                    </div>
+                    <div className="tech-bar-label">
+                      {pct != null ? `${Math.round(pct)}% от лимита ${f1(limitKw)} кВт` : `лимит ${f1(limitKw)} кВт`}
+                    </div>
+
+                    <div className="tech-grid">
+                      <div><span className="k">№ ПУ техучёта</span><span className="v">{s.techPuNumber || '—'}</span></div>
+                      <div><span className="k">Sном, кВА</span><span className="v">{s.tnKva != null ? s.tnKva : '—'}</span></div>
+                      <div><span className="k">cosφ</span><span className="v">{cosPhi}</span></div>
+                      <div><span className="k">Лимит, кВт</span><span className="v">{f1(limitKw)}</span></div>
+                      <div><span className="k">Источник</span><span className="v">{srcRu}</span></div>
+                      <div><span className="k">Дата загрузки профиля</span><span className="v">{s.lastProfileAt ? new Date(s.lastProfileAt).toLocaleString('ru-RU') : '—'}</span></div>
+                    </div>
+
+                    {techCase && (
+                      <div className="highlight-box">
+                        <strong>Случай перегруза:</strong> {STAGE_RU[techCase.stage] || techCase.stage}
+                        {typeof onSectionChange === 'function' && (
+                          <div style={{ marginTop: 6 }}>
+                            <button className="link-btn" style={{ color: 'var(--accent)', textDecoration: 'underline' }}
+                              onClick={() => { setTechModal(null); onSectionChange('power_overload'); }}>
+                              Перейти в «Превышение Pном»
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
+                  </>
+                ) : (
+                  <div className="tech-empty">
+                    <span className="svg-frame"><IconZap size={24} /></span>
+                    <p>Профиль мощности не загружался</p>
                   </div>
                 )}
               </div>
