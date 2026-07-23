@@ -254,6 +254,11 @@ function NetworkStructure() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
 
+  // Секции шин ТП (этап 1)
+  const [sections, setSections] = useState([]);
+  const [sectionModal, setSectionModal] = useState(null); // { tpName, resId, id?, ... } | null
+  const [sectionForm, setSectionForm] = useState({ sectionNumber: '', tnKva: '', cosPhi: '0.9', techPuNumber: '' });
+
   // Используем переданный selectedRes, если нет - берем из контекста
   
   
@@ -269,9 +274,90 @@ function NetworkStructure() {
     }
   }, [selectedRes]);
 
+  // Загрузка секций шин выбранного РЭСа
+  const loadSections = useCallback(async () => {
+    try {
+      const response = await api.get('/api/network/sections', { params: { resId: selectedRes || undefined } });
+      setSections(response.data);
+    } catch (error) {
+      console.error('Error loading sections:', error);
+      setSections([]);
+    }
+  }, [selectedRes]);
+
+  useEffect(() => {
+    loadSections();
+  }, [loadSections]);
+
+  // Открыть форму секции (создание/редактирование)
+  const openSectionModal = (tpName, resId, section = null) => {
+    if (section) {
+      setSectionForm({
+        sectionNumber: String(section.sectionNumber ?? ''),
+        tnKva: section.tnKva != null ? String(section.tnKva) : '',
+        cosPhi: section.cosPhi != null ? String(section.cosPhi) : '0.9',
+        techPuNumber: section.techPuNumber || ''
+      });
+      setSectionModal({ ...section, tpName, resId });
+    } else {
+      setSectionForm({ sectionNumber: '', tnKva: '', cosPhi: '0.9', techPuNumber: '' });
+      setSectionModal({ tpName, resId });
+    }
+  };
+
+  const saveSection = async () => {
+    try {
+      const payload = {
+        sectionNumber: sectionForm.sectionNumber,
+        tnKva: sectionForm.tnKva,
+        cosPhi: sectionForm.cosPhi,
+        techPuNumber: sectionForm.techPuNumber
+      };
+      if (sectionModal.id) {
+        await api.put(`/api/network/sections/${sectionModal.id}`, payload);
+      } else {
+        await api.post('/api/network/sections', {
+          ...payload,
+          resId: sectionModal.resId,
+          tpName: sectionModal.tpName
+        });
+      }
+      setSectionModal(null);
+      await loadSections();
+    } catch (error) {
+      alert('Ошибка: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  const deleteSection = async (section) => {
+    if (!window.confirm(`Удалить секцию СШ-${section.sectionNumber}?`)) return;
+    try {
+      await api.delete(`/api/network/sections/${section.id}`);
+      await loadSections();
+    } catch (error) {
+      alert('Ошибка: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  // Привязка/отвязка ВЛ к секции
+  const assignSection = async (item, sectionId) => {
+    try {
+      await api.put(`/api/network/structure/${item.id}`, {
+        startPu: item.startPu,
+        middlePu: item.middlePu,
+        endPu: item.endPu,
+        sectionId: sectionId || null
+      });
+      await loadNetworkStructure();
+      await loadSections();
+    } catch (error) {
+      alert('Ошибка: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
   useEffect(() => {
     loadNetworkStructure();
-    
+
     // Слушаем события обновления
     const handleUpdate = () => loadNetworkStructure();
     
@@ -752,52 +838,153 @@ const executeClearHistory = async () => {
   </div>
 </div>
       
-      <div className="structure-table">
-        <table>
-          <thead>
-            <tr>
-              {user.role === 'admin' && (
-                <th className="checkbox-column">
-                  <input 
-                    type="checkbox"
-                    checked={selectedIds.length === filteredData.length && filteredData.length > 0}
-                    onChange={handleSelectAll}
-                  />
-                </th>
-              )}
-              <th>РЭС</th>
-              <th>ТП</th>
-              <th>ВЛ</th>
-              <th>Начало</th>
-              <th>Середина</th>
-              <th>Конец</th>
-              <th>Дата обновления</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredData.map(item => (
-              <tr key={item.id} className={selectedIds.includes(item.id) ? 'selected' : ''}>
+      <div className="structure-grouped">
+        {(() => {
+          // Класс индикатора техучёта секции по overloadStatus (данные придут в этапе 2).
+          const overloadClass = (st) =>
+            st === 'ok' ? 'status-ok' : st === 'overload' ? 'status-error' : 'status-unchecked';
+
+          // Строка одной ВЛ: чекбокс (admin) + название + начало/середина/конец.
+          const renderVlRow = (item, showSectionSelect) => {
+            const tpSections = sections.filter(s => s.tpName === item.tpName);
+            return (
+              <div key={item.id} className={`vl-row ${selectedIds.includes(item.id) ? 'selected' : ''}`}>
                 {user.role === 'admin' && (
-                  <td className="checkbox-column">
-                    <input 
-                      type="checkbox"
-                      checked={selectedIds.includes(item.id)}
-                      onChange={() => handleSelectRow(item.id)}
-                    />
-                  </td>
+                  <input
+                    type="checkbox"
+                    className="vl-check"
+                    checked={selectedIds.includes(item.id)}
+                    onChange={() => handleSelectRow(item.id)}
+                  />
                 )}
-                <td>{item.ResUnit?.name}</td>
-                <td>{item.tpName}</td>
-                <td>{item.vlName}</td>
-                <td>{renderPuCell(item, 'start')}</td>
-                <td>{renderPuCell(item, 'middle')}</td>
-                <td>{renderPuCell(item, 'end')}</td>
-                <td>{new Date(item.lastUpdate).toLocaleDateString('ru-RU')}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                <span className="vl-name">{item.vlName}</span>
+                <div className="vl-cells">
+                  {renderPuCell(item, 'start')}
+                  {renderPuCell(item, 'middle')}
+                  {renderPuCell(item, 'end')}
+                </div>
+                {showSectionSelect && user.role === 'admin' && (
+                  <select
+                    className="vl-section-select"
+                    value=""
+                    onChange={(e) => assignSection(item, e.target.value)}
+                    disabled={tpSections.length === 0}
+                    title={tpSections.length === 0 ? 'Сначала добавьте секцию этой ТП' : 'Привязать к секции'}
+                  >
+                    <option value="">Секция…</option>
+                    {tpSections.map(s => (
+                      <option key={s.id} value={s.id}>СШ-{s.sectionNumber}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            );
+          };
+
+          return uniqueTps.map(tp => {
+            const tpItems = filteredData.filter(i => i.tpName === tp);
+            const tpSections = sections.filter(s => s.tpName === tp);
+            const resId = tpItems[0]?.resId || tpItems[0]?.ResUnit?.id;
+            const unassigned = tpItems.filter(i => !i.sectionId);
+
+            return (
+              <div key={tp} className="tp-card">
+                <div className="tp-card-head">
+                  <span className="tp-card-title">{tpItems[0]?.ResUnit?.name} · ТП {tp}</span>
+                  {user.role === 'admin' && (
+                    <button className="section-add-btn" onClick={() => openSectionModal(tp, resId)}>
+                      <IconLayers className="ico" /> Добавить секцию
+                    </button>
+                  )}
+                </div>
+
+                {/* Секции ТП */}
+                {tpSections.map(section => {
+                  const lines = tpItems.filter(i => i.sectionId === section.id);
+                  const parts = [`СШ-${section.sectionNumber}`];
+                  if (section.tnKva != null) parts.push(`${section.tnKva} кВА`);
+                  if (section.techPuNumber) parts.push(`тех.учёт № ${section.techPuNumber}`);
+                  return (
+                    <div key={section.id} className="section-block">
+                      <div className="section-head">
+                        <span className={`status-box ${overloadClass(section.overloadStatus)}`}
+                              title="Индикатор техучёта (перегруз)"></span>
+                        <span className="section-title">{parts.join(' · ')}</span>
+                        {user.role === 'admin' && (
+                          <span className="section-actions">
+                            <button className="link-btn" onClick={() => openSectionModal(tp, resId, section)}>
+                              <IconEdit className="ico" />
+                            </button>
+                            <button className="link-btn" onClick={() => deleteSection(section)}>
+                              <IconTrash className="ico" style={{ color: 'var(--red)' }} />
+                            </button>
+                          </span>
+                        )}
+                      </div>
+                      <div className="section-lines">
+                        {lines.length === 0
+                          ? <div className="section-empty">Нет привязанных ВЛ</div>
+                          : lines.map(item => renderVlRow(item, false))}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* ВЛ без секции */}
+                {unassigned.length > 0 && (
+                  <div className="section-block section-block--none">
+                    <div className="section-head">
+                      <span className="section-title muted">ВЛ без секции ({unassigned.length})</span>
+                    </div>
+                    <div className="section-lines">
+                      {unassigned.map(item => renderVlRow(item, true))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          });
+        })()}
       </div>
+
+      {/* Форма секции шин ТП */}
+      {sectionModal && (
+        <div className="modal-backdrop" onClick={() => setSectionModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{sectionModal.id ? 'Редактировать секцию' : 'Новая секция'} — ТП {sectionModal.tpName}</h3>
+              <button className="close-btn" onClick={() => setSectionModal(null)}><IconX className="ico" /></button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Номер секции шин</label>
+                <input type="number" value={sectionForm.sectionNumber}
+                  onChange={(e) => setSectionForm({ ...sectionForm, sectionNumber: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Sном тр-ра, кВА</label>
+                <input type="number" step="any" value={sectionForm.tnKva}
+                  onChange={(e) => setSectionForm({ ...sectionForm, tnKva: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>cosφ</label>
+                <input type="number" step="any" value={sectionForm.cosPhi}
+                  onChange={(e) => setSectionForm({ ...sectionForm, cosPhi: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>№ ПУ технического учёта</label>
+                <input type="text" value={sectionForm.techPuNumber}
+                  onChange={(e) => setSectionForm({ ...sectionForm, techPuNumber: e.target.value })} />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="cancel-btn" onClick={() => setSectionModal(null)}>Отмена</button>
+              <button className="confirm-btn" onClick={saveSection}
+                disabled={sectionForm.sectionNumber === ''}>Сохранить</button>
+            </div>
+          </div>
+        </div>
+      )}
       
       <ErrorDetailsModal 
         isOpen={modalOpen}

@@ -334,6 +334,32 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-23** — Секции шин ТП, ЭТАП 1/3 (только модель + экраны структуры; БЕЗ
+  анализатора профилей и workflow — следующие коммиты). Бэкенд (`server.js`):
+  новая модель **`TpSection`** (resId FK, tpName, sectionNumber, tnKva=Sном кВА,
+  cosPhi=0.9, techPuNumber, overloadStatus ENUM ok/overload/unknown, lastPeakKw/
+  lastPeakAt/lastProfilePeriod); у `NetworkStructure` — колонка **`sectionId`**
+  (nullable; NULL = «ВЛ без секции»). Ассоциации: `NetworkStructure.belongsTo
+  TpSection as 'section'`, `TpSection.hasMany NetworkStructure as 'lines'`.
+  Идемпотентно в `initializeDatabase` (после `sync()`): `ALTER TABLE
+  NetworkStructures ADD COLUMN IF NOT EXISTS sectionId`, индексы IF NOT EXISTS
+  `idx_netstruct_section`, `idx_tpsection_res`, уникальный `idx_tpsection_unique
+  (resId,tpName,sectionNumber)` — DB_ALTER не нужен (новую таблицу создаёт sync).
+  API: `GET /api/network/sections?resId=` (секции + `linesCount`),
+  POST/PUT/DELETE `/api/network/sections[/:id]` (admin, как редактирование
+  структуры; DELETE→400 если привязаны ВЛ), `PUT /api/network/structure/:id`
+  принимает `sectionId` с валидацией (та же ТП и РЭС, иначе 400); GET структуры
+  включает `section` (ограниченные attributes). Фронт (`App.jsx`, `NetworkStructure`):
+  плоская таблица заменена на **группировку ТП → секции → ВЛ** (карточка ТП →
+  блоки секций «СШ-N · кВА · тех.учёт №…» с квадратом-индикатором техучёта тем же
+  стилем `.status-box` (unknown=серый/ok=зелёный/overload=красный, данные пока
+  всегда unknown) + блок «ВЛ без секции» с селектом привязки). Форма секции
+  (номер, «Sном тр-ра, кВА», cosφ=0.9, № ПУ техучёта). Логика начало/середина/
+  конец (`renderPuCell`), чекбоксы/удаление/фильтры/экспорт — не тронуты, только
+  переиспользованы. БЕЗ новых анимаций (дизайн-инварианты). CSS новых классов —
+  в конце `App.css`. Проверки: `node --check`, `npm run build` — ОК (живой старт
+  с БД локально не гонялся — нет драйвера; на Amvera sync создаёт таблицу,
+  ALTER идемпотентный).
 - **2026-07-17** — UX модалки «Отметить выполнение мероприятий» (роль РЭС,
   `Notifications` в `frontend/src/App.jsx`). Раньше кнопка «Подтвердить
   выполнение» была `disabled` при <5 слов в комментарии — клик ничего не давал,

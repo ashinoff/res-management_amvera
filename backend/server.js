@@ -320,9 +320,65 @@ const NetworkStructure = sequelize.define('NetworkStructure', {
     type: DataTypes.STRING,
     allowNull: true
   },
+  // Привязка ВЛ к секции шин ТП (NULL = «ВЛ без секции», старые записи).
+  sectionId: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   lastUpdate: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW
+  }
+});
+
+// 3b. Модель секции шин ТП (СШ). Одна ТП может иметь несколько секций;
+// у секции — силовой трансформатор (Sном) и ПУ технического учёта на вводе.
+const TpSection = sequelize.define('TpSection', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  resId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: { model: ResUnit, key: 'id' }
+  },
+  tpName: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  sectionNumber: {
+    type: DataTypes.INTEGER,
+    allowNull: false          // номер секции шин
+  },
+  tnKva: {
+    type: DataTypes.FLOAT,
+    allowNull: true           // Sном силового трансформатора, кВА
+  },
+  cosPhi: {
+    type: DataTypes.FLOAT,
+    defaultValue: 0.9
+  },
+  techPuNumber: {
+    type: DataTypes.STRING,
+    allowNull: true           // № ПУ технического учёта на вводе секции
+  },
+  overloadStatus: {
+    type: DataTypes.ENUM('ok', 'overload', 'unknown'),
+    defaultValue: 'unknown'
+  },
+  lastPeakKw: {
+    type: DataTypes.FLOAT,
+    allowNull: true
+  },
+  lastPeakAt: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  lastProfilePeriod: {
+    type: DataTypes.STRING,
+    allowNull: true
   }
 });
 
@@ -721,6 +777,11 @@ ResUnit.hasMany(User, { foreignKey: 'resId' });
 NetworkStructure.belongsTo(ResUnit, { foreignKey: 'resId' });
 NetworkStructure.hasMany(PuStatus, { foreignKey: 'networkStructureId' });
 PuStatus.belongsTo(NetworkStructure, { foreignKey: 'networkStructureId' });
+// Секции шин ТП
+TpSection.belongsTo(ResUnit, { foreignKey: 'resId' });
+ResUnit.hasMany(TpSection, { foreignKey: 'resId' });
+NetworkStructure.belongsTo(TpSection, { foreignKey: 'sectionId', as: 'section' });
+TpSection.hasMany(NetworkStructure, { foreignKey: 'sectionId', as: 'lines' });
 Notification.belongsTo(User, { as: 'fromUser', foreignKey: 'fromUserId' });
 Notification.belongsTo(User, { as: 'toUser', foreignKey: 'toUserId' });
 Notification.belongsTo(ResUnit, { foreignKey: 'resId' });
@@ -1088,11 +1149,17 @@ app.get('/api/network/structure/:resId?', authenticateToken, async (req, res) =>
           required: false,
           attributes: ['id', 'puNumber', 'position', 'status', 'errorDetails', 'lastCheck']
         },
+        {
+          model: TpSection,
+          as: 'section',
+          required: false,
+          attributes: ['id', 'sectionNumber', 'tnKva', 'techPuNumber', 'overloadStatus']
+        },
         ResUnit
       ],
       order: [['tpName', 'ASC'], ['vlName', 'ASC']]
     });
-    
+
     res.json(structures);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1100,23 +1167,161 @@ app.get('/api/network/structure/:resId?', authenticateToken, async (req, res) =>
 });
 
 // 4. ОБНОВЛЕНИЕ структуры сети (только админ)
-app.put('/api/network/structure/:id', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.put('/api/network/structure/:id',
+  authenticateToken,
+  checkRole(['admin']),
   async (req, res) => {
     try {
       const { startPu, middlePu, endPu } = req.body;
-      
-      await NetworkStructure.update({
+
+      const structure = await NetworkStructure.findByPk(req.params.id);
+      if (!structure) {
+        return res.status(404).json({ error: 'ВЛ не найдена' });
+      }
+
+      const updates = {
         startPu: startPu || null,
         middlePu: middlePu || null,
         endPu: endPu || null,
         lastUpdate: new Date()
-      }, {
-        where: { id: req.params.id }
-      });
-      
+      };
+
+      // Привязка/перепривязка ВЛ к секции шин (sectionId). Секция должна быть
+      // того же РЭСа и той же ТП, что и ВЛ, иначе 400. null = снять привязку.
+      if ('sectionId' in req.body) {
+        const sectionId = req.body.sectionId;
+        if (sectionId === null || sectionId === '') {
+          updates.sectionId = null;
+        } else {
+          const section = await TpSection.findByPk(sectionId);
+          if (!section) {
+            return res.status(400).json({ error: 'Секция не найдена' });
+          }
+          if (section.resId !== structure.resId || section.tpName !== structure.tpName) {
+            return res.status(400).json({ error: 'Секция принадлежит другой ТП или РЭС' });
+          }
+          updates.sectionId = section.id;
+        }
+      }
+
+      await structure.update(updates);
+
       res.json({ success: true, message: 'Структура обновлена' });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+});
+
+// 4a. СЕКЦИИ ШИН ТП — список секций РЭСа со счётчиком привязанных ВЛ
+app.get('/api/network/sections', authenticateToken, async (req, res) => {
+  try {
+    const resId = req.query.resId || req.user.resId;
+    if (req.user.role !== 'admin' && resId != req.user.resId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const where = {};
+    if (resId) where.resId = resId;
+
+    const sections = await TpSection.findAll({
+      where,
+      order: [['tpName', 'ASC'], ['sectionNumber', 'ASC']]
+    });
+
+    // Счётчик привязанных ВЛ по секциям (одним запросом).
+    const counts = await NetworkStructure.findAll({
+      attributes: ['sectionId', [sequelize.fn('COUNT', sequelize.col('id')), 'cnt']],
+      where: { sectionId: { [Op.ne]: null }, ...(resId ? { resId } : {}) },
+      group: ['sectionId'],
+      raw: true
+    });
+    const cntBySection = {};
+    counts.forEach(c => { cntBySection[c.sectionId] = parseInt(c.cnt, 10); });
+
+    const result = sections.map(s => ({
+      ...s.toJSON(),
+      linesCount: cntBySection[s.id] || 0
+    }));
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 4b. Создание секции (админ — как редактирование структуры)
+app.post('/api/network/sections',
+  authenticateToken,
+  checkRole(['admin']),
+  async (req, res) => {
+    try {
+      const { resId, tpName, sectionNumber, tnKva, cosPhi, techPuNumber } = req.body;
+      if (!resId || !tpName || sectionNumber === undefined || sectionNumber === null || sectionNumber === '') {
+        return res.status(400).json({ error: 'Обязательны РЭС, ТП и номер секции' });
+      }
+
+      const section = await TpSection.create({
+        resId,
+        tpName: String(tpName).trim(),
+        sectionNumber: parseInt(sectionNumber, 10),
+        tnKva: (tnKva === '' || tnKva === undefined) ? null : parseFloat(tnKva),
+        cosPhi: (cosPhi === '' || cosPhi === undefined) ? 0.9 : parseFloat(cosPhi),
+        techPuNumber: techPuNumber ? String(techPuNumber).trim() : null
+      });
+
+      res.json({ success: true, section });
+    } catch (error) {
+      if (error.name === 'SequelizeUniqueConstraintError') {
+        return res.status(400).json({ error: 'Секция с таким номером уже есть у этой ТП' });
+      }
+      res.status(500).json({ error: error.message });
+    }
+});
+
+// 4c. Обновление секции
+app.put('/api/network/sections/:id',
+  authenticateToken,
+  checkRole(['admin']),
+  async (req, res) => {
+    try {
+      const section = await TpSection.findByPk(req.params.id);
+      if (!section) return res.status(404).json({ error: 'Секция не найдена' });
+
+      const { sectionNumber, tnKva, cosPhi, techPuNumber } = req.body;
+      const updates = {};
+      if (sectionNumber !== undefined) updates.sectionNumber = parseInt(sectionNumber, 10);
+      if (tnKva !== undefined) updates.tnKva = (tnKva === '' || tnKva === null) ? null : parseFloat(tnKva);
+      if (cosPhi !== undefined) updates.cosPhi = (cosPhi === '' || cosPhi === null) ? 0.9 : parseFloat(cosPhi);
+      if (techPuNumber !== undefined) updates.techPuNumber = techPuNumber ? String(techPuNumber).trim() : null;
+
+      await section.update(updates);
+      res.json({ success: true, section });
+    } catch (error) {
+      if (error.name === 'SequelizeUniqueConstraintError') {
+        return res.status(400).json({ error: 'Секция с таким номером уже есть у этой ТП' });
+      }
+      res.status(500).json({ error: error.message });
+    }
+});
+
+// 4d. Удаление секции — запрещено, если к ней привязаны ВЛ
+app.delete('/api/network/sections/:id',
+  authenticateToken,
+  checkRole(['admin']),
+  async (req, res) => {
+    try {
+      const section = await TpSection.findByPk(req.params.id);
+      if (!section) return res.status(404).json({ error: 'Секция не найдена' });
+
+      const linked = await NetworkStructure.count({ where: { sectionId: section.id } });
+      if (linked > 0) {
+        return res.status(400).json({
+          error: `Нельзя удалить секцию: к ней привязано ВЛ — ${linked}. Сначала отвяжите линии.`
+        });
+      }
+
+      await section.destroy();
+      res.json({ success: true, message: 'Секция удалена' });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -4540,7 +4745,13 @@ async function initializeDatabase() {
       // ADD COLUMN IF NOT EXISTS — доезжает без DB_ALTER (Postgres-safe,
       // уникальный индекс допускает много NULL).
       `ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "keycloakId" VARCHAR(64)`,
-      `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_keycloak ON "Users" ("keycloakId")`
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_keycloak ON "Users" ("keycloakId")`,
+      // Секции шин ТП: привязка ВЛ к секции + индексы. ADD COLUMN IF NOT EXISTS
+      // доезжает без DB_ALTER (Postgres-safe). Старые ВЛ остаются с NULL.
+      `ALTER TABLE "NetworkStructures" ADD COLUMN IF NOT EXISTS "sectionId" INTEGER`,
+      `CREATE INDEX IF NOT EXISTS idx_netstruct_section ON "NetworkStructures" ("sectionId")`,
+      `CREATE INDEX IF NOT EXISTS idx_tpsection_res ON "TpSections" ("resId")`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_tpsection_unique ON "TpSections" ("resId", "tpName", "sectionNumber")`
     ];
     for (const stmt of indexStatements) {
       try {

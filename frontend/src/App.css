@@ -6675,3 +6675,46 @@ tr.selected:hover,
 .notification-compact.info {
   cursor: default;
 }
+
+/* ===== Структура сети: группировка ТП → секции → ВЛ (этап 1) ===== */
+.structure-grouped { display: flex; flex-direction: column; gap: 14px; }
+.tp-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  overflow: hidden;
+}
+.tp-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.tp-card-title { font-weight: 600; }
+.section-add-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: #fff; cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.section-add-btn:hover { border-color: var(--navy); background: var(--surface-2); }
+.section-block { padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.section-block:last-child { border-bottom: none; }
+.section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.section-title { font-weight: 600; font-size: 14px; }
+.section-title.muted { color: var(--text-muted); font-weight: 500; }
+.section-actions { display: inline-flex; gap: 4px; margin-left: auto; }
+.link-btn { background: none; border: none; cursor: pointer; padding: 2px 4px; }
+.section-empty { color: var(--text-muted); font-size: 13px; padding: 4px 0; }
+.section-lines { display: flex; flex-direction: column; gap: 2px; }
+.vl-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 8px; border-radius: 6px;
+  transition: background .12s;
+}
+.vl-row:hover { background: var(--surface-2); }
+.vl-row.selected { background: var(--accent-soft); }
+.vl-name { min-width: 160px; font-size: 13px; }
+.vl-cells { display: flex; gap: 14px; align-items: center; }
+.vl-section-select { margin-left: auto; font-size: 13px; padding: 3px 6px; }
