@@ -1309,19 +1309,24 @@ const executeClearHistory = async () => {
               <IconTrash className="ico" />
               <span className="fab-badge">{selectedIds.length}</span>
             </button>
-            <button className="fab-btn" title="Очистить историю выбранных" onClick={handleClearTpHistory}>
+            <button className="fab-btn fab-warn" title="Очистить историю выбранных" onClick={handleClearTpHistory}>
               <IconBroom className="ico" />
               <span className="fab-badge">{selectedIds.length}</span>
             </button>
           </>
         )}
-        <button className="fab-btn" title="Обновить структуру" disabled={loading}
-          onClick={() => { setLoading(true); loadNetworkStructure(); }}>
-          <IconRefresh className="ico" />
-        </button>
-        <button className="fab-btn" title="Выгрузка в Excel" onClick={exportStructureToExcel}>
-          <IconDownload className="ico" />
-        </button>
+        {/* Появляются вместе с кнопкой «наверх» (при прокрутке). */}
+        {showScrollTop && (
+          <>
+            <button className="fab-btn fab-blue" title="Обновить структуру" disabled={loading}
+              onClick={() => { setLoading(true); loadNetworkStructure(); }}>
+              <IconRefresh className="ico" />
+            </button>
+            <button className="fab-btn fab-green" title="Выгрузка в Excel" onClick={exportStructureToExcel}>
+              <IconDownload className="ico" />
+            </button>
+          </>
+        )}
       </div>
 
       {showScrollTop && (

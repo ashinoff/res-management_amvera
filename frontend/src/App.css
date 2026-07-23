@@ -210,7 +210,7 @@ body {
 .osc-bg {
   position: absolute;
   left: -24px; right: -24px;
-  top: -18px; bottom: -14px;
+  top: -18px; bottom: -7px;
   z-index: 2;
   pointer-events: none;
   mix-blend-mode: screen;
@@ -6843,6 +6843,12 @@ tr.selected:hover,
 .fab-btn:disabled { opacity: .5; cursor: default; }
 .fab-btn.fab-danger { background: var(--red); }
 .fab-btn.fab-danger:hover { background: #b91c1c; }
+.fab-btn.fab-green { background: var(--green); }
+.fab-btn.fab-green:hover { background: #166534; }
+.fab-btn.fab-blue { background: var(--blue, #1d4ed8); }
+.fab-btn.fab-blue:hover { background: #1e40af; }
+.fab-btn.fab-warn { background: var(--amber); }
+.fab-btn.fab-warn:hover { background: #b45309; }
 .fab-badge {
   position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
   padding: 0 5px; border-radius: 9px; background: var(--amber, #e08a00); color: #fff;
