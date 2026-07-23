@@ -6990,3 +6990,21 @@ tr.selected:hover,
 @media (max-width: 900px) {
   .file-types-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ===== Загрузка файлов: активная синяя кнопка + полировка ===== */
+.upload-actions { text-align: left; margin-top: 20px; }
+.upload-submit {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 22px; border: none; border-radius: 10px;
+  background: var(--blue); color: #fff;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(29, 78, 216, 0.28);
+  transition: background .12s, box-shadow .12s;
+}
+.upload-submit:hover { background: #1e40af; box-shadow: 0 3px 12px rgba(29, 78, 216, 0.35); }
+.upload-submit:disabled { background: #cbd5e1; cursor: default; box-shadow: none; }
+.upload-submit .ico { width: 18px; height: 18px; }
+/* Секции страницы — единый ритм отступов */
+.file-type-selection { margin-top: 4px; }
+.upload-progress-section { margin-top: 18px; }
+.upload-result { margin-top: 20px; }

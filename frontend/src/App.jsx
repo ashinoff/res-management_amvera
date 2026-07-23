@@ -1730,16 +1730,16 @@ for (let i = 0; i < files.length; i++) {
         </div>
       )}
 
-      {/* Кнопка загрузки */}
+      {/* Кнопка загрузки — активная синяя */}
       {files.length > 0 && !uploading && (
         <div className="upload-actions">
-          <button 
-            onClick={handleUpload} 
+          <button
+            onClick={handleUpload}
             disabled={!selectedType}
-            className="btn btn-primary btn-large btn-default"
+            className="upload-submit"
           >
-            <span><IconRocket className="ico" /></span>
-            Загрузить и анализировать ({files.length} файлов)
+            <IconRocket className="ico" />
+            Загрузить и анализировать ({files.length})
           </button>
         </div>
       )}
