@@ -2674,10 +2674,12 @@ function Reports() {
       
       if (reportType === 'problem_vl') {
         response = await api.get('/api/reports/problem-vl', { params });
+      } else if (reportType === 'power_overload') {
+        response = await api.get('/api/reports/overload', { params });
       } else {
         response = await api.get('/api/reports/detailed', { params });
       }
-      
+
       setReportData(response.data);
     } catch (error) {
       console.error('Error loading reports:', error);
@@ -2715,7 +2717,24 @@ function Reports() {
     const exportData = filteredData.map((item, index) => {
       console.log(`Processing item ${index}:`, item);
       
-      if (reportType === 'problem_vl') {
+      if (reportType === 'power_overload') {
+        return {
+          'РЭС': item.resName || '',
+          'ТП': item.tpName || '',
+          'СШ': item.sectionNumber,
+          'Sном, кВА': item.tnKva,
+          'cosφ': item.cosPhi,
+          'Лимит, кВт': item.limitKw,
+          'Последний пик, кВт': item.lastPeakKw ?? '',
+          'Дата пика': item.lastPeakAt ? new Date(item.lastPeakAt).toLocaleString('ru-RU') : '',
+          '%': item.ratioPct != null ? item.ratioPct + '%' : '',
+          'Статус случая': item.caseStage || '—',
+          'Дата АСКУЭ': item.askueCompletedAt ? new Date(item.askueCompletedAt).toLocaleDateString('ru-RU') : '',
+          'Дата РЭС': item.resCompletedAt ? new Date(item.resCompletedAt).toLocaleDateString('ru-RU') : '',
+          'Результат перепроверки': item.recheckResult || '—',
+          'Циклы': item.cycles || 0
+        };
+      } else if (reportType === 'problem_vl') {
         return {
           'РЭС': item.resName || '',
           'ТП': item.tpName || '',
@@ -2723,9 +2742,9 @@ function Reports() {
           'Позиция': item.position || '', // УЖЕ преобразовано на бэкенде
           'Номер ПУ': item.puNumber || '',
           'Количество неудачных проверок': item.failureCount || 0,
-          'Дата первого обращения': item.firstReportDate ? 
+          'Дата первого обращения': item.firstReportDate ?
             new Date(item.firstReportDate).toLocaleDateString('ru-RU') : '',
-          'Дата последней проверки': item.lastErrorDate ? 
+          'Дата последней проверки': item.lastErrorDate ?
             new Date(item.lastErrorDate).toLocaleDateString('ru-RU') : '',
           'Последняя ошибка': item.lastErrorDetails || '',
           'Статус проблемы': item.status || ''
@@ -2874,6 +2893,8 @@ function Reports() {
         return 'Завершенные проверки';
       case 'problem_vl':
         return 'Проблемные ВЛ';
+      case 'power_overload':
+        return 'Превышение Pном';
       default:
         return 'Отчет';
     }
@@ -2907,6 +2928,7 @@ function Reports() {
             <option value="pending_askue">Ожидающие проверки АСКУЭ</option>
             <option value="completed">Завершенные проверки</option>
             <option value="problem_vl">Проблемные ВЛ (2+ ошибки)</option>
+            <option value="power_overload">Превышение Pном</option>
           </select>
         </div>
         
@@ -2963,6 +2985,37 @@ function Reports() {
         {loading && <LoadingSpinner type="overlay" message="Обновление данных..." />}
   
         <div className={`report-table ${loading ? 'loading' : ''}`}>
+          {reportType === 'power_overload' ? (
+            <table>
+              <thead>
+                <tr>
+                  <th>РЭС</th><th>ТП</th><th>СШ</th><th>Sном, кВА</th><th>cosφ</th>
+                  <th>Лимит, кВт</th><th>Пик, кВт</th><th>Дата пика</th><th>%</th>
+                  <th>Статус случая</th><th>АСКУЭ</th><th>РЭС</th><th>Перепроверка</th><th>Циклы</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredData.map((item, idx) => (
+                  <tr key={idx}>
+                    <td>{item.resName}</td>
+                    <td>{item.tpName}</td>
+                    <td>СШ-{item.sectionNumber}</td>
+                    <td>{item.tnKva}</td>
+                    <td>{item.cosPhi}</td>
+                    <td>{item.limitKw}</td>
+                    <td>{item.lastPeakKw ?? '—'}</td>
+                    <td>{item.lastPeakAt ? new Date(item.lastPeakAt).toLocaleString('ru-RU') : '—'}</td>
+                    <td>{item.ratioPct != null ? item.ratioPct + '%' : '—'}</td>
+                    <td>{item.caseStage}</td>
+                    <td>{item.askueCompletedAt ? new Date(item.askueCompletedAt).toLocaleDateString('ru-RU') : '—'}</td>
+                    <td>{item.resCompletedAt ? new Date(item.resCompletedAt).toLocaleDateString('ru-RU') : '—'}</td>
+                    <td>{item.recheckResult}</td>
+                    <td>{item.cycles}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
           <table>
             <thead>
               <tr>
@@ -3096,9 +3149,10 @@ function Reports() {
               ))}
             </tbody>
           </table>
+          )}
         </div>
       </div>
-      
+
       {filteredData.length === 0 && (
         <div className="no-data">
           <p>Нет данных для отображения {needsDateFilter() ? 'за выбранный период' : 'на данный момент'}</p>
@@ -6403,7 +6457,9 @@ function Analytics() {
       '% охвата ВЛ': row.vlCoveragePercent + '%',
       'Всего ПУ': row.totalPuCount,
       'Проверено ПУ': row.uniqueCheckedPuCount,
-      '% охвата ПУ': row.puCoveragePercent + '%'
+      '% охвата ПУ': row.puCoveragePercent + '%',
+      'Секций с перегрузом': row.overloadSections ?? 0,
+      'Активных случаев Pном': row.activeOverloadCases ?? 0
     }));
     
     // Добавляем итоги
@@ -6415,7 +6471,9 @@ function Analytics() {
         '% охвата ВЛ': totals.vlCoveragePercent + '%',
         'Всего ПУ': totals.totalPuCount,
         'Проверено ПУ': totals.uniqueCheckedPuCount,
-        '% охвата ПУ': totals.puCoveragePercent + '%'
+        '% охвата ПУ': totals.puCoveragePercent + '%',
+        'Секций с перегрузом': totals.overloadSections ?? 0,
+        'Активных случаев Pном': totals.activeOverloadCases ?? 0
       });
     }
     
@@ -6564,6 +6622,8 @@ function Analytics() {
               <th>Всего ПУ</th>
               <th>Проверено ПУ</th>
               <th>% охвата ПУ</th>
+              <th>Секций с перегрузом</th>
+              <th>Активных случаев Pном</th>
             </tr>
           </thead>
           <tbody>
@@ -6596,6 +6656,8 @@ function Analytics() {
                     <span>{row.puCoveragePercent}%</span>
                   </div>
                 </td>
+                <td>{row.overloadSections ?? 0}</td>
+                <td>{row.activeOverloadCases ?? 0}</td>
               </tr>
             ))}
             {user.role === 'admin' && (
@@ -6611,6 +6673,8 @@ function Analytics() {
                 <td>
                   <strong>{totals.puCoveragePercent}%</strong>
                 </td>
+                <td><strong>{totals.overloadSections ?? 0}</strong></td>
+                <td><strong>{totals.activeOverloadCases ?? 0}</strong></td>
               </tr>
             )}
           </tbody>

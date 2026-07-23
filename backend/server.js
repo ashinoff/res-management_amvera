@@ -3110,6 +3110,62 @@ app.get('/api/reports/problem-vl',
       res.status(500).json({ error: error.message });
     }
 });
+
+// Отчёт «Превышение Pном»: все секции с заданным Sном + данные последнего кейса.
+app.get('/api/reports/overload', authenticateToken, async (req, res) => {
+  try {
+    const where = { tnKva: { [Op.ne]: null } };
+    if (req.user.role === 'admin' && req.query.resId) {
+      where.resId = parseInt(req.query.resId, 10);
+    } else if (req.user.role !== 'admin') {
+      where.resId = req.user.resId;
+    }
+
+    const sections = await TpSection.findAll({
+      where,
+      include: [{ model: ResUnit, attributes: ['name'] }],
+      order: [['tpName', 'ASC'], ['sectionNumber', 'ASC']]
+    });
+
+    const STAGE_RU = {
+      askue_limit: 'Ограничение по АСКУЭ',
+      res_work: 'Мероприятия РЭС',
+      awaiting_recheck: 'Ожидает перепроверки',
+      completed: 'Завершён'
+    };
+
+    const rows = await Promise.all(sections.map(async (s) => {
+      const cosPhi = s.cosPhi != null ? s.cosPhi : 0.9;
+      const limitKw = s.tnKva * cosPhi;
+      const ratio = (s.lastPeakKw != null && limitKw) ? s.lastPeakKw / limitKw : null;
+      const oc = await OverloadCase.findOne({
+        where: { sectionId: s.id },
+        order: [['id', 'DESC']]
+      });
+      return {
+        resName: s.ResUnit?.name || '',
+        tpName: s.tpName,
+        sectionNumber: s.sectionNumber,
+        tnKva: s.tnKva,
+        cosPhi,
+        limitKw: Math.round(limitKw * 10) / 10,
+        lastPeakKw: s.lastPeakKw != null ? Math.round(s.lastPeakKw * 10) / 10 : null,
+        lastPeakAt: s.lastPeakAt,
+        ratioPct: ratio != null ? Math.round(ratio * 100) : null,
+        caseStage: oc ? STAGE_RU[oc.stage] : '—',
+        askueCompletedAt: oc?.askueCompletedAt || null,
+        resCompletedAt: oc?.resCompletedAt || null,
+        recheckResult: oc?.recheckResult === 'ok' ? 'устранён' : oc?.recheckResult === 'still_overload' ? 'повторный перегруз' : '—',
+        cycles: oc?.cycles || 0
+      };
+    }));
+
+    res.json(rows);
+  } catch (error) {
+    console.error('Overload report error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 // Получение количества непрочитанных уведомлений
 // Счётчики уведомлений по роли (переиспользуются эндпоинтом ниже и бейджем
 // платформы /api/platform/badge). Возвращает { tech_pending, askue_pending,
@@ -6551,10 +6607,18 @@ app.get('/api/analytics/summary',
             ? Math.round((checkedVLCount / vlCount) * 100) 
             : 0;
           
-          const puCoveragePercent = totalPuCount > 0 
-            ? Math.round((uniqueCheckedPuCount / totalPuCount) * 100) 
+          const puCoveragePercent = totalPuCount > 0
+            ? Math.round((uniqueCheckedPuCount / totalPuCount) * 100)
             : 0;
-          
+
+          // Перегруз секций (этап 3)
+          const overloadSections = await TpSection.count({
+            where: { resId: res.id, overloadStatus: 'overload' }
+          });
+          const activeOverloadCases = await OverloadCase.count({
+            where: { resId: res.id, stage: { [Op.ne]: 'completed' } }
+          });
+
           return {
             resId: res.id,
             resName: res.name,
@@ -6563,22 +6627,28 @@ app.get('/api/analytics/summary',
             vlCoveragePercent,
             totalPuCount,
             uniqueCheckedPuCount,
-            puCoveragePercent
+            puCoveragePercent,
+            overloadSections,
+            activeOverloadCases
           };
         })
       );
-      
+
       // Итоги
       const totals = analytics.reduce((acc, curr) => ({
         tpCount: acc.tpCount + curr.tpCount,
         vlCount: acc.vlCount + curr.vlCount,
         totalPuCount: acc.totalPuCount + curr.totalPuCount,
-        uniqueCheckedPuCount: acc.uniqueCheckedPuCount + curr.uniqueCheckedPuCount
+        uniqueCheckedPuCount: acc.uniqueCheckedPuCount + curr.uniqueCheckedPuCount,
+        overloadSections: acc.overloadSections + curr.overloadSections,
+        activeOverloadCases: acc.activeOverloadCases + curr.activeOverloadCases
       }), {
         tpCount: 0,
         vlCount: 0,
         totalPuCount: 0,
-        uniqueCheckedPuCount: 0
+        uniqueCheckedPuCount: 0,
+        overloadSections: 0,
+        activeOverloadCases: 0
       });
       
       // Добавляем проценты к итогам
