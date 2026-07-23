@@ -142,12 +142,26 @@ function LoginForm({ onLogin }) {
 // ГЛАВНОЕ МЕНЮ
 // =====================================================
 
+// Путь синусоиды для осциллограммы (viewBox 0 0 120 14, ~2.25 периода). Считается один раз.
+const OSC_PATH = (() => {
+  const w = 120, mid = 7, amp = 4.5, periods = 2.25, n = 64;
+  let d = '';
+  for (let i = 0; i <= n; i++) {
+    const x = (w * i / n).toFixed(2);
+    const y = (mid - amp * Math.sin(periods * 2 * Math.PI * i / n)).toFixed(2);
+    d += (i === 0 ? 'M' : 'L') + x + ' ' + y + ' ';
+  }
+  return d.trim();
+})();
+
 function MainMenu({ activeSection, onSectionChange, userRole }) {
   const [notificationCounts, setNotificationCounts] = useState({
     tech_pending: 0,
     askue_pending: 0,
     problem_vl: 0
   });
+  // Тик «пробега» осциллограммы — инкремент по каждому успешному поллу counts.
+  const [sweepTick, setSweepTick] = useState(0);
 
   // Загружаем количество уведомлений
   useEffect(() => {
@@ -179,10 +193,18 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
     try {
       const response = await api.get('/api/notifications/counts');
       setNotificationCounts(response.data);
+      // Однократный «пробег» осциллограммы на факт успешного ответа (без таймеров).
+      setSweepTick(t => t + 1);
     } catch (error) {
       console.error('Error loading notification counts:', error);
     }
   };
+
+  // Красный, если есть активные error (tech_pending) или перегрузы Pном; иначе зелёный.
+  const oscDanger =
+    (notificationCounts.tech_pending || 0) +
+    (notificationCounts.powerOverload || 0) +
+    (notificationCounts.power_overload || 0) > 0;
 
   const menuItems = [
     { id: 'structure', label: 'Структура сети', icon: <IconLayers size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
@@ -202,7 +224,16 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
 
   return (
     <nav className="main-menu">
-      <h3>Меню</h3>
+      <div className="monitor-head">
+        <h3 className="monitor-title">Мониторинг<br />напряжения</h3>
+        <svg className={`osc ${oscDanger ? 'danger' : 'ok'}`} viewBox="0 0 120 14"
+             preserveAspectRatio="none" aria-hidden="true">
+          <path className="osc-line osc-draw" d={OSC_PATH} fill="none" pathLength="1" />
+          {sweepTick > 0 && (
+            <path key={sweepTick} className="osc-line osc-sweep" d={OSC_PATH} fill="none" pathLength="1" />
+          )}
+        </svg>
+      </div>
       {visibleItems.map(item => (
         <button
           key={item.id}

@@ -195,6 +195,62 @@ body {
   border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 
+/* Заголовок сайдбара «Мониторинг напряжения» + осциллограмма-индикатор */
+.monitor-head {
+  margin-bottom: 28px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.monitor-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.15;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.osc {
+  display: block;
+  width: 100%;
+  height: 14px;
+  margin-top: 10px;
+  color: var(--green);
+  transition: color 0.12s;
+}
+.osc.danger { color: var(--red); }
+.osc-line {
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 0.12s;
+}
+/* 1) Прочерчивание слева направо при монтировании — один раз, без infinite. */
+.osc-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: osc-draw 0.9s ease-out forwards;
+}
+@keyframes osc-draw { to { stroke-dashoffset: 0; } }
+/* 2) «Пробег» блика по линии на каждый успешный полл — конечная анимация, */
+/*    повторный запуск через re-mount по key (sweepTick). */
+.osc-sweep {
+  stroke: #e6f4ff;
+  stroke-width: 2.5;
+  stroke-dasharray: 0.14 1;
+  stroke-dashoffset: 1;
+  animation: osc-sweep 0.8s linear forwards;
+}
+@keyframes osc-sweep {
+  from { stroke-dashoffset: 1; opacity: 0.9; }
+  to   { stroke-dashoffset: -0.14; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .osc-draw { animation: none; stroke-dashoffset: 0; }
+  .osc-sweep { display: none; }
+}
+
 .main-menu button {
   width: 100%;
   padding: 14px 20px;

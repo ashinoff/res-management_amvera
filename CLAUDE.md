@@ -334,6 +334,19 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-23** — Заголовок сайдбара «Меню» → «МОНИТОРИНГ НАПРЯЖЕНИЯ» (2 строки,
+  `.monitor-title`, uppercase, letter-spacing 0.06em) + инлайн-SVG осциллограмма
+  (`OSC_PATH` — синусоида ~2.25 периода, viewBox 0 0 120 14, stroke 2px). Анимации
+  КОНЕЧНЫЕ (инвариант «без infinite» соблюдён): (1) прочерчивание слева-направо при
+  монтировании `osc-draw .9s forwards` (dasharray/dashoffset, pathLength=1); (2)
+  «пробег» блика на КАЖДЫЙ успешный полл `/api/notifications/counts` — оверлей-path
+  с `key={sweepTick}` (re-mount перезапускает `osc-sweep .8s forwards`), tick
+  инкрементится в `loadNotificationCounts` при успехе (без таймеров-циклов); (3)
+  цвет линии: `--green` если нет активных error/power_overload (tech_pending+
+  powerOverload+power_overload==0), иначе `--red`, переход `transition color .12s`;
+  (4) `prefers-reduced-motion: reduce` — анимации off, линия статична. Поллер, пункты
+  меню, бейджи не тронуты (только подписка на успех). Проверено: grep — новых
+  `animation: infinite` нет; npm run build — ОК.
 - **2026-07-23** — UI-правки (App.jsx/App.css): (1) кнопка «Ограничение по АСКУЭ
   выполнено» убрана из тела карточки «Превышение Pном» — только в футере модалки
   деталей (для admin=АСКУЭ + askue_limit); `submitAskue` спрашивает
