@@ -1668,11 +1668,11 @@ for (let i = 0; i < files.length; i++) {
     <div className="file-upload-container">
       <h2><span className="svg-frame"><IconUpload size={24} /></span> Загрузка файлов для анализа</h2>
       <p className="upload-note">Имя файла должно совпадать с номером ПУ</p>
-      <p className="upload-subtitle">Загружайте Excel файлы с данными счетчиков для автоматической проверки</p>
+      <p className="upload-subtitle">Загружайте Excel файлы с данными счётчиков для автоматической проверки</p>
 
-      {/* Выбор типа загрузки */}
+      {/* Шаг 1 — тип загрузки */}
       <div className="file-type-selection">
-        <h3>Тип загрузки</h3>
+        <h3 className="fu-h3"><span className="fu-step">1</span> Тип загрузки</h3>
         <div className="file-types-grid">
           {fileTypes.map(type => (
             <div
@@ -1680,17 +1680,19 @@ for (let i = 0; i < files.length; i++) {
               className={`file-type-card ${selectedType === type.id ? 'selected' : ''}`}
               onClick={() => setSelectedType(type.id)}
             >
-              <h4 className="ft-label">{type.label}</h4>
-              <p className="ft-sub">{type.description}</p>
+              <span className="ft-check"><IconCheck className="ico" /></span>
+              <span className="ft-icon"><IconMeter className="ico" /></span>
+              <span className="ft-label">{type.label}</span>
+              <span className="ft-sub">{type.description}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Выбор файла — компактная строка */}
+      {/* Шаг 2 — файл (появляется после выбора типа) */}
       {selectedType && (
         <div className="file-pick-section">
-          <h3>Файл</h3>
+          <h3 className="fu-h3"><span className="fu-step">2</span> Файл</h3>
           <div className="file-pick-row">
             <input
               type="file"
@@ -1700,10 +1702,10 @@ for (let i = 0; i < files.length; i++) {
               onChange={handleFileSelect}
               style={{ display: 'none' }}
             />
-            <label htmlFor="file-input" className="btn btn-secondary file-pick-btn">
+            <label htmlFor="file-input" className="fu-pick-btn">
               <IconFolder className="ico" /> Выбрать файл
             </label>
-            <span className="file-pick-hint">.xlsx, .xls, .csv</span>
+            <span className="file-pick-hint">.xlsx, .xls, .csv — можно несколько</span>
           </div>
           {files.length > 0 && (
             <div className="file-chips">
@@ -1722,7 +1724,7 @@ for (let i = 0; i < files.length; i++) {
       {/* Прогресс загрузки */}
       {uploading && (
         <div className="upload-progress-section">
-          <LoadingSpinner 
+          <LoadingSpinner
             type="pulse"
             message={`Обработка файлов: ${uploadProgress.current} из ${uploadProgress.total}`}
             submessage="Пожалуйста, не закрывайте страницу"
@@ -1730,13 +1732,13 @@ for (let i = 0; i < files.length; i++) {
         </div>
       )}
 
-      {/* Кнопка загрузки — активная синяя */}
+      {/* Финальное действие — сплошная синяя */}
       {files.length > 0 && !uploading && (
         <div className="upload-actions">
           <button
             onClick={handleUpload}
             disabled={!selectedType}
-            className="upload-submit"
+            className="fu-submit-btn"
           >
             <IconRocket className="ico" />
             Загрузить и анализировать ({files.length})

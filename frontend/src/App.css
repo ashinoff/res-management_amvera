@@ -7008,3 +7008,83 @@ tr.selected:hover,
 .file-type-selection { margin-top: 4px; }
 .upload-progress-section { margin-top: 18px; }
 .upload-result { margin-top: 20px; }
+
+/* ===== Редизайн «Загрузка файлов» (дизайн-агент, финал) ===== */
+.file-upload-container {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  padding: 24px; box-shadow: var(--shadow-sm); max-width: 100%;
+}
+.file-upload-container > h2 {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 4px; color: var(--navy); font-size: 20px; font-weight: 700;
+}
+.file-upload-container .upload-note { margin: 0 0 2px; color: var(--red); font-size: 13px; text-align: left; }
+.file-upload-container .upload-subtitle { margin: 0 0 20px; color: var(--text-muted); font-size: 13.5px; text-align: left; }
+
+.fu-h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--text); font-size: 15px; font-weight: 600; }
+.fu-step {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent-soft); border: 1px solid var(--accent);
+  color: var(--accent); font-size: 12px; font-weight: 700;
+}
+
+.file-type-selection { margin-bottom: 22px; }
+.file-types-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.file-type-card {
+  position: relative; display: flex; flex-direction: column; gap: 2px;
+  padding: 14px 14px 14px 44px; min-height: 76px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
+  cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s;
+}
+.file-type-card:hover { border-color: var(--border-strong); transform: none; box-shadow: none; }
+.file-type-card.selected { background: var(--accent-soft); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.ft-icon { position: absolute; left: 14px; top: 14px; display: inline-flex; color: var(--text-muted); }
+.file-type-card.selected .ft-icon { color: var(--accent); }
+.ft-check { position: absolute; right: 10px; top: 10px; display: none; color: var(--accent); }
+.file-type-card.selected .ft-check { display: inline-flex; }
+.file-type-card .ft-label { margin: 0; color: var(--navy); font-size: 14.5px; font-weight: 700; line-height: 1.2; text-transform: none; letter-spacing: 0; }
+.file-type-card .ft-sub { margin: 0; color: var(--text-muted); font-size: 12px; font-weight: 400; line-height: 1.3; }
+
+.file-pick-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+.file-pick-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.fu-pick-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 16px; border-radius: 10px;
+  background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue);
+  font-size: 13.5px; font-weight: 600; cursor: pointer;
+  transition: background .12s, box-shadow .12s;
+}
+.fu-pick-btn:hover { background: var(--accent-soft); box-shadow: var(--shadow-sm); }
+.file-pick-hint { color: var(--text-muted); font-size: 12.5px; }
+
+.file-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.file-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 6px 5px 10px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text); font-size: 12.5px; max-width: 280px;
+}
+.file-chip .ico { color: var(--accent); flex: 0 0 auto; }
+.file-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-chip-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: transparent; border: none; color: var(--text-muted); cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.file-chip-x:hover { background: var(--blue-bg); color: var(--red); }
+
+.upload-progress-section { margin-top: 20px; display: flex; justify-content: center; }
+.upload-actions { margin-top: 20px; text-align: left; }
+.fu-submit-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 22px; border-radius: 10px;
+  background: var(--blue); color: #fff; border: 1px solid var(--blue);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  box-shadow: var(--shadow-sm); transition: background .12s, box-shadow .12s;
+}
+.fu-submit-btn:hover:not(:disabled) { background: var(--navy); border-color: var(--navy); }
+.fu-submit-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+@media (max-width: 900px) { .file-types-grid { grid-template-columns: repeat(2, 1fr); } }
