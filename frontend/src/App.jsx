@@ -150,7 +150,7 @@ const toRoman = (n) => ROMAN[n] || String(n);
 // (viewBox 0 0 120 44, mid=22). Узкая амплитуда — колебания идут ровно в зазоре
 // между словами «МОНИТОРИНГ» и «напряжения», не вываливаясь волнами вниз.
 const OSC_PATH = (() => {
-  const w = 120, mid = 22, amp = 10, periods = 9, n = 270;
+  const w = 120, mid = 22, amp = 14, periods = 9, n = 300;
   let d = '';
   for (let i = 0; i <= n; i++) {
     const x = (w * i / n).toFixed(2);

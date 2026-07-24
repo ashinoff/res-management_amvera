@@ -215,7 +215,7 @@ body {
   position: absolute;
   left: -24px; right: -24px;
   top: 50%;
-  height: 26px;
+  height: 40px;
   transform: translateY(-50%);
   z-index: 2;
   pointer-events: none;
@@ -252,7 +252,7 @@ body {
   position: absolute;
   left: -24px; right: -24px;
   top: 50%;
-  height: 30px;
+  height: 44px;
   transform: translateY(-50%);
   z-index: 2;
   pointer-events: none;
@@ -268,13 +268,13 @@ body {
   stroke-width: 1.2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 0.5 1.6;      /* длинный видимый сегмент (~4-5 гребней) + большой gap */
-  stroke-dashoffset: 0.5;         /* dash полностью за левым краем */
+  stroke-dasharray: 0.9 1.2;      /* видимый сегмент ~90% ширины — волна идёт по всей решётке */
+  stroke-dashoffset: 0.9;         /* dash полностью за левым краем */
   filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 6px currentColor);
   animation: osc-spark 1.4s cubic-bezier(0.33, 0, 0.3, 1) forwards; /* медленнее — можно любоваться */
 }
 @keyframes osc-spark {
-  0%   { stroke-dashoffset: 0.5; opacity: 0; }
+  0%   { stroke-dashoffset: 0.9; opacity: 0; }
   8%   { opacity: 1; }
   85%  { opacity: 1; }
   100% { stroke-dashoffset: -1;  opacity: 0; }  /* dash полностью за правым краем */
