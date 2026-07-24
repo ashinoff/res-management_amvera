@@ -984,11 +984,11 @@ app.use((error, req, res, next) => {
   next(error);
 });
 
-// Email сервис
+// Email сервис (SMTP — Яндекс по умолчанию, всё переопределяется env).
 const createEmailTransporter = () => {
   return nodemailer.createTransport({
-    host: process.env.MAIL_HOST || 'smtp.mail.ru',
-    port: process.env.MAIL_PORT || 465,
+    host: process.env.MAIL_HOST || 'smtp.yandex.ru',
+    port: Number(process.env.MAIL_PORT) || 465,
     secure: true,
     auth: {
       user: process.env.MAIL_USER,
@@ -996,6 +996,14 @@ const createEmailTransporter = () => {
     }
   });
 };
+
+// From ОБЯЗАН совпадать с логином (Яндекс: 553 Sender address rejected иначе).
+// Всегда шлём с MAIL_USER (с display name). Централизованный отправитель.
+const mailFrom = () => `"РЭС-менеджмент" <${process.env.MAIL_USER}>`;
+async function sendMailAs(to, subject, text) {
+  const transporter = createEmailTransporter();
+  return transporter.sendMail({ from: mailFrom(), to, subject, text });
+}
 
 // =====================================================
 // API РОУТЫ
@@ -1554,6 +1562,151 @@ app.post('/api/overload/:caseId/res-complete',
     }
 });
 
+// Обработка файла профиля мощности (Пирамида): анализатор → матчинг секций по
+// техучёту → обновление секций/кейсов/уведомлений. Переиспользуется роутом
+// /api/upload/analyze и почтовым приёмником. Файл НЕ удаляет (это делает вызывающий).
+async function processProfileFile(filePath, userId) {
+  const analysis = await runProfileAnalyzer(filePath);
+  if (!analysis || !analysis.success) {
+    return { success: false, error: analysis?.error || 'Ошибка анализа профиля' };
+  }
+
+  const results = analysis.results || [];
+  const analyzerWarnings = analysis.warnings || [];
+
+  const normPu = (v) => {
+    let s = String(v == null ? '' : v).trim();
+    if (s.endsWith('.0') && /^\d+\.0$/.test(s)) s = s.slice(0, -2);
+    return s;
+  };
+
+  const allSections = await TpSection.findAll({ where: { techPuNumber: { [Op.ne]: null } } });
+  const sectionByTechPu = {};
+  allSections.forEach(s => {
+    const key = normPu(s.techPuNumber);
+    if (key) sectionByTechPu[key] = s;
+  });
+
+  let sectionsUpdated = 0;
+  let overloadCount = 0;
+  const unmatched = [];
+  const details = [];
+
+  for (const r of results) {
+    const section = sectionByTechPu[normPu(r.puNumber)];
+    if (!section) {
+      unmatched.push(r.puNumber);
+      details.push({
+        puNumber: r.puNumber, matched: false, sectionId: null, tpSection: null,
+        peakRaw: r.peakRaw, kt: r.kt, peakKw: r.peakKw, peakAt: r.peakAt,
+        tnKva: null, cosPhi: null, limitKw: null, decision: 'not_matched'
+      });
+      console.log(`[PROFILE] ПУ ${r.puNumber} peakRaw=${r.peakRaw} kt=${r.kt} peakKw=${r.peakKw} — не сопоставлен с секцией`);
+      continue;
+    }
+
+    const cosPhi = Number.isFinite(section.cosPhi) ? section.cosPhi : 0.9;
+    const hasLimit = Number.isFinite(section.tnKva) && section.tnKva > 0;
+    const limitKw = hasLimit ? section.tnKva * cosPhi : null;
+    let overloadStatus = 'unknown';
+    if (hasLimit) overloadStatus = (r.peakKw >= limitKw) ? 'overload' : 'ok';
+
+    const period = r.period || analysis.period || null;
+    const ratio = limitKw ? (r.peakKw / limitKw) : null;
+
+    details.push({
+      puNumber: r.puNumber, matched: true, sectionId: section.id,
+      tpSection: `${section.tpName} СШ-${section.sectionNumber}`,
+      peakRaw: r.peakRaw, kt: r.kt, peakKw: r.peakKw, peakAt: r.peakAt,
+      tnKva: hasLimit ? section.tnKva : null, cosPhi: hasLimit ? cosPhi : null,
+      limitKw, decision: overloadStatus
+    });
+    console.log(`[PROFILE] ПУ ${r.puNumber} → ${section.tpName} СШ-${section.sectionNumber}: peakRaw=${r.peakRaw} kt=${r.kt} peakKw=${r.peakKw} tnKva=${section.tnKva} cosPhi=${cosPhi} limitKw=${limitKw} → ${overloadStatus}`);
+
+    await section.update({
+      lastPeakKw: r.peakKw,
+      lastPeakAt: parsePeakAt(r.peakAt),
+      lastProfilePeriod: period,
+      lastProfileSource: r.source || null,
+      lastProfileAt: new Date(),
+      overloadStatus
+    });
+    sectionsUpdated++;
+
+    if (!hasLimit) continue;
+
+    const activeCase = await OverloadCase.findOne({
+      where: { sectionId: section.id, stage: { [Op.ne]: 'completed' } },
+      order: [['id', 'DESC']]
+    });
+
+    const snapshot = () => ({
+      peakKw: r.peakKw, peakAt: r.peakAt, tnKva: section.tnKva,
+      cosPhi, limitKw, ratio, period
+    });
+    const notifData = (caseId, stage) => ({
+      sectionId: section.id, caseId, stage,
+      tpName: section.tpName, sectionNumber: section.sectionNumber,
+      techPuNumber: section.techPuNumber,
+      peakKw: r.peakKw, peakAt: r.peakAt, tnKva: section.tnKva,
+      cosPhi, limitKw, ratio, period
+    });
+
+    if (overloadStatus === 'overload') {
+      overloadCount++;
+      if (!activeCase) {
+        const oc = await OverloadCase.create({
+          sectionId: section.id, resId: section.resId,
+          stage: 'askue_limit', cycles: 1, ...snapshot()
+        });
+        await removeSectionOverloadNotifs(section.id);
+        await Notification.create({
+          type: 'power_overload', resId: section.resId, toUserId: null, fromUserId: userId,
+          message: `Превышение Pном: ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт при лимите ${limitKw} кВт`,
+          errorData: notifData(oc.id, 'askue_limit')
+        });
+      } else if (activeCase.stage === 'awaiting_recheck') {
+        await activeCase.update({
+          recheckAt: new Date(), recheckPeakKw: r.peakKw, recheckResult: 'still_overload',
+          stage: 'askue_limit', cycles: activeCase.cycles + 1, ...snapshot()
+        });
+        await removeSectionOverloadNotifs(section.id);
+        await Notification.create({
+          type: 'power_overload', resId: section.resId, toUserId: null, fromUserId: userId,
+          message: `Повторный перегруз после мероприятий (цикл ${activeCase.cycles + 1}): ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт`,
+          errorData: { ...notifData(activeCase.id, 'askue_limit'), cycle: activeCase.cycles + 1 }
+        });
+      } else {
+        await activeCase.update(snapshot());
+      }
+    } else {
+      if (activeCase && activeCase.stage === 'awaiting_recheck') {
+        await activeCase.update({
+          recheckAt: new Date(), recheckPeakKw: r.peakKw, recheckResult: 'ok',
+          stage: 'completed', closedAt: new Date()
+        });
+        await removeSectionOverloadNotifs(section.id);
+        await Notification.create({
+          type: 'success', resId: section.resId, toUserId: null, fromUserId: userId,
+          message: `Перегруз ${section.tpName} СШ-${section.sectionNumber} устранён, пик ${r.peakKw} кВт при лимите ${limitKw} кВт`
+        });
+      } else if (activeCase) {
+        await activeCase.update({ stage: 'completed', recheckResult: 'ok', closedAt: new Date() });
+        await removeSectionOverloadNotifs(section.id);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    sectionsUpdated,
+    overloadCount,
+    unmatched: [...unmatched, ...analyzerWarnings],
+    details,
+    period: analysis.period || null
+  };
+}
+
 // 5. ЗАГРУЗКА ФАЙЛОВ ДЛЯ АНАЛИЗА
 app.post('/api/upload/analyze',
   authenticateToken,
@@ -1595,155 +1748,17 @@ app.post('/api/upload/analyze',
           return res.status(400).json({ success: false, error: `Не удалось создать запись загрузки: ${createErr.message}` });
         }
 
-        const analysis = await runProfileAnalyzer(req.file.path);
+        const result = await processProfileFile(req.file.path, userId);
         try { fs.unlinkSync(req.file.path); } catch (e) {}
 
-        if (!analysis || !analysis.success) {
+        if (!result.success) {
           await uploadRecord.update({ status: 'failed' });
-          return res.status(400).json({ success: false, error: analysis?.error || 'Ошибка анализа профиля' });
-        }
-
-        const results = analysis.results || [];
-        const analyzerWarnings = analysis.warnings || []; // ПУ без данных на обоих листах
-
-        // Нормализация номера ПУ для матчинга: строка, trim, без хвоста «.0».
-        const normPu = (v) => {
-          let s = String(v == null ? '' : v).trim();
-          if (s.endsWith('.0') && /^\d+\.0$/.test(s)) s = s.slice(0, -2);
-          return s;
-        };
-
-        // Индекс секций по techPuNumber (нормализовано). Одна секция = один тех.ПУ.
-        const allSections = await TpSection.findAll({ where: { techPuNumber: { [Op.ne]: null } } });
-        const sectionByTechPu = {};
-        allSections.forEach(s => {
-          const key = normPu(s.techPuNumber);
-          if (key) sectionByTechPu[key] = s;
-        });
-
-        let sectionsUpdated = 0;
-        let overloadCount = 0;
-        const unmatched = [];       // ПУ профиля без секции в структуре
-        const overloads = [];       // сводка перегрузов
-        const details = [];         // диагностика расчёта по каждому ПУ (штатная)
-
-        for (const r of results) {
-          const section = sectionByTechPu[normPu(r.puNumber)];
-          if (!section) {
-            unmatched.push(r.puNumber);
-            details.push({
-              puNumber: r.puNumber, matched: false, sectionId: null, tpSection: null,
-              peakRaw: r.peakRaw, kt: r.kt, peakKw: r.peakKw, peakAt: r.peakAt,
-              tnKva: null, cosPhi: null, limitKw: null, decision: 'not_matched'
-            });
-            console.log(`[PROFILE] ПУ ${r.puNumber} peakRaw=${r.peakRaw} kt=${r.kt} peakKw=${r.peakKw} — не сопоставлен с секцией`);
-            continue;
-          }
-
-          // tnKva/cosPhi: заданными считаем только конечные числа (> 0 для Sном),
-          // иначе unknown (НЕ 0). cosPhi по умолчанию 0.9 при пустом.
-          const cosPhi = Number.isFinite(section.cosPhi) ? section.cosPhi : 0.9;
-          const hasLimit = Number.isFinite(section.tnKva) && section.tnKva > 0;
-          const limitKw = hasLimit ? section.tnKva * cosPhi : null;
-          let overloadStatus = 'unknown';
-          if (hasLimit) overloadStatus = (r.peakKw >= limitKw) ? 'overload' : 'ok';
-
-          const period = r.period || analysis.period || null;
-          const ratio = limitKw ? (r.peakKw / limitKw) : null;
-
-          details.push({
-            puNumber: r.puNumber, matched: true, sectionId: section.id,
-            tpSection: `${section.tpName} СШ-${section.sectionNumber}`,
-            peakRaw: r.peakRaw, kt: r.kt, peakKw: r.peakKw, peakAt: r.peakAt,
-            tnKva: hasLimit ? section.tnKva : null, cosPhi: hasLimit ? cosPhi : null,
-            limitKw, decision: overloadStatus
-          });
-          console.log(`[PROFILE] ПУ ${r.puNumber} → ${section.tpName} СШ-${section.sectionNumber}: peakRaw=${r.peakRaw} kt=${r.kt} peakKw=${r.peakKw} tnKva=${section.tnKva} cosPhi=${cosPhi} limitKw=${limitKw} → ${overloadStatus}`);
-
-          await section.update({
-            lastPeakKw: r.peakKw,
-            lastPeakAt: parsePeakAt(r.peakAt),
-            lastProfilePeriod: period,
-            lastProfileSource: r.source || null,
-            lastProfileAt: new Date(),
-            overloadStatus
-          });
-          sectionsUpdated++;
-
-          if (!hasLimit) continue; // без Sном статус unknown — кейсы не ведём
-
-          // Активный кейс по секции (не завершённый)
-          const activeCase = await OverloadCase.findOne({
-            where: { sectionId: section.id, stage: { [Op.ne]: 'completed' } },
-            order: [['id', 'DESC']]
-          });
-
-          const snapshot = () => ({
-            peakKw: r.peakKw, peakAt: r.peakAt, tnKva: section.tnKva,
-            cosPhi, limitKw, ratio, period
-          });
-          const notifData = (caseId, stage) => ({
-            sectionId: section.id, caseId, stage,
-            tpName: section.tpName, sectionNumber: section.sectionNumber,
-            techPuNumber: section.techPuNumber,
-            peakKw: r.peakKw, peakAt: r.peakAt, tnKva: section.tnKva,
-            cosPhi, limitKw, ratio, period
-          });
-
-          if (overloadStatus === 'overload') {
-            overloadCount++;
-            if (!activeCase) {
-              // Новый случай перегруза → этап АСКУЭ
-              const oc = await OverloadCase.create({
-                sectionId: section.id, resId: section.resId,
-                stage: 'askue_limit', cycles: 1, ...snapshot()
-              });
-              await removeSectionOverloadNotifs(section.id);
-              await Notification.create({
-                type: 'power_overload', resId: section.resId, toUserId: null, fromUserId: userId,
-                message: `Превышение Pном: ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт при лимите ${limitKw} кВт`,
-                errorData: notifData(oc.id, 'askue_limit')
-              });
-            } else if (activeCase.stage === 'awaiting_recheck') {
-              // Перепроверка провалена → новый цикл, снова к АСКУЭ
-              await activeCase.update({
-                recheckAt: new Date(), recheckPeakKw: r.peakKw, recheckResult: 'still_overload',
-                stage: 'askue_limit', cycles: activeCase.cycles + 1, ...snapshot()
-              });
-              await removeSectionOverloadNotifs(section.id);
-              await Notification.create({
-                type: 'power_overload', resId: section.resId, toUserId: null, fromUserId: userId,
-                message: `Повторный перегруз после мероприятий (цикл ${activeCase.cycles + 1}): ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт`,
-                errorData: { ...notifData(activeCase.id, 'askue_limit'), cycle: activeCase.cycles + 1 }
-              });
-            } else {
-              // Кейс в askue_limit/res_work — обновляем цифры, уведомление не дублируем
-              await activeCase.update(snapshot());
-            }
-          } else {
-            // Секция ok
-            if (activeCase && activeCase.stage === 'awaiting_recheck') {
-              // Успех перепроверки
-              await activeCase.update({
-                recheckAt: new Date(), recheckPeakKw: r.peakKw, recheckResult: 'ok',
-                stage: 'completed', closedAt: new Date()
-              });
-              await removeSectionOverloadNotifs(section.id);
-              await Notification.create({
-                type: 'success', resId: section.resId, toUserId: null, fromUserId: userId,
-                message: `Перегруз ${section.tpName} СШ-${section.sectionNumber} устранён, пик ${r.peakKw} кВт при лимите ${limitKw} кВт`
-              });
-            } else if (activeCase) {
-              // Перегруз ушёл сам (кейс в askue_limit/res_work) — закрываем
-              await activeCase.update({ stage: 'completed', recheckResult: 'ok', closedAt: new Date() });
-              await removeSectionOverloadNotifs(section.id);
-            }
-          }
+          return res.status(400).json({ success: false, error: result.error });
         }
 
         await uploadRecord.update({
-          processedCount: sectionsUpdated,
-          errorCount: overloadCount,
+          processedCount: result.sectionsUpdated,
+          errorCount: result.overloadCount,
           status: 'completed'
         });
 
@@ -1751,11 +1766,10 @@ app.post('/api/upload/analyze',
           success: true,
           message: 'Профиль обработан',
           type: 'profile',
-          sectionsUpdated,
-          overloadCount,
-          unmatched: [...unmatched, ...analyzerWarnings],
-          overloads,
-          details
+          sectionsUpdated: result.sectionsUpdated,
+          overloadCount: result.overloadCount,
+          unmatched: result.unmatched,
+          details: result.details
         });
       }
 
@@ -5652,6 +5666,162 @@ app.delete('/api/admin/files/:public_id',
 
 
 // Запуск сервера
+// ==================== Почтовый приёмник (Пирамида → профиль мощности) ==========
+// За флагом MAIL_INTAKE (default OFF): при OFF ничего не запускается, поведение
+// прежнее. Читает IMAP (Яндекс), по разрешённым отправителям обрабатывает
+// вложение-профиль, отвечает сводкой и раскладывает письма по папкам
+// Processed / Errors / Rejected.
+let intakeRunning = false;
+
+// Создать/найти папку с учётом namespace Яндекса; fallback на плоское имя и
+// на подпапку INBOX. Идемпотентно (ALREADYEXISTS не роняет).
+async function ensureImapFolder(client, name) {
+  let prefix = '', delim = '/';
+  try {
+    const ns = client.namespace;
+    const personal = ns && ns.personal && ns.personal[0];
+    if (personal) { prefix = personal.prefix || ''; delim = personal.delimiter || '/'; }
+  } catch (e) {}
+  const candidates = [...new Set([prefix + name, name, 'INBOX' + delim + name])];
+  for (const p of candidates) {
+    try { await client.mailboxCreate(p); return p; }
+    catch (e) {
+      const m = String(e && (e.responseText || e.message || e.code) || '');
+      if (/alreadyexists|already exists/i.test(m)) return p;
+    }
+  }
+  return candidates[0];
+}
+
+async function runMailIntakeOnce() {
+  if (intakeRunning) return;
+  intakeRunning = true;
+  let ImapFlow, simpleParser;
+  try {
+    ({ ImapFlow } = require('imapflow'));
+    ({ simpleParser } = require('mailparser'));
+  } catch (e) {
+    console.error('[INTAKE] Нет модулей imapflow/mailparser:', e.message);
+    intakeRunning = false; return;
+  }
+  const client = new ImapFlow({
+    host: process.env.MAIL_IMAP_HOST || 'imap.yandex.ru',
+    port: Number(process.env.MAIL_IMAP_PORT) || 993,
+    secure: true,
+    auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASS },
+    logger: false
+  });
+  try {
+    await client.connect();
+
+    // Разрешённые отправители: env MAIL_INTAKE_ALLOWED (через запятую) либо все
+    // email пользователей из БД.
+    const envAllowed = (process.env.MAIL_INTAKE_ALLOWED || '')
+      .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    const allowed = new Set(envAllowed);
+    if (allowed.size === 0) {
+      const users = await User.findAll({ attributes: ['email'] });
+      users.forEach(u => { if (u.email) allowed.add(String(u.email).trim().toLowerCase()); });
+    }
+
+    const fProcessed = await ensureImapFolder(client, process.env.MAIL_FOLDER_PROCESSED || 'Processed');
+    const fErrors = await ensureImapFolder(client, process.env.MAIL_FOLDER_ERRORS || 'Errors');
+    const fRejected = await ensureImapFolder(client, process.env.MAIL_FOLDER_REJECTED || 'Rejected');
+
+    // Собираем непрочитанные письма INBOX.
+    const jobs = [];
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      for await (const msg of client.fetch({ seen: false }, { uid: true, source: true })) {
+        jobs.push({ uid: msg.uid, source: msg.source });
+      }
+    } finally { lock.release(); }
+
+    for (const job of jobs) {
+      let parsed = null;
+      try { parsed = await simpleParser(job.source); }
+      catch (e) { console.error('[INTAKE] parse error:', e.message); }
+      const sender = parsed?.from?.value?.[0]?.address
+        ? String(parsed.from.value[0].address).trim().toLowerCase() : '';
+      const subject = parsed?.subject || '(без темы)';
+
+      let target = fErrors;
+      let reply = null;
+
+      if (!sender || !allowed.has(sender)) {
+        target = fRejected; // без ответа
+        console.log(`[INTAKE] Отклонено (адрес не разрешён): ${sender || '—'}`);
+      } else {
+        const att = (parsed.attachments || []).find(a =>
+          /\.(xlsx|xls)$/i.test(a.filename || '') || /spreadsheet|excel/i.test(a.contentType || ''));
+        if (!att) {
+          target = fErrors;
+          reply = { subject: 'Ошибка обработки: нет вложения',
+            text: `Здравствуйте!\n\nВ письме «${subject}» не найдено вложение с профилем мощности (.xlsx). Пришлите выгрузку «Профиль мощности» из Пирамиды файлом .xlsx.\n\n— РЭС-менеджмент (автоответ).` };
+          console.log(`[INTAKE] Нет вложения от ${sender}`);
+        } else {
+          const tmpDir = path.join(process.cwd(), 'uploads');
+          try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (e) {}
+          const tmpPath = path.join(tmpDir, `intake_${Date.now()}_${Math.random().toString(36).slice(2)}.xlsx`);
+          try {
+            fs.writeFileSync(tmpPath, att.content);
+            const result = await processProfileFile(tmpPath, null);
+            try { fs.unlinkSync(tmpPath); } catch (e) {}
+            if (!result.success) {
+              target = fErrors;
+              reply = { subject: 'Ошибка обработки профиля',
+                text: `Здравствуйте!\n\nНе удалось обработать профиль из письма «${subject}»: ${result.error}\n\n— РЭС-менеджмент (автоответ).` };
+            } else {
+              target = fProcessed;
+              const un = result.unmatched.length
+                ? `\nНе привязано к структуре ПУ: ${result.unmatched.length} (${result.unmatched.join(', ')})` : '';
+              reply = { subject: 'Профиль мощности обработан',
+                text: `Здравствуйте!\n\nПрофиль из письма «${subject}» обработан.\nСекций обновлено: ${result.sectionsUpdated}\nПерегрузов: ${result.overloadCount}${un}\n\n— РЭС-менеджмент (автоответ).` };
+              console.log(`[INTAKE] Обработано от ${sender}: секций ${result.sectionsUpdated}, перегрузов ${result.overloadCount}`);
+            }
+          } catch (e) {
+            try { fs.unlinkSync(tmpPath); } catch (e2) {}
+            target = fErrors;
+            reply = { subject: 'Ошибка обработки профиля',
+              text: `Здравствуйте!\n\nОшибка обработки профиля из письма «${subject}»: ${e.message}\n\n— РЭС-менеджмент (автоответ).` };
+            console.error('[INTAKE] processing error:', e.message);
+          }
+        }
+      }
+
+      if (reply && sender) {
+        try { await sendMailAs(sender, reply.subject, reply.text); }
+        catch (e) { console.error('[INTAKE] reply send error:', e.message); }
+      }
+
+      // Помечаем прочитанным и переносим (если move упадёт — хотя бы не зациклит).
+      const mlock = await client.getMailboxLock('INBOX');
+      try {
+        try { await client.messageFlagsAdd(String(job.uid), ['\\Seen'], { uid: true }); } catch (e) {}
+        try { await client.messageMove(String(job.uid), target, { uid: true }); }
+        catch (e) { console.error('[INTAKE] move error:', e.message); }
+      } finally { mlock.release(); }
+    }
+  } catch (e) {
+    console.error('[INTAKE] error:', e.message);
+  } finally {
+    try { await client.logout(); } catch (e) {}
+    intakeRunning = false;
+  }
+}
+
+function startMailIntake() {
+  if (process.env.MAIL_INTAKE !== 'true') return;
+  if (!process.env.MAIL_USER || !process.env.MAIL_PASS) {
+    console.warn('[INTAKE] MAIL_INTAKE=true, но MAIL_USER/MAIL_PASS не заданы — приёмник не запущен.');
+    return;
+  }
+  const interval = Number(process.env.MAIL_INTAKE_INTERVAL_MS) || 60000;
+  console.log(`[INTAKE] Почтовый приёмник включён (Яндекс IMAP, каждые ${interval} мс).`);
+  runMailIntakeOnce().catch(e => console.error('[INTAKE] first run:', e.message));
+  setInterval(() => runMailIntakeOnce().catch(e => console.error('[INTAKE] tick:', e.message)), interval);
+}
+
 initializeDatabase().then(() => {
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
@@ -5661,6 +5831,7 @@ initializeDatabase().then(() => {
     console.log('- Phase Detection ✓'); 
     console.log('- Auto Updates ✓');
     console.log('- Auto Hide Notifications ✓');
+    startMailIntake();
   });
 });
 
