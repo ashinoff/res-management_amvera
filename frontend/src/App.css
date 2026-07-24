@@ -236,7 +236,7 @@ body {
 .osc-grid-flash {
   color: rgba(180,240,255,0.55);                     /* вспышка — холодно-белая */
   opacity: 0;
-  animation: osc-grid-flash 1.4s ease-out forwards;  /* один пробег, синхронно с искрой */
+  animation: osc-grid-flash 1.8s ease-out forwards;  /* один пробег, синхронно с лучом */
 }
 .osc-grid-flash.danger { color: rgba(255,175,182,0.5); }
 @keyframes osc-grid-flash {
@@ -268,16 +268,17 @@ body {
   stroke-width: 1.2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 0.9 1.2;      /* видимый сегмент ~90% ширины — волна идёт по всей решётке */
-  stroke-dashoffset: 0.9;         /* dash полностью за левым краем */
+  stroke-dasharray: 1 1;          /* dash = вся длина пути; луч прочерчивает всю ширину */
+  stroke-dashoffset: 1;           /* старт: путь полностью скрыт за левым краем */
   filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 6px currentColor);
-  animation: osc-spark 1.4s cubic-bezier(0.33, 0, 0.3, 1) forwards; /* медленнее — можно любоваться */
+  animation: osc-spark 1.8s linear forwards; /* ровная скорость — луч бежит от левого края до правого */
 }
 @keyframes osc-spark {
-  0%   { stroke-dashoffset: 0.9; opacity: 0; }
-  8%   { opacity: 1; }
-  85%  { opacity: 1; }
-  100% { stroke-dashoffset: -1;  opacity: 0; }  /* dash полностью за правым краем */
+  0%   { stroke-dashoffset: 1; opacity: 0; }
+  6%   { opacity: 1; }
+  65%  { stroke-dashoffset: 0; opacity: 1; }  /* к 65% прочерчена ВСЯ ширина решётки */
+  86%  { stroke-dashoffset: 0; opacity: 1; }  /* держим полную волну */
+  100% { stroke-dashoffset: 0; opacity: 0; }  /* плавно гаснет целиком */
 }
 /* Текст заголовка — поверх синусоиды. */
 .monitor-title {
