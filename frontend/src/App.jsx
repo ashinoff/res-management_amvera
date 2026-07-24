@@ -146,10 +146,11 @@ function LoginForm({ onLogin }) {
 const ROMAN = { 1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V' };
 const toRoman = (n) => ROMAN[n] || String(n);
 
-// Высокочастотная глубокая синусоида (осциллограф) на всю высоту заголовка
-// (viewBox 0 0 120 44, 8 периодов, амплитуда почти во всю высоту). Считается один раз.
+// Высокочастотная синусоида (осциллограф), центрированная по средней линии
+// (viewBox 0 0 120 44, mid=22). Узкая амплитуда — колебания идут ровно в зазоре
+// между словами «МОНИТОРИНГ» и «напряжения», не вываливаясь волнами вниз.
 const OSC_PATH = (() => {
-  const w = 120, mid = 22, amp = 19, periods = 8, n = 240;
+  const w = 120, mid = 22, amp = 7, periods = 9, n = 270;
   let d = '';
   for (let i = 0; i <= n; i++) {
     const x = (w * i / n).toFixed(2);
@@ -247,18 +248,27 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
   return (
     <nav className="main-menu">
       <div className="monitor-head">
-        <svg className={`osc-bg ${oscDanger ? 'danger' : 'ok'}`} viewBox="0 0 120 44"
-             preserveAspectRatio="none" aria-hidden="true">
+        <div className="monitor-brand">
+          {/* Сетка осциллографа (тонкие белые квадраты), отцентрована по средней
+              линии между словами. Базовая — едва заметная; на пробеге вспыхивает. */}
+          <div className={`osc-grid ${oscDanger ? 'danger' : 'ok'}`} aria-hidden="true" />
           {sweepTick > 0 && (
-            <path key={sweepTick} className="osc-spark" d={OSC_PATH} fill="none" pathLength="1" />
+            <div key={`g${sweepTick}`} className={`osc-grid-flash ${oscDanger ? 'danger' : 'ok'}`}
+                 aria-hidden="true" />
           )}
-        </svg>
-        <div className="monitor-title">
-          <span className="monitor-logo">{RESM_LOGO}</span>
-          <span className="monitor-text">
-            <span className="mt-1">МОНИТОРИНГ</span>
-            <span className="mt-2">напряжения</span>
-          </span>
+          <svg className={`osc-bg ${oscDanger ? 'danger' : 'ok'}`} viewBox="0 0 120 44"
+               preserveAspectRatio="none" aria-hidden="true">
+            {sweepTick > 0 && (
+              <path key={sweepTick} className="osc-spark" d={OSC_PATH} fill="none" pathLength="1" />
+            )}
+          </svg>
+          <div className="monitor-title">
+            <span className="monitor-logo">{RESM_LOGO}</span>
+            <span className="monitor-text">
+              <span className="mt-1">МОНИТОРИНГ</span>
+              <span className="mt-2">напряжения</span>
+            </span>
+          </div>
         </div>
       </div>
       {visibleItems.map(item => (

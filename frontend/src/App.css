@@ -203,14 +203,57 @@ body {
   padding-bottom: 16px;
   border-bottom: 1px solid rgba(255,255,255,0.1);
 }
+/* Обёртка бренда: логотип + текст задают высоту, осциллограф и сетка
+   центрируются по её середине — ровно по зазору между двумя словами. */
+.monitor-brand {
+  position: relative;
+}
+/* Сетка осциллографа: тонкие белые квадраты (real-px через два repeating-градиента),
+   «экран» центрирован по средней линии между «МОНИТОРИНГ» и «напряжения». Базовая —
+   едва различима; вспыхивает копией .osc-grid-flash в момент пробега синусоиды. */
+.osc-grid, .osc-grid-flash {
+  position: absolute;
+  left: -24px; right: -24px;
+  top: 50%;
+  height: 26px;
+  transform: translateY(-50%);
+  z-index: 2;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  --cell: 5.5px;                  /* сторона квадрата */
+  --line: 0.6px;                  /* толщина линии */
+  background-image:
+    repeating-linear-gradient(to right,
+      transparent 0, transparent calc(var(--cell) - var(--line)),
+      currentColor calc(var(--cell) - var(--line)), currentColor var(--cell)),
+    repeating-linear-gradient(to bottom,
+      transparent 0, transparent calc(var(--cell) - var(--line)),
+      currentColor calc(var(--cell) - var(--line)), currentColor var(--cell));
+  background-position: center;
+}
+.osc-grid { color: rgba(255,255,255,0.07); }         /* база — почти невидима */
+.osc-grid.danger { color: rgba(255,154,162,0.08); }
+.osc-grid-flash {
+  color: rgba(180,240,255,0.55);                     /* вспышка — холодно-белая */
+  opacity: 0;
+  animation: osc-grid-flash 0.85s ease-out forwards; /* один пробег, синхронно с искрой */
+}
+.osc-grid-flash.danger { color: rgba(255,175,182,0.5); }
+@keyframes osc-grid-flash {
+  0%   { opacity: 0; }
+  12%  { opacity: 1; }
+  70%  { opacity: 0.65; }
+  100% { opacity: 0; }
+}
 /* Осциллограф ПОВЕРХ текста (mix-blend screen — светится над тёмным фоном, белые
    буквы не темнит). Постоянной линии нет: волна рисуется бегущей искрой и тут же
-   исчезает (виден только короткий «хвост» ~2 колебания). */
-/* Во всю ширину меню (компенсируем padding 24px) и выше/ниже букв (~0.5 см). */
+   исчезает. Центрирована по средней линии (mid=22 → середина полосы = зазор). */
 .osc-bg {
   position: absolute;
   left: -24px; right: -24px;
-  top: -18px; bottom: 4px;
+  top: 50%;
+  height: 30px;
+  transform: translateY(-50%);
   z-index: 2;
   pointer-events: none;
   mix-blend-mode: screen;
@@ -250,7 +293,7 @@ body {
 .monitor-text .mt-1 { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; color: #fff; }
 .monitor-text .mt-2 { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; color: #a9bcd4; }
 @media (prefers-reduced-motion: reduce) {
-  .osc-spark { display: none; }
+  .osc-spark, .osc-grid-flash { display: none; }
 }
 
 .main-menu button {
