@@ -272,17 +272,18 @@ body {
   stroke-width: 1.2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 1 1;          /* dash = вся длина пути; луч прочерчивает всю ширину */
-  stroke-dashoffset: 1;           /* старт: путь полностью скрыт за левым краем */
+  stroke-dasharray: 0.28 1.4;     /* видимое окно ~2.5 гребня (0.28×9 периодов) + большой gap */
+  stroke-dashoffset: 0.28;        /* старт: окно полностью за левым краем */
   filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 6px currentColor);
-  animation: osc-spark 1.8s linear forwards; /* ровная скорость — луч бежит от левого края до правого */
+  animation: osc-spark 1.8s linear forwards; /* ровная скорость — окно бежит от края до края */
 }
+/* Бегущее окно: фронт дорисовывает волну, хвост стирает её по тому же контуру —
+   в кадре всегда 2–3 гребня; окно проходит всю ширину и уходит за правый край. */
 @keyframes osc-spark {
-  0%   { stroke-dashoffset: 1; opacity: 0; }
+  0%   { stroke-dashoffset: 0.28; opacity: 0; }
   6%   { opacity: 1; }
-  65%  { stroke-dashoffset: 0; opacity: 1; }  /* к 65% прочерчена ВСЯ ширина решётки */
-  86%  { stroke-dashoffset: 0; opacity: 1; }  /* держим полную волну */
-  100% { stroke-dashoffset: 0; opacity: 0; }  /* плавно гаснет целиком */
+  92%  { opacity: 1; }
+  100% { stroke-dashoffset: -1;   opacity: 0; }  /* окно полностью за правым краем */
 }
 /* Текст заголовка — поверх синусоиды. */
 .monitor-title {
