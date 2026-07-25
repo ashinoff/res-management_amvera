@@ -3228,14 +3228,22 @@ app.get('/api/reports/overload', authenticateToken, async (req, res) => {
       completed: 'Завершён'
     };
 
-    const rows = await Promise.all(sections.map(async (s) => {
+    // PERF: последний кейс на секцию — ОДНИМ запросом (DISTINCT ON), в Map по
+    // sectionId (было — OverloadCase.findOne на каждую секцию внутри Promise.all).
+    const latestCases = await sequelize.query(
+      `SELECT DISTINCT ON ("sectionId") "sectionId", "stage", "askueCompletedAt", "resCompletedAt", "recheckResult", "cycles"
+         FROM "OverloadCases"
+        ORDER BY "sectionId", "id" DESC`,
+      { type: Sequelize.QueryTypes.SELECT }
+    );
+    const caseBySection = new Map();
+    for (const c of latestCases) caseBySection.set(c.sectionId, c);
+
+    const rows = sections.map((s) => {
       const cosPhi = s.cosPhi != null ? s.cosPhi : 0.9;
       const limitKw = s.tnKva * cosPhi;
       const ratio = (s.lastPeakKw != null && limitKw) ? s.lastPeakKw / limitKw : null;
-      const oc = await OverloadCase.findOne({
-        where: { sectionId: s.id },
-        order: [['id', 'DESC']]
-      });
+      const oc = caseBySection.get(s.id);
       return {
         resName: s.ResUnit?.name || '',
         tpName: s.tpName,
@@ -3252,7 +3260,7 @@ app.get('/api/reports/overload', authenticateToken, async (req, res) => {
         recheckResult: oc?.recheckResult === 'ok' ? 'устранён' : oc?.recheckResult === 'still_overload' ? 'повторный перегруз' : '—',
         cycles: oc?.cycles || 0
       };
-    }));
+    });
 
     res.json(rows);
   } catch (error) {
