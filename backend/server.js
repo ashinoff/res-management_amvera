@@ -1876,74 +1876,85 @@ app.post('/api/network/upload-full-structure',
       
       let processed = 0;
       let errors = [];
-      
-           
+
+      // PERF: все РЭС одним запросом в Map по имени (было — findOne на строку).
+      const resUnits = await ResUnit.findAll({ transaction });
+      const resByName = new Map(resUnits.map(r => [r.name, r]));
+
+      // PuStatus для новых ПУ копим и создаём одним bulkCreate после цикла (было —
+      // findOrCreate на каждую позицию). Первое вхождение ПУ выигрывает, как и у
+      // findOrCreate; существующие в БД не трогаем.
+      const puToCreate = new Map(); // puNumber -> { networkStructureId, position, status }
+
       // Обрабатываем каждую строку
       for (const row of data) {
         try {
           // Ищем РЭС по полному имени из Excel
           const resName = row['РЭС'];
-          const res = await ResUnit.findOne({ 
-            where: { name: resName },
-            transaction 
-          });
-          
-          if (!res) {
+          const resUnit = resByName.get(resName);
+
+          if (!resUnit) {
             errors.push(`Неизвестный РЭС: ${resName}`);
             continue;
           }
-          
-          // Создаем или обновляем запись
-          await NetworkStructure.upsert({
-            resId: res.id,
+
+          // Создаём/обновляем запись; id берём из returning — без повторного findOne
+          const [structure] = await NetworkStructure.upsert({
+            resId: resUnit.id,
             tpName: row['ТП'] || '',
             vlName: row['Фидер'] || '',
             startPu: row['Начало'] ? String(row['Начало']) : null,
             endPu: row['Конец'] ? String(row['Конец']) : null,
             middlePu: row['Середина'] ? String(row['Середина']) : null
           }, {
+            returning: true,
             transaction
           });
-          
+
           processed++;
-          
-          // ✅ Находим ID структуры для привязки PuStatus
-          const structure = await NetworkStructure.findOne({
-            where: { 
-              resId: res.id, 
-              tpName: row['ТП'] || '', 
-              vlName: row['Фидер'] || '' 
-            },
-            transaction
-          });
+
           const structureId = structure?.id;
-          
-          // Создаем статусы для новых ПУ
+
+          // Копим статусы для новых ПУ (первое вхождение выигрывает)
           const positions = [
             { pu: row['Начало'], pos: 'start' },
             { pu: row['Конец'], pos: 'end' },
             { pu: row['Середина'], pos: 'middle' }
           ];
-          
           for (const { pu, pos } of positions) {
             if (pu) {
-              await PuStatus.findOrCreate({
-                where: { puNumber: String(pu) },
-                defaults: {
+              const key = String(pu);
+              if (!puToCreate.has(key)) {
+                puToCreate.set(key, {
+                  puNumber: key,
                   networkStructureId: structureId,
                   position: pos,
                   status: 'not_checked'
-                },
-                transaction
-              });
+                });
+              }
             }
           }
-          
+
         } catch (err) {
           errors.push(`Ошибка в строке ${row['ТП']}-${row['Фидер']}: ${err.message}`);
         }
       }
-      
+
+      // Недостающие PuStatus — одним запросом; существующие не трогаем (как findOrCreate).
+      if (puToCreate.size > 0) {
+        const puNumbers = [...puToCreate.keys()];
+        const existing = await PuStatus.findAll({
+          where: { puNumber: puNumbers },
+          attributes: ['puNumber'],
+          transaction
+        });
+        const existingSet = new Set(existing.map(e => e.puNumber));
+        const toInsert = [...puToCreate.values()].filter(p => !existingSet.has(p.puNumber));
+        if (toInsert.length > 0) {
+          await PuStatus.bulkCreate(toInsert, { transaction });
+        }
+      }
+
       await transaction.commit();
       
       // Удаляем файл
