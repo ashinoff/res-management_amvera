@@ -5779,8 +5779,14 @@ async function runMailIntakeOnce() {
               target = fProcessed;
               const un = result.unmatched.length
                 ? `\nНе привязано к структуре ПУ: ${result.unmatched.length} (${result.unmatched.join(', ')})` : '';
+              const matched = (result.details || []).filter(d => d.matched);
+              const matchedTxt = matched.length
+                ? `\n\nОбновлены секции:\n` + matched.map(d =>
+                    `• ПУ ${d.puNumber} → ${d.tpSection}: пик ${d.peakKw} кВт${d.decision === 'overload' ? ' (ПЕРЕГРУЗ)' : ''}`
+                  ).join('\n')
+                : '';
               reply = { subject: 'Профиль мощности обработан',
-                text: `Здравствуйте!\n\nПрофиль из письма «${subject}» обработан.\nСекций обновлено: ${result.sectionsUpdated}\nПерегрузов: ${result.overloadCount}${un}\n\n— РЭС-менеджмент (автоответ).` };
+                text: `Здравствуйте!\n\nПрофиль из письма «${subject}» обработан.\nСекций обновлено: ${result.sectionsUpdated}\nПерегрузов: ${result.overloadCount}${un}${matchedTxt}\n\n— РЭС-менеджмент (автоответ).` };
               console.log(`[INTAKE] Обработано от ${sender}: секций ${result.sectionsUpdated}, перегрузов ${result.overloadCount}`);
             }
           } catch (e) {
