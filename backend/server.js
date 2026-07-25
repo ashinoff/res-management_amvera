@@ -43,6 +43,18 @@ const kc = require('./keycloakPlatform');
 // =====================================================
 
 require('dotenv').config();
+
+// СЕКРЕТЫ ОБЯЗАТЕЛЬНЫ: без них не стартуем (иначе небезопасные дефолты в проде).
+// Проверка до app.listen — при отсутствии переменной сервер падает на старте.
+if (!process.env.JWT_SECRET || !process.env.DELETE_PASSWORD) {
+  console.error('FATAL: не заданы обязательные переменные окружения:' +
+    (!process.env.JWT_SECRET ? ' JWT_SECRET' : '') +
+    (!process.env.DELETE_PASSWORD ? ' DELETE_PASSWORD' : '') +
+    '. Сервер остановлен.');
+  process.exit(1);
+}
+const JWT_SECRET = process.env.JWT_SECRET;
+
 const app = express();
 app.use((req, res, next) => {
   if (req.path.startsWith('/api')) {
@@ -52,8 +64,8 @@ app.use((req, res, next) => {
 });
 const PORT = process.env.PORT || 3000;
 
-// ВАЖНО: Пароль для удаления из переменной окружения
-const DELETE_PASSWORD = process.env.DELETE_PASSWORD || '1191';
+// ВАЖНО: Пароль для удаления — только из переменной окружения (проверен выше).
+const DELETE_PASSWORD = process.env.DELETE_PASSWORD;
 
 // Middleware
 app.use(cors());
@@ -926,7 +938,7 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: 'Access denied' });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET || 'secret-key', (err, user) => {
+  jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
       return res.status(403).json({ error: 'Invalid token' });
     }
@@ -1030,7 +1042,7 @@ app.post('/api/auth/login', async (req, res) => {
         resId: user.resId,
         
       },
-      process.env.JWT_SECRET || 'secret-key',
+      JWT_SECRET,
       { expiresIn: '24h' }
     );
     
@@ -1097,7 +1109,7 @@ app.post('/api/auth/platform', async (req, res) => {
     // Обычный JWT приложения — тот же формат, что в /api/auth/login.
     const appToken = jwt.sign(
       { id: user.id, role: user.role, resId: user.resId },
-      process.env.JWT_SECRET || 'secret-key',
+      JWT_SECRET,
       { expiresIn: '24h' }
     );
     res.json({

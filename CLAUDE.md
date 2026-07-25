@@ -145,8 +145,10 @@ JSON-строка в `message`), UploadHistory, CheckHistory (вложения �
    в проде SSL — сейчас включается по `NODE_ENV=production`, проверить, что на
    Amvera работает; возможно понадобится `ssl:false` — у Amvera БД во внутренней
    сети), `JWT_SECRET` (новый — разлогинит старые сессии, это ок),
-   `DELETE_PASSWORD`, `CLOUDINARY_*` (3 шт., переносятся как есть),
-   **почта (Яндекс)** — `MAIL_USER` (полный адрес ящика), `MAIL_PASS`
+   `DELETE_PASSWORD`, `CLOUDINARY_*` (3 шт., переносятся как есть).
+   **`JWT_SECRET` и `DELETE_PASSWORD` ОБЯЗАТЕЛЬНЫ** — без любой из них сервер
+   падает на старте (`process.exit(1)`), небезопасных дефолтов больше нет.
+   Далее — **почта (Яндекс)** — `MAIL_USER` (полный адрес ящика), `MAIL_PASS`
    (**пароль приложения**, не основной пароль ящика), `MAIL_HOST=smtp.yandex.ru`,
    `MAIL_PORT=465`, `MAIL_IMAP_HOST=imap.yandex.ru`, `MAIL_IMAP_PORT=993`;
    приёмник за флагом — `MAIL_INTAKE=true` (default OFF = приёмник не
