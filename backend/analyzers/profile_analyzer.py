@@ -173,7 +173,8 @@ def _read_sheet(ws):
                 pu_s = _pu_str(pu_cell)
                 if pu_s:
                     kt_cell = kt_row_vals[col - 1] if (kt_row_vals and col - 1 < len(kt_row_vals)) else None
-                    meta[col] = {'pu': pu_s, 'kt': _parse_kt(kt_cell)}
+                    meta[col] = {'pu': pu_s, 'kt': _parse_kt(kt_cell),
+                                 'ktRaw': '' if kt_cell is None else str(kt_cell).strip()}
                     series[col] = {}
 
         a = row[0] if len(row) > 0 else None
@@ -221,10 +222,12 @@ def analyze(filepath):
     meta30, series30, dates30 = _read_sheet(ws30)
 
     # Полный список ПУ (объединение по номерам) с их kt (приоритет — где есть данные)
-    pu_info = {}   # pu -> {'kt': float}
+    pu_info = {}   # pu -> {'kt': float, 'ktRaw': str}
     for m in (meta60, meta30):
         for c, info in m.items():
-            pu_info.setdefault(info['pu'], {})['kt'] = info['kt']
+            entry = pu_info.setdefault(info['pu'], {})
+            entry['kt'] = info['kt']
+            entry['ktRaw'] = info.get('ktRaw', '')
 
     all_dates = dates60 + dates30
     period = ''
@@ -263,6 +266,7 @@ def analyze(filepath):
         results.append({
             'puNumber': pu,
             'kt': round(kt, 4),
+            'ktRaw': info.get('ktRaw', ''),
             'peakRaw': round(peak_raw, 4),
             'peakKw': round(peak_kw, 4),
             'peakAt': peak_dt.strftime('%d.%m.%Y %H:%M'),

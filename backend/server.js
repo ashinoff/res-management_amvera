@@ -1598,10 +1598,10 @@ async function processProfileFile(filePath, userId) {
       unmatched.push(r.puNumber);
       details.push({
         puNumber: r.puNumber, matched: false, sectionId: null, tpSection: null,
-        peakRaw: r.peakRaw, kt: r.kt, peakKw: r.peakKw, peakAt: r.peakAt,
+        peakRaw: r.peakRaw, kt: r.kt, ktRaw: r.ktRaw || null, peakKw: r.peakKw, peakAt: r.peakAt,
         tnKva: null, cosPhi: null, limitKw: null, decision: 'not_matched'
       });
-      console.log(`[PROFILE] ПУ ${r.puNumber} peakRaw=${r.peakRaw} kt=${r.kt} peakKw=${r.peakKw} — не сопоставлен с секцией`);
+      console.log(`[PROFILE] ПУ ${r.puNumber} peakRaw=${r.peakRaw} Ктт/Ктн="${r.ktRaw || ''}" kt=${r.kt} peakKw=${r.peakKw} — не сопоставлен с секцией`);
       continue;
     }
 
@@ -1617,11 +1617,11 @@ async function processProfileFile(filePath, userId) {
     details.push({
       puNumber: r.puNumber, matched: true, sectionId: section.id,
       tpSection: `${section.tpName} СШ-${section.sectionNumber}`,
-      peakRaw: r.peakRaw, kt: r.kt, peakKw: r.peakKw, peakAt: r.peakAt,
+      peakRaw: r.peakRaw, kt: r.kt, ktRaw: r.ktRaw || null, peakKw: r.peakKw, peakAt: r.peakAt,
       tnKva: hasLimit ? section.tnKva : null, cosPhi: hasLimit ? cosPhi : null,
       limitKw, decision: overloadStatus
     });
-    console.log(`[PROFILE] ПУ ${r.puNumber} → ${section.tpName} СШ-${section.sectionNumber}: peakRaw=${r.peakRaw} kt=${r.kt} peakKw=${r.peakKw} tnKva=${section.tnKva} cosPhi=${cosPhi} limitKw=${limitKw} → ${overloadStatus}`);
+    console.log(`[PROFILE] ПУ ${r.puNumber} → ${section.tpName} СШ-${section.sectionNumber}: peakRaw=${r.peakRaw} Ктт/Ктн="${r.ktRaw || ''}" kt=${r.kt} peakKw=${r.peakKw} tnKva=${section.tnKva} cosPhi=${cosPhi} limitKw=${limitKw} → ${overloadStatus}`);
 
     await section.update({
       lastPeakKw: r.peakKw,
@@ -5782,7 +5782,7 @@ async function runMailIntakeOnce() {
               const matched = (result.details || []).filter(d => d.matched);
               const matchedTxt = matched.length
                 ? `\n\nОбновлены секции:\n` + matched.map(d =>
-                    `• ПУ ${d.puNumber} → ${d.tpSection}: пик ${d.peakKw} кВт${d.decision === 'overload' ? ' (ПЕРЕГРУЗ)' : ''}`
+                    `• ПУ ${d.puNumber} (Ктт/Ктн ${d.ktRaw || '—'}, kt ${d.kt}) → ${d.tpSection}: пик-пром ${d.peakRaw} × ${d.kt} = ${d.peakKw} кВт${d.decision === 'overload' ? ' (ПЕРЕГРУЗ)' : ''}`
                   ).join('\n')
                 : '';
               reply = { subject: 'Профиль мощности обработан',
