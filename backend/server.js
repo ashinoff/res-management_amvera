@@ -3478,32 +3478,40 @@ function runProfileAnalyzer(filePath) {
     if (!fs.existsSync(scriptPath)) {
       return resolve({ success: false, error: 'profile_analyzer.py не найден' });
     }
-    let python;
-    try {
-      python = spawn('python3', [scriptPath, filePath]);
-    } catch (e) {
-      try { python = spawn('python', [scriptPath, filePath]); }
-      catch (e2) { return resolve({ success: false, error: 'Python недоступен' }); }
-    }
-    let out = '', err = '', done = false;
+    let done = false, current = null;
     const finish = (v) => { if (done) return; done = true; clearTimeout(timer); resolve(v); };
 
-    // Таймаут: зависание анализатора больше не выглядит как «молча ничего не нашлось».
+    // Один таймаут на ОБЕ попытки (python3, затем python) — не утекает: убивает
+    // текущий процесс. Зависание больше не выглядит как «молча ничего не нашлось».
     const timer = setTimeout(() => {
-      try { python.kill('SIGKILL'); } catch (e) {}
+      try { if (current) current.kill('SIGKILL'); } catch (e) {}
       console.error('[PROFILE] анализатор не уложился в 120 с — SIGKILL');
       finish({ success: false, error: 'Анализатор не уложился в 120 с' });
     }, 120000);
 
-    python.stdout.on('data', d => { out += d.toString(); });
-    python.stderr.on('data', d => { err += d.toString(); });
-    python.on('error', () => finish({ success: false, error: 'Python недоступен' }));
-    python.on('close', (code) => {
-      if (err) console.error('[PROFILE] stderr:', err);
-      if (code !== 0) return finish({ success: false, error: `Ошибка анализа (код ${code}): ${err}` });
-      try { finish(JSON.parse(out)); }
-      catch (e) { finish({ success: false, error: 'Не удалось разобрать результат анализатора' }); }
-    });
+    // spawn НЕ бросает синхронно (ENOENT приходит событием 'error'). Поэтому
+    // пробуем 'python3', и в on('error') один раз падаем на 'python' с теми же
+    // обработчиками. Если и он дал 'error' — Python недоступен.
+    const run = (cmd, isFallback) => {
+      let out = '', err = '';
+      const child = spawn(cmd, [scriptPath, filePath]);
+      current = child;
+      child.stdout.on('data', d => { out += d.toString(); });
+      child.stderr.on('data', d => { err += d.toString(); });
+      child.on('error', () => {
+        child.removeAllListeners('close');   // не дать 'close' первой попытки перебить fallback
+        if (!isFallback) return run('python', true);
+        finish({ success: false, error: 'Python недоступен' });
+      });
+      child.on('close', (code) => {
+        if (done) return;
+        if (err) console.error('[PROFILE] stderr:', err);
+        if (code !== 0) return finish({ success: false, error: `Ошибка анализа (код ${code}): ${err}` });
+        try { finish(JSON.parse(out)); }
+        catch (e) { finish({ success: false, error: 'Не удалось разобрать результат анализатора' }); }
+      });
+    };
+    run('python3', false);
   });
 }
 
@@ -3611,50 +3619,25 @@ async function analyzeFile(filePath, type, originalFileName = null, requiredPeri
       });
     }
     
-    // Запуск Python
-    let python;
-    try {
-      python = spawn('python3', [scriptPath, filePath]);
-      console.log('Python3 spawn created successfully');
-    } catch (err) {
-      console.error('Failed to spawn python3, trying python:', err);
-      try {
-        python = spawn('python', [scriptPath, filePath]);
-        console.log('Python spawn created successfully');
-      } catch (err2) {
-        console.error('Both python3 and python failed:', err2);
-        return resolve({
-          processed: [],
-          errors: ['Python не установлен на сервере. Убедитесь что в Build Command есть: npm install && pip install xlrd']
-        });
-      }
-    }
-
-    console.log('Running Python script:', scriptPath);
-    console.log('Analyzing file:', filePath);
-
+    // Запуск Python. spawn НЕ бросает синхронно (ENOENT приходит событием
+    // 'error'), поэтому пробуем 'python3', а в on('error') один раз падаем на
+    // 'python' с теми же обработчиками stdout/stderr/close.
     let output = '';
     let errorOutput = '';
+    let done = false, current = null;
 
-    python.stdout.on('data', (data) => {
-      output += data.toString();
-      console.log('Python stdout chunk:', data.toString());
-    });
+    // Оборачиваем resolve: единожды + гасим таймаут (в теле onClose много resolve).
+    const _resolve = resolve;
+    resolve = (v) => { if (done) return; done = true; clearTimeout(timer); _resolve(v); };
 
-    python.stderr.on('data', (data) => {
-      errorOutput += data.toString();
-      console.error('Python stderr:', data.toString());
-    });
+    // Один таймаут на ОБЕ попытки — покрывает оба процесса и не утекает.
+    const timer = setTimeout(() => {
+      try { if (current) current.kill('SIGKILL'); } catch (e) {}
+      console.error('Python analyzer timed out (120s) — SIGKILL');
+      resolve({ processed: [], errors: ['Анализатор не уложился в 120 с'] });
+    }, 120000);
 
-    python.on('error', (error) => {
-      console.error('Python process error:', error);
-      return resolve({
-        processed: [],
-        errors: [`Python не установлен или недоступен. Убедитесь что в Build Command на Render есть: npm install && pip install xlrd`]
-      });
-    });
-
-    python.on('close', async (code) => {
+    const onClose = async (code) => {
       console.log('Python process closed with code:', code);
       
       if (code !== 0) {
@@ -4198,7 +4181,28 @@ if (result.has_errors) {
           errors: [`Ошибка парсинга результата: ${e.message}`]
         });
       }
-    });
+    };
+
+    const run = (cmd, isFallback) => {
+      const child = spawn(cmd, [scriptPath, filePath]);
+      current = child;
+      child.stdout.on('data', (data) => {
+        output += data.toString();
+        console.log('Python stdout chunk:', data.toString());
+      });
+      child.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+        console.error('Python stderr:', data.toString());
+      });
+      child.on('error', (error) => {
+        child.removeAllListeners('close');   // 'close' первой попытки не должен перебить fallback
+        if (!isFallback) return run('python', true);
+        console.error('Python process error:', error);
+        resolve({ processed: [], errors: ['Python недоступен'] });
+      });
+      child.on('close', onClose);
+    };
+    run('python3', false);
   });
 }
 
