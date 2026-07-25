@@ -5719,10 +5719,13 @@ async function runMailIntakeOnce() {
     const envAllowed = (process.env.MAIL_INTAKE_ALLOWED || '')
       .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
     const allowed = new Set(envAllowed);
+    const allowSource = envAllowed.length ? 'MAIL_INTAKE_ALLOWED' : 'email пользователей БД';
     if (allowed.size === 0) {
       const users = await User.findAll({ attributes: ['email'] });
       users.forEach(u => { if (u.email) allowed.add(String(u.email).trim().toLowerCase()); });
     }
+    console.log(`[INTAKE] Подключено. Разрешённых отправителей: ${allowed.size} (источник: ${allowSource})` +
+      (allowed.size ? ` — ${[...allowed].slice(0, 8).join(', ')}` : ' — ПУСТО: все письма будут отклонены!'));
 
     const fProcessed = await ensureImapFolder(client, process.env.MAIL_FOLDER_PROCESSED || 'Processed');
     const fErrors = await ensureImapFolder(client, process.env.MAIL_FOLDER_ERRORS || 'Errors');
@@ -5737,6 +5740,7 @@ async function runMailIntakeOnce() {
       }
     } finally { lock.release(); }
 
+    console.log(`[INTAKE] Непрочитанных писем в INBOX: ${jobs.length}`);
     for (const job of jobs) {
       let parsed = null;
       try { parsed = await simpleParser(job.source); }
@@ -5816,8 +5820,12 @@ function startMailIntake() {
     console.warn('[INTAKE] MAIL_INTAKE=true, но MAIL_USER/MAIL_PASS не заданы — приёмник не запущен.');
     return;
   }
-  const interval = Number(process.env.MAIL_INTAKE_INTERVAL_MS) || 60000;
-  console.log(`[INTAKE] Почтовый приёмник включён (Яндекс IMAP, каждые ${interval} мс).`);
+  // Период опроса: MAIL_POLL_SECONDS (в секундах) либо MAIL_INTAKE_INTERVAL_MS (в мс).
+  const pollSec = Number(process.env.MAIL_POLL_SECONDS);
+  const interval = (Number.isFinite(pollSec) && pollSec > 0)
+    ? pollSec * 1000
+    : (Number(process.env.MAIL_INTAKE_INTERVAL_MS) || 60000);
+  console.log(`[INTAKE] Почтовый приёмник включён (Яндекс IMAP, каждые ${Math.round(interval / 1000)} с).`);
   runMailIntakeOnce().catch(e => console.error('[INTAKE] first run:', e.message));
   setInterval(() => runMailIntakeOnce().catch(e => console.error('[INTAKE] tick:', e.message)), interval);
 }
