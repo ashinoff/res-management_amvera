@@ -1614,7 +1614,6 @@ async function processProfileFile(filePath, userId) {
         peakRaw: r.peakRaw, kt: r.kt, ktRaw: r.ktRaw || null, peakKw: r.peakKw, peakAt: r.peakAt,
         tnKva: null, cosPhi: null, limitKw: null, decision: 'not_matched'
       });
-      console.log(`[PROFILE] ПУ ${r.puNumber} peakRaw=${r.peakRaw} Ктт/Ктн="${r.ktRaw || ''}" kt=${r.kt} peakKw=${r.peakKw} — не сопоставлен с секцией`);
       continue;
     }
 
@@ -1634,7 +1633,6 @@ async function processProfileFile(filePath, userId) {
       tnKva: hasLimit ? section.tnKva : null, cosPhi: hasLimit ? cosPhi : null,
       limitKw, decision: overloadStatus
     });
-    console.log(`[PROFILE] ПУ ${r.puNumber} → ${section.tpName} СШ-${section.sectionNumber}: peakRaw=${r.peakRaw} Ктт/Ктн="${r.ktRaw || ''}" kt=${r.kt} peakKw=${r.peakKw} tnKva=${section.tnKva} cosPhi=${cosPhi} limitKw=${limitKw} → ${overloadStatus}`);
 
     await section.update({
       lastPeakKw: r.peakKw,
@@ -1710,11 +1708,16 @@ async function processProfileFile(filePath, userId) {
     }
   }
 
+  // Сводный лог (детализация по каждому ПУ — в details[] ответа и в письме-ответе).
+  const allUnmatched = [...unmatched, ...analyzerWarnings];
+  console.log(`[PROFILE] обработано секций: ${sectionsUpdated}, перегрузов: ${overloadCount}, ` +
+    `не сопоставлено: ${allUnmatched.length}${allUnmatched.length ? ' (' + allUnmatched.join(', ') + ')' : ''}`);
+
   return {
     success: true,
     sectionsUpdated,
     overloadCount,
-    unmatched: [...unmatched, ...analyzerWarnings],
+    unmatched: allUnmatched,
     details,
     period: analysis.period || null
   };
@@ -1733,16 +1736,6 @@ app.post('/api/upload/analyze',
       
       // Берем resId из body (если есть) или из токена пользователя
       const resId = req.body.resId || req.user.resId;
-
-      console.log('=== UPLOAD DEBUG ===');
-      console.log('userId from token:', userId);
-      console.log('req.user:', req.user);
-
-      console.log('=== UPLOAD ANALYZE START ===');
-      console.log('User:', req.user);
-      console.log('Request body:', req.body);
-      console.log('Final resId:', resId);
-      console.log('File:', req.file?.originalName);
 
       // ── Профиль мощности (Пирамида) — матчинг по ПУ техучёта, resId не нужен ──
       if (type === 'profile') {
@@ -1834,8 +1827,6 @@ app.post('/api/upload/analyze',
           // НЕ падаем, продолжаем работу!
         }
       }
-      
-      console.log('=== UPLOAD ANALYZE COMPLETE ===');
       
       // Возвращаем результат
       res.json({
@@ -3601,9 +3592,6 @@ function parsePeakAt(s) {
 async function analyzeFile(filePath, type, originalFileName = null, requiredPeriod = null, userId = null) {
   return new Promise((resolve, reject) => {
 
-    console.log('=== ANALYZE FILE DEBUG ===');
-    console.log('Received userId:', userId);
-    console.log('All params:', { filePath, type, originalFileName, requiredPeriod, userId });
     
     // Вспомогательная функция для получения названия месяца
     function getMonthName(monthNum) {
@@ -3700,7 +3688,6 @@ async function analyzeFile(filePath, type, originalFileName = null, requiredPeri
     }, 120000);
 
     const onClose = async (code) => {
-      console.log('Python process closed with code:', code);
       
       if (code !== 0) {
         return resolve({
@@ -3712,7 +3699,6 @@ async function analyzeFile(filePath, type, originalFileName = null, requiredPeri
       try {
         // Парсим результат от Python
         const result = JSON.parse(output);
-        console.log('Parsed result:', JSON.stringify(result));
         
         if (result.success) {
           const processed = [];
@@ -3723,7 +3709,6 @@ async function analyzeFile(filePath, type, originalFileName = null, requiredPeri
             ? path.basename(originalFileName, path.extname(originalFileName))
             : path.basename(filePath, path.extname(filePath));
           
-          console.log('Extracted PU number from filename:', fileName);
 
           if (!fileName || fileName === 'undefined' || fileName === '') {
   console.error('ERROR: Invalid PU number');
@@ -3763,7 +3748,6 @@ if (result.has_errors) {
   );
   
   if (sameErrorUpload) {
-    console.log(`Found same error in history for PU ${fileName}, checking if it was fixed...`);
     
     // Проверяем, была ли загрузка БЕЗ ошибок после этой ошибки
     const successfulUploadAfter = recentUploads.find(upload => 
@@ -3773,11 +3757,9 @@ if (result.has_errors) {
     
     if (successfulUploadAfter) {
       // Ошибка была исправлена, но теперь появилась снова
-      console.log(`Error was fixed on ${successfulUploadAfter.uploadedAt} but now appeared again`);
       // Разрешаем загрузку - это повторное появление ошибки
     } else {
       // Ошибка не была исправлена - это дубликат
-      console.log(`DUPLICATE: Same error still not fixed for PU ${fileName}`);
       
       // Записываем попытку загрузки дубликата
       if (userId) {
@@ -3822,7 +3804,6 @@ if (result.has_errors) {
   });
   
   if (activeCheckHistory) {
-    console.log(`DUPLICATE: Active CheckHistory record exists for this error`);
     
     if (userId) {
       await PuUploadHistory.create({
@@ -3869,14 +3850,12 @@ if (result.has_errors) {
           });
           
           if (networkStructure) {
-            console.log(`Found network structure for PU ${fileName}: TP=${networkStructure.tpName}, VL=${networkStructure.vlName}`);
             
             // Определяем позицию
             let position = 'start';
             if (networkStructure.endPu === fileName) position = 'end';
             else if (networkStructure.middlePu === fileName) position = 'middle';
             
-            console.log(`PU position: ${position}`);
             
             // Проверяем последнюю запись в истории
             const lastCheckHistory = await CheckHistory.findOne({
@@ -3893,7 +3872,6 @@ if (result.has_errors) {
             
             // ПРОВЕРКА 1: Это перепроверка?
             if (lastCheckHistory && lastCheckHistory.status === 'awaiting_recheck') {
-              console.log(`This is a recheck for PU ${fileName}`);
               
               // ПРОВЕРКА ПЕРИОДА при перепроверке
               if (result.has_errors) {
@@ -3919,7 +3897,6 @@ if (result.has_errors) {
   
                     // Журнал должен включать данные ПОСЛЕ месяца выполнения работ
                     if (lastErrorMonthNum < requiredMonth) {  // если последний месяц раньше требуемого
-                      console.log(`PERIOD MISMATCH: Required from month ${requiredMonth}, but journal ends at month ${lastErrorMonthNum}`);
     
                       return resolve({
                         processed: [{
@@ -3943,12 +3920,10 @@ if (result.has_errors) {
                   }
                 }
               });
-              console.log('Deleted ASKUE notifications');
               
               // ОБРАБОТКА РЕЗУЛЬТАТА ПЕРЕПРОВЕРКИ
               if (!result.has_errors) {
                 // УСПЕШНАЯ перепроверка
-                console.log(`Recheck successful - errors fixed for PU ${fileName}`);
                 
                 // Обновляем историю
                 await CheckHistory.update({
@@ -3990,7 +3965,6 @@ if (result.has_errors) {
                 
               } else {
                 // НЕУСПЕШНАЯ перепроверка
-                console.log(`Recheck failed - errors still present for PU ${fileName}`);
                 
                 const newFailureCount = (lastCheckHistory.failureCount || 1) + 1;
                 
@@ -4034,7 +4008,6 @@ if (result.has_errors) {
                   }),
                   isRead: false
                 });
-                console.log('Created error notification for RES after failed recheck');
                 
                 // Проверяем на проблемную ВЛ (2+ ошибки)
                 if (newFailureCount >= 2) {
@@ -4088,7 +4061,6 @@ if (result.has_errors) {
                       isRead: false
                     });
                   }
-                  console.log('Created problem VL notification for admins');
                 }
               }
               
@@ -4120,7 +4092,6 @@ if (result.has_errors) {
               }
               
               if (deletedOldNotifs > 0) {
-                console.log(`🧹 Cleaned up ${deletedOldNotifs} old error notifications for PU ${fileName} (phases: ${newPhaseKey})`);
               }
               
               // Если ошибок НЕТ — удаляем ВСЕ старые error-уведомления для этого ПУ
@@ -4132,7 +4103,6 @@ if (result.has_errors) {
                     message: { [Op.like]: `%"puNumber":"${fileName}"%` }
                   }
                 });
-                console.log(`🧹 PU ${fileName} clean — removed ${remaining} remaining error notifications`);
               }
               
               // Обновляем статус ПУ
@@ -4163,24 +4133,13 @@ if (result.has_errors) {
                   networkStructureId: networkStructure.id,
                   resId: networkStructure.resId
                 });
-                console.log('Added error for notification creation');
               }
             }
             
             // Записываем успешную загрузку в историю
             if (userId) {
-                console.log('=== CREATING PuUploadHistory ===');
-                console.log('userId:', userId);
-                console.log('Data to save:', {
-                  puNumber: fileName,
-                  uploadedBy: userId,
-                  fileName: originalFileName || 'unknown',
-                  fileType: type,
-                  uploadStatus: 'success'
-                });
-  
                 try {
-                  const record = await PuUploadHistory.create({
+                  await PuUploadHistory.create({
                     puNumber: fileName,
                     uploadedBy: userId,
                     fileName: originalFileName || 'unknown',
@@ -4192,12 +4151,9 @@ if (result.has_errors) {
                     errorDetails: result.has_errors ? result.details : null,
                     uploadStatus: 'success'
                   });
-                  console.log('✅ PuUploadHistory created:', record.id);
                 } catch (error) {
                   console.error('❌ Error creating PuUploadHistory:', error);
                 }
-              } else {
-                console.log('⚠️ No userId provided, skipping history save');
               }
             
             // Добавляем в processed
@@ -4209,7 +4165,6 @@ if (result.has_errors) {
             
           } else {
             // ПУ не найден в структуре сети
-            console.log(`WARNING: NetworkStructure not found for PU: ${fileName}`);
             processed.push({
               puNumber: fileName,
               status: 'not_in_structure',
@@ -4220,7 +4175,6 @@ if (result.has_errors) {
           // Удаляем временный файл
           try {
             fs.unlinkSync(filePath);
-            console.log('Temporary file deleted');
           } catch (err) {
             console.error('Error deleting file:', err);
           }
@@ -4250,7 +4204,6 @@ if (result.has_errors) {
       current = child;
       child.stdout.on('data', (data) => {
         output += data.toString();
-        console.log('Python stdout chunk:', data.toString());
       });
       child.stderr.on('data', (data) => {
         errorOutput += data.toString();
