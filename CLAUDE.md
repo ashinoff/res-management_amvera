@@ -349,6 +349,43 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-25** — Код-ревью: баги + перф (server.js/App.jsx, монолит не дроблён,
+  правки точечные, каждый пункт — отдельный коммит). **Баги:** (1) секреты —
+  `JWT_SECRET`/`DELETE_PASSWORD` теперь ОБЯЗАТЕЛЬНЫ, при отсутствии — `process.exit(1)`
+  на старте (до listen), небезопасные дефолты `'secret-key'`/`'1191'` убраны, введена
+  константа `JWT_SECRET`. (2) `unhandledRejection` был зарегистрирован дважды с
+  `exit(1)` — оставлен ОДИН обработчик, только `console.error`, без exit
+  (`uncaughtException` с exit не тронут). (3) Python-fallback: `spawn` не бросает
+  синхронно → старый `try/catch` не работал; `runProfileAnalyzer`/`analyzeFile`
+  переписаны — `python3`, при событии `'error'` один раз `python` с теми же
+  обработчиками (`removeAllListeners('close')` чтобы 'close' первой попытки не
+  перебил fallback), ОДИН таймаут 120с на обе попытки (в `analyzeFile` его раньше
+  не было). (4) `extractPeriodFromError`: год брался всегда текущий → в январе
+  декабрьские данные уезжали на год вперёд; теперь месяц, опережающий текущий
+  более чем на 1, относится к прошлому году. (5) Фронт: два `useEffect` со
+  скролл-слушателем `.content` и пустыми deps не привязывались, если `.content`
+  ещё не в DOM → кнопка «наверх» не работала; переписаны на retry через
+  `requestAnimationFrame` с корректным cleanup (дизайн не тронут). **Перф:**
+  (6) двойной `JSON.parse` в `getNotificationCounts` и `GET /api/notifications` —
+  `getPhaseSignature` получает уже распарсенный объект (ключи дедупликации не
+  изменились). (7) `/api/notifications/counts` (+ бейдж платформы) — in-memory
+  кэш `getNotificationCounts`, TTL 15с, ключ `role_resId_userId` (Map+timestamp,
+  без Redis); полная инвалидация через хуки `afterCreate/Update/Destroy` (+bulk)
+  моделей `Notification`/`OverloadCase` — ловят все пути создания/удаления, счётчики
+  не залипают дольше 15с и падают сразу после загрузки анализа. (8) Импорт
+  структуры Excel — убран N+1: все `ResUnit` одним `findAll` в Map, `upsert(returning)`
+  вместо повторного `findOne`, `PuStatus` недостающие — одним `bulkCreate` после
+  цикла (семантика `findOrCreate` сохранена: первое вхождение, существующие не
+  трогаем). (9) `/api/reports/overload` — последний кейс на секцию одним
+  `SELECT DISTINCT ON ("sectionId") … ORDER BY "sectionId","id" DESC` в Map вместо
+  `OverloadCase.findOne` в `Promise.all`. (10) Отчёт vl_workload — количество ВЛ
+  одним `findAll(COUNT group by resId)` в Map вместо `count` на каждый РЭС. (11)
+  Логи: в `analyzeFile`/профиле убраны пер-строка/пер-ПУ `console.log` (~25 шт +
+  banner'ы `=== UPLOAD/ANALYZE … ===`), оставлены сводка «Analysis complete» и
+  `console.error` реальных ошибок; профиль — одна сводная строка (детализация
+  Ктт/Ктн осталась в `details[]` ответа и в письме-автоответе). Форматы ответов
+  роутов и контракты платформы не менялись. Проверки: `node --check`,
+  `npm run build`, `py_compile` — ОК.
 - **2026-07-24** — Заставка-логотип сайдбара «Мониторинг напряжения»: осциллограф
   отцентрован по зазору между двумя словами. Добавлена обёртка `.monitor-brand`
   (высоту задаёт текст), синусоида и сетка центрируются `top:50%/translateY(-50%)`
