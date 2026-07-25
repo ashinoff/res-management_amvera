@@ -473,19 +473,28 @@ function NetworkStructure({ onSectionChange } = {}) {
   }, [loadNetworkStructure, loadSections]);
 
   useEffect(() => {
-  const contentElement = document.querySelector('.content');
-  
-  const handleScroll = () => {
-    if (contentElement) {
-      setShowScrollTop(contentElement.scrollTop > 300);
-    }
-  };
-  
-  if (contentElement) {
-    contentElement.addEventListener('scroll', handleScroll);
-    return () => contentElement.removeEventListener('scroll', handleScroll);
-  }
-}, []);
+    // .content может ещё не быть в DOM на момент маунта — ждём через rAF,
+    // иначе слушатель не привяжется и кнопка «наверх» не появится.
+    let contentElement = null;
+    let rafId = null;
+    const handleScroll = () => {
+      if (contentElement) setShowScrollTop(contentElement.scrollTop > 300);
+    };
+    const attach = () => {
+      contentElement = document.querySelector('.content');
+      if (contentElement) {
+        contentElement.addEventListener('scroll', handleScroll);
+        handleScroll();
+      } else {
+        rafId = requestAnimationFrame(attach);
+      }
+    };
+    attach();
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      if (contentElement) contentElement.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
 
   const getStatusColor = (status) => {
     switch(status) {
@@ -1895,18 +1904,27 @@ const loadNotifications = useCallback(async () => {
   }, [loadNotifications]);
 
   useEffect(() => {
-    const contentElement = document.querySelector('.content');
-    
+    // .content может ещё не быть в DOM на момент маунта — ждём через rAF,
+    // иначе слушатель не привяжется и кнопка «наверх» не появится.
+    let contentElement = null;
+    let rafId = null;
     const handleScroll = () => {
+      if (contentElement) setShowScrollTop(contentElement.scrollTop > 300);
+    };
+    const attach = () => {
+      contentElement = document.querySelector('.content');
       if (contentElement) {
-        setShowScrollTop(contentElement.scrollTop > 300);
+        contentElement.addEventListener('scroll', handleScroll);
+        handleScroll();
+      } else {
+        rafId = requestAnimationFrame(attach);
       }
     };
-    
-    if (contentElement) {
-      contentElement.addEventListener('scroll', handleScroll);
-      return () => contentElement.removeEventListener('scroll', handleScroll);
-    }
+    attach();
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      if (contentElement) contentElement.removeEventListener('scroll', handleScroll);
+    };
   }, []);
 
   const markAsRead = async () => {
