@@ -1155,7 +1155,7 @@ app.get('/api/platform/badge', async (req, res) => {
     }
     if (!user) return res.json({ count: 0 });
 
-    const counts = await getNotificationCounts(user);
+    const counts = await getNotificationCountsCached(user);
     let count = 0;
     if (user.role === 'admin') count = counts.tech_pending + counts.askue_pending + counts.problem_vl + (counts.power_overload || 0);
     else if (user.role === 'res_responsible') count = counts.tech_pending;
@@ -3249,6 +3249,36 @@ app.get('/api/reports/overload', authenticateToken, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ── Кэш счётчиков /counts (TTL 15с) ──────────────────────────────────────────
+// Роут поллится каждым клиентом раз в 30с + бейдж платформы. Кэшируем результат
+// getNotificationCounts. Ключ — role_resId_userId: именно от них зависит выборка
+// (res_responsible/uploader фильтруют по resId и toUserId=user.id, admin — глобально).
+const notifCountsCache = new Map(); // key -> { ts, data }
+const NOTIF_COUNTS_TTL_MS = 15000;
+function invalidateNotifCountsCache() { notifCountsCache.clear(); }
+
+// Любое изменение Notification/OverloadCase полностью чистит кэш. Хуки модели
+// ловят ВСЕ пути create/update/destroy (и bulk) — надёжнее ручных вызовов по
+// десяткам мест создания/удаления, ни одно не пропустим.
+[Notification, OverloadCase].forEach((M) => {
+  M.addHook('afterCreate', invalidateNotifCountsCache);
+  M.addHook('afterUpdate', invalidateNotifCountsCache);
+  M.addHook('afterDestroy', invalidateNotifCountsCache);
+  M.addHook('afterBulkCreate', invalidateNotifCountsCache);
+  M.addHook('afterBulkUpdate', invalidateNotifCountsCache);
+  M.addHook('afterBulkDestroy', invalidateNotifCountsCache);
+});
+
+async function getNotificationCountsCached(user) {
+  const key = `${user.role}_${user.resId ?? ''}_${user.id ?? ''}`;
+  const now = Date.now();
+  const hit = notifCountsCache.get(key);
+  if (hit && (now - hit.ts) < NOTIF_COUNTS_TTL_MS) return hit.data;
+  const data = await getNotificationCounts(user);
+  notifCountsCache.set(key, { ts: now, data });
+  return data;
+}
+
 // Получение количества непрочитанных уведомлений
 // Счётчики уведомлений по роли (переиспользуются эндпоинтом ниже и бейджем
 // платформы /api/platform/badge). Возвращает { tech_pending, askue_pending,
@@ -3353,7 +3383,7 @@ async function getNotificationCounts(user) {
 
 app.get('/api/notifications/counts', authenticateToken, async (req, res) => {
   try {
-    res.json(await getNotificationCounts(req.user));
+    res.json(await getNotificationCountsCached(req.user));
   } catch (error) {
     console.error('Error counting notifications:', error);
     res.status(500).json({ error: error.message });
