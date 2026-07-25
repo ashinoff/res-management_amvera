@@ -3568,11 +3568,16 @@ async function analyzeFile(filePath, type, originalFileName = null, requiredPeri
       if (foundMonths && foundMonths.length > 0) {
         const firstMonth = monthMap[foundMonths[0]];
         const lastMonth = monthMap[foundMonths[foundMonths.length - 1]];
-        const currentYear = new Date().getFullYear();
-        
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1; // 1..12
+        // Данные — про прошлое: месяц, опережающий текущий более чем на 1
+        // (напр. сейчас январь, а в журнале декабрь), относится к прошлому году.
+        const yearFor = (m) => (m > currentMonth + 1) ? currentYear - 1 : currentYear;
+
         return {
-          start: new Date(currentYear, firstMonth - 1, 1),
-          end: new Date(currentYear, lastMonth - 1, 28)
+          start: new Date(yearFor(firstMonth), firstMonth - 1, 1),
+          end: new Date(yearFor(lastMonth), lastMonth - 1, 28)
         };
       }
       
