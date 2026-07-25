@@ -221,13 +221,21 @@ def analyze(filepath):
     meta60, series60, dates60 = _read_sheet(ws60)
     meta30, series30, dates30 = _read_sheet(ws30)
 
-    # Полный список ПУ (объединение по номерам) с их kt (приоритет — где есть данные)
-    pu_info = {}   # pu -> {'kt': float, 'ktRaw': str}
-    for m in (meta60, meta30):
-        for c, info in m.items():
-            entry = pu_info.setdefault(info['pu'], {})
-            entry['kt'] = info['kt']
-            entry['ktRaw'] = info.get('ktRaw', '')
+    # ВАЖНО: kt берём из ТОГО ЖЕ листа, откуда взяты данные/пик. Раньше kt лежал в
+    # общем pu_info с «последним победителем» (meta30 перезаписывал meta60), а пик
+    # брался из приоритетного листа (60) — при разной раскладке колонок на листах
+    # 30/60 это давало неверный множитель (пик одного столбца × Ктт другого).
+    # Держим kt/ktRaw по каждому листу отдельно и выбираем строго по источнику.
+    kt60 = {info['pu']: info['kt'] for c, info in meta60.items()}
+    ktRaw60 = {info['pu']: info.get('ktRaw', '') for c, info in meta60.items()}
+    kt30 = {info['pu']: info['kt'] for c, info in meta30.items()}
+    ktRaw30 = {info['pu']: info.get('ktRaw', '') for c, info in meta30.items()}
+
+    # Полный список ПУ (объединение по номерам, порядок стабильный)
+    all_pus = list(dict.fromkeys(
+        [info['pu'] for c, info in meta60.items()] +
+        [info['pu'] for c, info in meta30.items()]
+    ))
 
     all_dates = dates60 + dates30
     period = ''
@@ -241,17 +249,22 @@ def analyze(filepath):
     results = []
     warnings = []
 
-    for pu, info in pu_info.items():
-        kt = info.get('kt', 1.0)
+    for pu in all_pus:
         hourly = {}
         source = None
+        kt = 1.0
+        kt_raw = ''
 
         if pu in col60 and series60.get(col60[pu]):
             hourly = _hourly_from_60(series60[col60[pu]])
             source = '60'
+            kt = kt60.get(pu, 1.0)
+            kt_raw = ktRaw60.get(pu, '')
         elif pu in col30 and series30.get(col30[pu]):
             hourly = _hourly_from_30(series30[col30[pu]])
             source = '30'
+            kt = kt30.get(pu, 1.0)
+            kt_raw = ktRaw30.get(pu, '')
 
         if not hourly:
             warnings.append(pu)
@@ -266,7 +279,7 @@ def analyze(filepath):
         results.append({
             'puNumber': pu,
             'kt': round(kt, 4),
-            'ktRaw': info.get('ktRaw', ''),
+            'ktRaw': kt_raw,
             'peakRaw': round(peak_raw, 4),
             'peakKw': round(peak_kw, 4),
             'peakAt': peak_dt.strftime('%d.%m.%Y %H:%M'),
