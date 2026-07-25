@@ -2051,8 +2051,8 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
       try {
         const data = JSON.parse(notif.message);
         if (!data.puNumber) return true;
-        
-        const phaseKey = getPhaseSignature(notif.message);
+
+        const phaseKey = getPhaseSignature(data); // уже распарсено — не парсим повторно
         const key = `${notif.type}_${data.puNumber}_${phaseKey}`;
         
         if (seenKeys.has(key)) {
@@ -3327,7 +3327,7 @@ async function getNotificationCounts(user) {
       const puNumber = data.puNumber;
 
       if (puNumber) {
-        const phaseKey = getPhaseSignature(notif.message);
+        const phaseKey = getPhaseSignature(data); // уже распарсено — не парсим повторно
         const key = `${puNumber}_${phaseKey}`;
 
         if (notif.type === 'error') techKeys.add(key);
