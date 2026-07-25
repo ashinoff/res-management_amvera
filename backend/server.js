@@ -2623,16 +2623,24 @@ app.get('/api/reports/detailed', authenticateToken, async (req, res) => {
           problemVlByRes[notif.resId].add(notif.networkStructureId);
         });
         
+        // PERF: количество ВЛ по всем РЭС — ОДНИМ group-by запросом, в Map по resId
+        // (было — NetworkStructure.count на каждый РЭС в цикле).
+        const vlCountRows = await NetworkStructure.findAll({
+          attributes: ['resId', [sequelize.fn('COUNT', sequelize.col('id')), 'cnt']],
+          where: { resId: resListForWorkload.map(r => r.id) },
+          group: ['resId'],
+          raw: true
+        });
+        const vlCountByRes = new Map(vlCountRows.map(r => [r.resId, parseInt(r.cnt, 10)]));
+
         // Собираем аналитику
         let totalAllVl = 0;
         let totalProblemVl = 0;
-        
+
         for (const resUnit of resListForWorkload) {
-          const totalVl = await NetworkStructure.count({
-            where: { resId: resUnit.id }
-          });
-          
-          const problemVlCount = problemVlByRes[resUnit.id] 
+          const totalVl = vlCountByRes.get(resUnit.id) || 0;
+
+          const problemVlCount = problemVlByRes[resUnit.id]
             ? problemVlByRes[resUnit.id].size 
             : 0;
           
