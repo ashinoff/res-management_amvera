@@ -449,17 +449,28 @@ function NetworkStructure({ onSectionChange } = {}) {
 
     // Слушаем события обновления
     const handleUpdate = () => loadNetworkStructure();
-    
+
     window.addEventListener('structureUpdated', handleUpdate);
     window.addEventListener('dataCleared', handleUpdate);
     window.addEventListener('structureDeleted', handleUpdate);
-    
+
+    // Тихое автообновление раз в 60 сек — чтобы изменения из почтового приёмника
+    // (пик/перегруз секций) появлялись без ручной перезагрузки. Без спиннера
+    // (loadNetworkStructure/loadSections не трогают loading), и только когда
+    // вкладка активна. При возврате на вкладку — перезапрос сразу.
+    const refresh = () => { loadNetworkStructure(); loadSections(); };
+    const interval = setInterval(() => { if (!document.hidden) refresh(); }, 60000);
+    const handleVisibility = () => { if (!document.hidden) refresh(); };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       window.removeEventListener('structureUpdated', handleUpdate);
       window.removeEventListener('dataCleared', handleUpdate);
       window.removeEventListener('structureDeleted', handleUpdate);
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [loadNetworkStructure]);
+  }, [loadNetworkStructure, loadSections]);
 
   useEffect(() => {
   const contentElement = document.querySelector('.content');
@@ -3389,8 +3400,9 @@ function PowerOverload({ selectedRes }) {
     completed: 'Завершён'
   };
 
-  const load = async () => {
-    setLoading(true);
+  // showSpinner=false — тихий фон-рефреш (автообновление/возврат на вкладку), без мигания спиннера.
+  const load = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
       const params = {};
       if (user.role === 'admin' && selectedRes) params.resId = selectedRes;
@@ -3399,15 +3411,24 @@ function PowerOverload({ selectedRes }) {
     } catch (e) {
       console.error('overload load', e);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   };
 
   useEffect(() => {
     load();
-    const h = () => load();
+    const h = () => load(false);
     window.addEventListener('notificationsUpdated', h);
-    return () => window.removeEventListener('notificationsUpdated', h);
+    // Тихое автообновление раз в 60 сек (изменения из почтового приёмника — новые
+    // перегрузы) — только когда вкладка активна; при возврате на вкладку — сразу.
+    const interval = setInterval(() => { if (!document.hidden) load(false); }, 60000);
+    const handleVisibility = () => { if (!document.hidden) load(false); };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('notificationsUpdated', h);
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
     // eslint-disable-next-line
   }, [selectedRes]);
 
