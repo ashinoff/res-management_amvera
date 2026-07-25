@@ -15,9 +15,10 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
+// Единственный обработчик: логируем, НО не роняем сервер (одиночный необработанный
+// reject не должен ронять прод для всех). uncaughtException выше — там exit оправдан.
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled Rejection:', err);
-  process.exit(1);
 });
 
 const express = require('express');
@@ -5859,12 +5860,6 @@ initializeDatabase().then(() => {
     console.log('- Auto Hide Notifications ✓');
     startMailIntake();
   });
-});
-
-// Обработка ошибок
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled rejection:', err);
-  process.exit(1);
 });
 
 // API для получения истории загрузок по конкретному ПУ
