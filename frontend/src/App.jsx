@@ -5087,14 +5087,8 @@ function DiagnoseData() {
       
       {/* НОВОЕ: Модальное окно массового исправления */}
       {showMassFixModal && (
-        <div className="modal-backdrop" onClick={() => setShowMassFixModal(false)}>
-          <div className="modal-content mass-fix-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-header-icon"><IconWrench className="ico" /></div>
-              <h3>Массовое автоисправление</h3>
-              <button className="close-btn" onClick={() => setShowMassFixModal(false)}><IconX className="ico" /></button>
-            </div>
-            
+        <ModalShell title="Массовое автоисправление" className="mass-fix-modal"
+          icon={<IconWrench size={16} />} onClose={() => setShowMassFixModal(false)}>
             <div className="modal-body">
               <div className="mass-fix-info">
                 <div className="info-icon"><IconLightbulb className="ico" /></div>
@@ -5171,20 +5165,14 @@ function DiagnoseData() {
                 )}
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
-      
+
       {/* Модальное окно ручного исправления */}
       {showFixModal && fixingNotif && (
-        <div className="modal-backdrop" onClick={() => setShowFixModal(false)}>
-          <div className="modal-content fix-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-header-icon"><IconEdit className="ico" /></div>
-              <h3>Ручное исправление ResId</h3>
-              <button className="close-btn" onClick={() => setShowFixModal(false)}><IconX className="ico" /></button>
-            </div>
-            
+        <ModalShell title="Ручное исправление ResId" className="fix-modal"
+          icon={<IconEdit size={16} />} onClose={() => setShowFixModal(false)}>
+
             <div className="modal-body">
               <div className="fix-info">
                 <p><strong>Уведомление #{fixingNotif.notificationId}</strong></p>
@@ -5251,8 +5239,7 @@ function DiagnoseData() {
                 Применить
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );
@@ -5547,13 +5534,8 @@ function UserSettings() {
       
       {/* Модальное окно создания пользователя */}
       {showCreateModal && (
-        <div className="modal-backdrop" onClick={() => setShowCreateModal(false)}>
-          <div className="modal-content user-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Создание пользователя</h3>
-              <button className="close-btn" onClick={() => setShowCreateModal(false)}><IconX className="ico" /></button>
-            </div>
-            
+        <ModalShell title="Создание пользователя" className="user-modal"
+          icon={<IconSettings size={16} />} onClose={() => setShowCreateModal(false)}>
             <div className="modal-body">
               <div className="form-group">
                 <label>ФИО</label>
@@ -5635,19 +5617,13 @@ function UserSettings() {
                 Создать
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
-      
+
       {/* Модальное окно редактирования (аналогично создания) */}
       {showEditModal && (
-        <div className="modal-backdrop" onClick={() => setShowEditModal(false)}>
-          <div className="modal-content user-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Редактирование пользователя</h3>
-              <button className="close-btn" onClick={() => setShowEditModal(false)}><IconX className="ico" /></button>
-            </div>
-            
+        <ModalShell title="Редактирование пользователя" className="user-modal"
+          icon={<IconSettings size={16} />} onClose={() => setShowEditModal(false)}>
             <div className="modal-body">
               <div className="form-group">
                 <label>ФИО</label>
@@ -5725,8 +5701,7 @@ function UserSettings() {
                 Сохранить
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );
@@ -5800,12 +5775,8 @@ function MaintenanceSettings() {
       
       {/* Модифицированное модальное окно */}
       {showClearModal && (
-        <div className="modal-backdrop" onClick={() => setShowClearModal(false)}>
-          <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Очистка данных системы</h3>
-              <button className="close-btn" onClick={() => setShowClearModal(false)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell variant="confirm" title="Очистка данных системы" className="delete-modal"
+          onClose={() => setShowClearModal(false)}>
             <div className="modal-body">
               {/* НОВОЕ: выбор периода */}
               <div className="form-group">
@@ -5860,8 +5831,7 @@ function MaintenanceSettings() {
                 {clearing ? 'Удаление...' : clearBeforeDate ? 'Удалить старые данные' : 'Удалить всё'}
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );
@@ -6337,19 +6307,8 @@ function UploadedDocuments() {
 
       {/* Модальное окно массового удаления */}
 {showBulkDeleteModal && (
-  <div className="modal-backdrop" onClick={() => {
-    setShowBulkDeleteModal(false); 
-    setDeletePassword('');
-  }}>
-    <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-      <div className="modal-header">
-        <h3><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Подтверждение удаления</h3>
-        <button className="close-btn" onClick={() => {
-          setShowBulkDeleteModal(false); 
-          setDeletePassword('');
-        }}><IconX className="ico" /></button>
-      </div>
-      
+  <ModalShell variant="confirm" title="Подтверждение удаления" className="delete-modal"
+    onClose={() => { setShowBulkDeleteModal(false); setDeletePassword(''); }}>
       <div className="modal-body">
         <div className="delete-summary">
           <div className="delete-icon"><IconTrash className="ico" /></div>
@@ -6391,18 +6350,13 @@ function UploadedDocuments() {
           <IconTrash className="ico" /> Удалить записи
         </button>
       </div>
-    </div>
-  </div>
+  </ModalShell>
 )}
 
       {/* Модальное окно удаления записи */}
       {showDeleteRecordModal && (
-        <div className="modal-backdrop" onClick={() => setShowDeleteRecordModal(false)}>
-          <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Подтверждение удаления записи</h3>
-              <button className="close-btn" onClick={() => setShowDeleteRecordModal(false)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell variant="confirm" title="Подтверждение удаления записи" className="delete-modal"
+          onClose={() => setShowDeleteRecordModal(false)}>
             <div className="modal-body">
               <p>Вы собираетесь удалить всю запись вместе со всеми файлами.</p>
               <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
@@ -6429,8 +6383,7 @@ function UploadedDocuments() {
                 Удалить запись
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
       
       {/* Модальное окно удаления файла */}
@@ -6524,13 +6477,8 @@ function ExtendedPuModal({
   const phaseErrors = getPhaseErrors();
   
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-content extended-pu-modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>ПУ #{puData.puNumber} - Детальная информация</h3>
-          <button className="close-btn" onClick={onClose}><IconX className="ico" /></button>
-        </div>
-        
+    <ModalShell title={`ПУ #${puData.puNumber} — Детальная информация`} className="extended-pu-modal"
+      dockTitle={`ПУ #${puData.puNumber}`} icon={<IconMeter size={16} />} onClose={onClose}>
         {/* Информация о местоположении */}
         <div className="pu-location-info">
           <p><strong>РЭС:</strong> {puData.resName}</p>
@@ -6747,8 +6695,7 @@ function ExtendedPuModal({
             </button>
           )}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -8023,9 +7970,9 @@ function DatabaseMaintenance() {
       )}
 
       {purgeConfirm && (
-        <div className="modal-backdrop" onClick={() => !purging && setPurgeConfirm(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header"><h3>Подтверждение очистки</h3></div>
+        <ModalShell variant="confirm" title="Подтверждение очистки"
+          onClose={() => setPurgeConfirm(false)}
+          onBackdrop={() => !purging && setPurgeConfirm(false)}>
             <div className="modal-body">
               <p>Будут <strong>безвозвратно</strong> удалены данные старше <strong>{purgeBefore}</strong>:</p>
               <ul style={{ margin: '8px 0 12px 18px' }}>
@@ -8043,8 +7990,7 @@ function DatabaseMaintenance() {
                 {purging ? 'Удаление...' : 'Удалить безвозвратно'}
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {loading && (
@@ -8338,13 +8284,8 @@ function DatabaseMaintenance() {
       
       {/* Модальное окно очистки */}
       {showCleanupModal && (
-        <div className="modal-backdrop" onClick={() => setShowCleanupModal(false)}>
-          <div className="modal-content cleanup-modal-modern" onClick={e => e.stopPropagation()}>
-            <div className="modal-header-modern">
-              <div className="modal-icon-large">{getCleanupDescription(cleanupType).icon}</div>
-              <h3>{getCleanupDescription(cleanupType).title}</h3>
-              <button className="close-btn" onClick={() => setShowCleanupModal(false)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell variant="confirm" title={getCleanupDescription(cleanupType).title}
+          className="cleanup-modal-modern" onClose={() => setShowCleanupModal(false)}>
             <div className="modal-body">
               <p className="cleanup-description">{getCleanupDescription(cleanupType).desc}</p>
               <div className="warning-box">
@@ -8393,8 +8334,7 @@ function DatabaseMaintenance() {
                 )}
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );

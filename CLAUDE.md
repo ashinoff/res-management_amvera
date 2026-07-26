@@ -370,6 +370,16 @@ env + сторона платформы + Keycloak + сквозная прове
   (confirm), диагностика файла, **FileViewer** (fullscreen-PDF, используется в
   Reports/FileManagement/UploadedDocuments/PowerOverload — покрыт разом). Остальные
   ⬜ — следующими заходами. npm run build — ОК.
+- **2026-07-26** — Оконная оболочка, ЗАВЕРШЕНИЕ: переведены ВСЕ оставшиеся модалки
+  на `ModalShell` (31 использование; `modal-backdrop`/`close-btn`/`modal-header` в
+  App.jsx = 0). Обычные (полный светофор): ErrorDetailsModal, детали проверки/
+  подробная информация, мероприятия, комментарий, детали случая/действие перегруза
+  (со статус-пиллой в `titleExtra`), детали/e-mail проблемной ВЛ, mass-fix/fix,
+  создание/редакт. пользователя, extended-pu, просмотр документов (FileViewer).
+  Confirm (только 🔴, не в доке): удаления с паролем во всех разделах,
+  очистка истории/данных, purge, cleanup, удаление файлов/записей (bulk и по
+  одному). Идентичные подвалы FileManagement/UploadedDocuments-delete закрыты одним
+  `replace_all`. Пересборка после каждой партии — зелёная. npm run build — ОК.
 - **2026-07-26** — Убран дубль SheetJS из бандла (коммит 2). Во фронте были и
   `xlsx`, и `xlsx-js-style` (drop-in форк с тем же API). Заменил
   `import * as XLSX from 'xlsx'` → из `xlsx-js-style`, слил `XLSXStyle`→`XLSX`
