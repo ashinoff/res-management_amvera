@@ -321,6 +321,7 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
 
   const menuItems = [
     { id: 'structure', label: 'Структура сети', icon: <IconLayers size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
+    { id: 'poll_map', label: 'Карта опроса', icon: <IconMapPin size={18} />, roles: ['admin', 'res_responsible', 'uec_responsible'] },
     { id: 'upload', label: 'Загрузить файлы', icon: <IconUpload size={18} />, roles: ['admin', 'uploader'] },
     { id: 'tech_pending', label: 'Ожидающие мероприятий', icon: <IconWrench size={18} />, roles: ['admin', 'res_responsible'], badge: notificationCounts.tech_pending },
     { id: 'askue_pending', label: 'Ожидающие проверки АСКУЭ', icon: <IconClipboard size={18} />, roles: ['admin', 'uploader'], badge: notificationCounts.askue_pending },
@@ -8510,6 +8511,251 @@ function DatabaseMaintenance() {
   );
 }
 
+// ═══ Раздел «Карта опроса структуры сети»: сверка ПУ структуры со срезом «Опрос ПУ» ═══
+function PollMap({ selectedRes }) {
+  const { user } = useContext(AuthContext);
+  const canSync = user.role === 'admin' || user.role === 'uec_responsible';
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [notice, setNotice] = useState(null);   // { type:'ok'|'err', text }
+  const [searchTp, setSearchTp] = useState('');
+  const [statusFilter, setStatusFilter] = useState(null); // collected|not_collected|absent|no_pu
+  const [legendCollapsed, setLegendCollapsed] = useState(false);
+  const [showOrphans, setShowOrphans] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const params = (user.role === 'admin' && selectedRes) ? { resId: selectedRes } : {};
+      const { data } = await api.get('/api/poll-map', { params });
+      setData(data);
+    } catch (e) {
+      setNotice({ type: 'err', text: e.response?.data?.error || e.message });
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [selectedRes]);
+
+  const sync = async () => {
+    setSyncing(true); setNotice(null);
+    try {
+      const { data } = await api.post('/api/poll-map/sync');
+      setNotice({ type: 'ok', text: `Срез обновлён: ПУ ${data.total}, собирается ${data.collected}, СПОДЭС ${data.spodes}` });
+      await load();
+    } catch (e) {
+      setNotice({ type: 'err', text: e.response?.data?.error || 'Ошибка синхронизации' });
+    } finally { setSyncing(false); }
+  };
+
+  // Полоса легенды → кружки при скролле (паттерн из «Структуры»).
+  useEffect(() => {
+    let el = null, raf = null, ticking = false;
+    const evaluate = () => {
+      ticking = false; if (!el) return;
+      const top = el.scrollTop;
+      setLegendCollapsed(prev => (!prev && top > 130) ? true : (prev && top < 80) ? false : prev);
+    };
+    const onScroll = () => { if (!ticking) { ticking = true; requestAnimationFrame(evaluate); } };
+    const attach = () => { el = document.querySelector('.content'); if (el) { el.addEventListener('scroll', onScroll, { passive: true }); evaluate(); } else raf = requestAnimationFrame(attach); };
+    attach();
+    return () => { if (raf) cancelAnimationFrame(raf); if (el) el.removeEventListener('scroll', onScroll); };
+  }, []);
+
+  const pctCls = (p) => p >= 90 ? 'green' : p >= 70 ? 'amber' : 'red';
+  const boxCls = (st) => st === 'collected' ? 'status-ok' : st === 'not_collected' ? 'status-pending'
+    : st === 'absent' ? 'status-error' : 'status-empty';
+  const fmtDate = (d) => d ? new Date(d).toLocaleString('ru-RU') : '—';
+
+  const rows = data?.rows || [];
+  const filtered = rows.filter(r => {
+    if (searchTp && !r.tpName?.toLowerCase().includes(searchTp.toLowerCase())) return false;
+    if (statusFilter) {
+      const has = [r.poll.start, r.poll.middle, r.poll.end].some(c => c.status === statusFilter);
+      if (!has) return false;
+    }
+    return true;
+  });
+  // Группировка РЭС → ТП.
+  const byRes = {};
+  filtered.forEach(r => {
+    (byRes[r.resName] = byRes[r.resName] || {});
+    (byRes[r.resName][r.tpName] = byRes[r.resName][r.tpName] || []).push(r);
+  });
+
+  const puCell = (pu, cell) => (
+    <div className="pu-cell" title={pu || 'ПУ не задан'}>
+      <div className={`status-box ${boxCls(cell.status)}`}>{cell.status === 'no_pu' ? 'X' : ''}
+        {cell.spodes && (cell.status === 'collected' || cell.status === 'not_collected') && <span className="spodes-badge">С</span>}
+      </div>
+      <span className="pu-num-line">{pu || ''}</span>
+    </div>
+  );
+
+  const exportExcel = () => {
+    if (!data || !rows.length) { alert('Нет данных для экспорта'); return; }
+    const stRu = (s) => s === 'collected' ? 'Собирается' : s === 'not_collected' ? 'Не собирается' : s === 'absent' ? 'Отсутствует' : 'ПУ не задан';
+    const mapRows = [];
+    rows.forEach(r => {
+      [['Начало', r.startPu, r.poll.start], ['Середина', r.middlePu, r.poll.middle], ['Конец', r.endPu, r.poll.end]].forEach(([pos, pu, c]) => {
+        if (!pu) return;
+        mapRows.push({ 'РЭС': r.resName, 'ТП': r.tpName, 'ВЛ': r.vlName, 'Позиция': pos, '№ ПУ': pu, 'Статус': stRu(c.status), 'СПОДЭС': c.spodes ? 'да' : '' });
+      });
+    });
+    const sumRows = [...(data.summary?.byRes || []), { ...data.summary?.total, resName: 'ИТОГО' }].map(a => ({
+      'РЭС': a.resName, 'Всего ПУ': a.totalPu, 'Собирается': a.collected, 'Не собирается': a.notCollected,
+      'Отсутствует': a.absent, 'СПОДЭС': a.spodes, 'ПУ не задан': a.noPu, '% сбора': a.coveragePct
+    }));
+    const orphRows = (data.orphans?.list || []).map(o => ({ '№ ПУ': o.serial, 'СПОДЭС': o.isSpodes ? 'да' : '', 'Собирается': o.isCollected ? 'да' : '' }));
+
+    const wb = XLSX.utils.book_new();
+    const statusColor = (v) => v === 'Собирается' ? XLS_COLORS.green : v === 'Не собирается' ? XLS_COLORS.amber : v === 'Отсутствует' ? XLS_COLORS.red : XLS_COLORS.gray;
+    const ws1 = XLSX.utils.json_to_sheet(mapRows);
+    ws1['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 8 }];
+    styleExportSheet(ws1, { 'Статус': statusColor });
+    XLSX.utils.book_append_sheet(wb, ws1, 'Карта');
+    const ws2 = XLSX.utils.json_to_sheet(sumRows);
+    ws2['!cols'] = [{ wch: 18 }, { wch: 9 }, { wch: 11 }, { wch: 13 }, { wch: 12 }, { wch: 8 }, { wch: 11 }, { wch: 9 }];
+    styleExportSheet(ws2, { '% сбора': (v) => { const n = Number(v); return n >= 90 ? XLS_COLORS.green : n >= 70 ? XLS_COLORS.amber : XLS_COLORS.red; } });
+    XLSX.utils.book_append_sheet(wb, ws2, 'Сводка');
+    if (orphRows.length) {
+      const ws3 = XLSX.utils.json_to_sheet(orphRows);
+      ws3['!cols'] = [{ wch: 18 }, { wch: 8 }, { wch: 11 }];
+      styleExportSheet(ws3);
+      XLSX.utils.book_append_sheet(wb, ws3, 'Не в структуре');
+    }
+    XLSX.writeFile(wb, `Карта_опроса_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
+  };
+
+  return (
+    <div className="poll-map">
+      <PageHeader icon={<IconMapPin size={24} />} title="Карта опроса структуры сети" />
+
+      <div className="poll-topbar">
+        <div className="poll-snapshot">
+          {data?.snapshotAt
+            ? <>Срез Пирамиды от <strong>{fmtDate(data.snapshotAt)}</strong></>
+            : 'Срез не загружен'}
+        </div>
+        <div className="poll-controls">
+          <input type="text" className="search-input" placeholder="Поиск по ТП..." value={searchTp} onChange={(e) => setSearchTp(e.target.value)} />
+          {canSync && (
+            <button className="pm-btn pm-btn--refresh" onClick={sync} disabled={syncing}>
+              <IconRefresh className="ico" /> {syncing ? 'Синхронизация...' : 'Синхронизировать'}
+            </button>
+          )}
+          <button className="pm-btn pm-btn--excel" onClick={exportExcel} disabled={!rows.length}>
+            <IconDownload className="ico" /> Excel
+          </button>
+        </div>
+      </div>
+
+      {notice && (
+        <div className={`poll-notice ${notice.type}`}>
+          {notice.type === 'ok' ? <IconCheck className="ico" /> : <IconAlertTriangle className="ico" />} {notice.text}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="loading"><RossetiLoader /></div>
+      ) : data?.noData ? (
+        <div className="no-data" style={{ padding: 24, textAlign: 'center' }}>
+          <span className="svg-frame" style={{ marginBottom: 8 }}><IconMapPin size={24} /></span>
+          <p>Нет данных среза. {canSync ? 'Выполните синхронизацию.' : 'Дождитесь синхронизации администратором.'}</p>
+        </div>
+      ) : (
+        <>
+          {/* Сводка покрытия */}
+          <div className="pm-table-wrap" style={{ marginBottom: 18 }}>
+            <table className="pm-matrix">
+              <thead>
+                <tr><th className="pm-sticky">РЭС</th><th>Всего</th><th>Собирается</th><th>Не собирается</th><th>Отсутствует</th><th>СПОДЭС</th><th>ПУ не задан</th><th>% сбора</th></tr>
+              </thead>
+              <tbody>
+                {(data.summary?.byRes || []).map(a => (
+                  <tr key={a.resId}>
+                    <td className="pm-sticky"><strong>{a.resName}</strong></td>
+                    <td>{a.totalPu}</td><td>{a.collected}</td><td>{a.notCollected}</td>
+                    <td>{a.absent}</td><td>{a.spodes}</td><td>{a.noPu}</td>
+                    <td className={`pm-${pctCls(a.coveragePct)}`}><strong>{a.coveragePct}%</strong></td>
+                  </tr>
+                ))}
+                {data.summary?.total && (
+                  <tr className="poll-total-row">
+                    <td className="pm-sticky"><strong>ИТОГО</strong></td>
+                    <td>{data.summary.total.totalPu}</td><td>{data.summary.total.collected}</td><td>{data.summary.total.notCollected}</td>
+                    <td>{data.summary.total.absent}</td><td>{data.summary.total.spodes}</td><td>{data.summary.total.noPu}</td>
+                    <td className={`pm-${pctCls(data.summary.total.coveragePct)}`}><strong>{data.summary.total.coveragePct}%</strong></td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Легенда-фильтры */}
+          <div className={`status-legend ${legendCollapsed ? 'is-collapsed' : ''}`}>
+            {[['collected', 'status-ok', 'Собирается'], ['not_collected', 'status-pending', 'В опросе, не собирается'], ['absent', 'status-error', 'В опросе отсутствует'], ['no_pu', 'status-empty', 'ПУ не задан']].map(([k, cls, lbl]) => (
+              <div key={k} className={`legend-item ${statusFilter === k ? 'active' : ''}`} onClick={() => setStatusFilter(statusFilter === k ? null : k)}>
+                <span className={`status-box ${cls}`}>{k === 'no_pu' ? 'X' : ''}</span> {lbl}
+              </div>
+            ))}
+          </div>
+          <div className={`legend-dots ${legendCollapsed ? 'show' : ''}`} aria-hidden={!legendCollapsed}>
+            {[['collected', 'status-ok', 'Собирается'], ['not_collected', 'status-pending', 'В опросе, не собирается'], ['absent', 'status-error', 'В опросе отсутствует'], ['no_pu', 'status-empty', 'ПУ не задан']].map(([k, cls, lbl]) => (
+              <button key={k} type="button" title={lbl} className={`legend-dot ${cls} ${statusFilter === k ? 'active' : ''}`} onClick={() => setStatusFilter(statusFilter === k ? null : k)}>{k === 'no_pu' ? 'X' : ''}</button>
+            ))}
+          </div>
+
+          {/* Дерево */}
+          <div className="poll-tree">
+            {Object.keys(byRes).sort((a, b) => a.localeCompare(b, 'ru')).map(resName => (
+              <div key={resName} className="poll-res">
+                <h3 className="poll-res-title">{resName}</h3>
+                {Object.keys(byRes[resName]).sort((a, b) => a.localeCompare(b, 'ru')).map(tpName => (
+                  <div key={tpName} className="tp-card">
+                    <div className="poll-grid poll-grid--head">
+                      <span className="poll-vl-name muted">{tpName}</span>
+                      <span className="pu-col-label">Начало</span><span className="pu-col-label">Середина</span><span className="pu-col-label">Конец</span>
+                    </div>
+                    {byRes[resName][tpName].map(r => (
+                      <div key={r.id} className="poll-grid">
+                        <span className="poll-vl-name">{r.vlName}</span>
+                        {puCell(r.startPu, r.poll.start)}
+                        {puCell(r.middlePu, r.poll.middle)}
+                        {puCell(r.endPu, r.poll.end)}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))}
+            {filtered.length === 0 && <div className="no-data" style={{ padding: 16 }}>Нет ВЛ по фильтру</div>}
+          </div>
+
+          {/* В опросе, но нет в структуре */}
+          {data.orphans?.count > 0 && (
+            <div className="poll-orphans">
+              <button className="poll-orphans-toggle" onClick={() => setShowOrphans(v => !v)}>
+                {showOrphans ? <IconArrowDown className="ico" /> : <IconArrowRight className="ico" />} В опросе, но нет в структуре ({data.orphans.count})
+              </button>
+              {showOrphans && (
+                <div className="poll-orphans-list">
+                  {data.orphans.list.map((o, i) => (
+                    <span key={i} className="poll-orphan-chip">
+                      {o.serial}
+                      {o.isCollected && <span className="mini-badge green">собирается</span>}
+                      {o.isSpodes && <span className="mini-badge">СПОДЭС</span>}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   // Пока в iframe ждём/меняем токен платформы — показываем лоадер, а не форму логина.
@@ -8698,6 +8944,8 @@ const renderContent = () => {
   switch (activeSection) {
     case 'structure':
       return <NetworkStructure onSectionChange={setActiveSection} />;
+    case 'poll_map':
+      return <PollMap selectedRes={selectedRes} />;
     case 'upload':
       return <FileUpload />;
     case 'tech_pending':

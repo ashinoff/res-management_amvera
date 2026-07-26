@@ -7437,3 +7437,30 @@ tr.selected:hover,
 .notif-period select { padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
 .notif-periods-info { font-size: 12px; color: var(--text-muted); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
 @media (max-width: 700px) { .notif-periods-info { display: none; } }
+
+/* ===== Раздел «Карта опроса структуры сети» ===== */
+.poll-topbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.poll-snapshot { font-size: 14px; color: var(--text-muted); }
+.poll-controls { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+.poll-notice { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; margin-bottom: 14px; }
+.poll-notice.ok { background: var(--green-bg); border: 1px solid var(--green); color: #14532d; }
+.poll-notice.err { background: var(--red-bg); border: 1px solid var(--red); color: #7f1d1d; }
+.poll-notice .ico { width: 16px; height: 16px; }
+.poll-res { margin-bottom: 18px; }
+.poll-res-title { font-size: 16px; font-weight: 700; margin: 14px 0 8px; color: var(--navy); }
+.poll-grid { display: grid; grid-template-columns: minmax(160px, 1fr) 90px 90px 90px; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.tp-card .poll-grid:last-child { border-bottom: none; }
+.poll-vl-name { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.poll-vl-name.muted { font-weight: 600; color: var(--text); }
+.poll-grid .pu-cell { position: relative; }
+.poll-grid .status-box { position: relative; }
+.spodes-badge { position: absolute; top: -6px; right: -6px; background: var(--navy); color: #fff; font-size: 8px; font-weight: 700; width: 14px; height: 14px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+.poll-orphans { margin-top: 18px; }
+.poll-orphans-toggle { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text); padding: 6px 0; }
+.poll-orphans-toggle .ico { width: 16px; height: 16px; }
+.poll-orphans-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.poll-orphan-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; }
+.mini-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--navy); color: #fff; }
+.mini-badge.green { background: var(--green); }
+.poll-total-row td { font-weight: 700; background: var(--surface-2); }
+.legend-dot.status-empty.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--gray); }
