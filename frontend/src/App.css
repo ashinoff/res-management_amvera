@@ -7426,3 +7426,14 @@ tr.selected:hover,
 .db-header-icon svg, .db-header-icon .ico { color: #2563eb; width: 30px; height: 30px; }
 .btn-check-db { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue); padding: 0 18px; height: 40px; border-radius: 8px; font-size: 14px; box-shadow: none; transition: background-color .12s ease, color .12s ease, border-color .12s ease; }
 .btn-check-db:hover:not(:disabled) { background: var(--blue); color: #fff; }
+
+/* Тулбар уведомлений: чекбокс «Выбрать все» + счётчик показанных + фильтр/инфо периодов */
+.notif-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; }
+.notif-selectall { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.notif-count { font-size: 13.5px; color: var(--text-muted); }
+.notif-count strong { color: var(--text); }
+.notif-period { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-muted); }
+.notif-period .ico { width: 16px; height: 16px; color: var(--blue); }
+.notif-period select { padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.notif-periods-info { font-size: 12px; color: var(--text-muted); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+@media (max-width: 700px) { .notif-periods-info { display: none; } }

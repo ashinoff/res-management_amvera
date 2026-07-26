@@ -2161,6 +2161,7 @@ function Notifications({ filterType, onSectionChange, selectedRes }) {
   const [comment, setComment] = useState('');
   const [checkFromDate, setCheckFromDate] = useState(new Date().toISOString().split('T')[0]);
   const [searchTp, setSearchTp] = useState('');
+  const [periodFilter, setPeriodFilter] = useState(''); // фильтр по месяцу появления уведомления
   const { user } = useContext(AuthContext);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteNotificationId, setDeleteNotificationId] = useState(null);
@@ -2504,8 +2505,23 @@ const loadNotifications = useCallback(async () => {
                 filterType === 'pending_askue' ? 'Ожидающие проверки АСКУЭ' : 
                 'Все уведомления';
 
-  // Фильтрация по ТП
+  // Период уведомления — месяц его появления (createdAt), YYYY-MM.
+  const periodKey = (n) => {
+    if (!n.createdAt) return null;
+    const d = new Date(n.createdAt);
+    if (isNaN(d.getTime())) return null;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+  // Доступные периоды в текущих уведомлениях (с количеством), новые сверху.
+  const periodCounts = {};
+  notifications.forEach(n => { const k = periodKey(n); if (k) periodCounts[k] = (periodCounts[k] || 0) + 1; });
+  const availablePeriods = Object.keys(periodCounts).sort().reverse().map(k => {
+    const [y, m] = k.split('-'); return { key: k, label: `${m}.${y}`, count: periodCounts[k] };
+  });
+
+  // Фильтрация по ТП + периоду
   const filteredNotifications = notifications.filter(notif => {
+    if (periodFilter && periodKey(notif) !== periodFilter) return false;
     if (!searchTp) return true;
     try {
       const data = JSON.parse(notif.message);
@@ -2552,16 +2568,38 @@ const loadNotifications = useCallback(async () => {
     )}
   </div>
   
-  {user.role === 'admin' && (
-    <div className="select-all-wrapper">
-      <input 
-        type="checkbox"
-        checked={selectedNotificationIds.length === filteredNotifications.length && filteredNotifications.length > 0}
-        onChange={handleSelectAll}
-      />
-      <span>Выбрать все</span>
-    </div>
-  )}
+  <div className="select-all-wrapper notif-toolbar">
+    {user.role === 'admin' && (
+      <label className="notif-selectall">
+        <input
+          type="checkbox"
+          checked={selectedNotificationIds.length === filteredNotifications.length && filteredNotifications.length > 0}
+          onChange={handleSelectAll}
+        />
+        <span>Выбрать все</span>
+      </label>
+    )}
+    <span className="notif-count">
+      Показано: <strong>{filteredNotifications.length}</strong>
+      {filteredNotifications.length !== notifications.length ? ` из ${notifications.length}` : ''}
+    </span>
+    {availablePeriods.length > 0 && (
+      <label className="notif-period">
+        <IconCalendar className="ico" /> Период:
+        <select value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value)}>
+          <option value="">Все ({notifications.length})</option>
+          {availablePeriods.map(p => (
+            <option key={p.key} value={p.key}>{p.label} ({p.count})</option>
+          ))}
+        </select>
+      </label>
+    )}
+    {availablePeriods.length > 0 && (
+      <span className="notif-periods-info" title="Периоды (месяцы) в текущих уведомлениях">
+        В наличии: {availablePeriods.map(p => `${p.label}·${p.count}`).join(', ')}
+      </span>
+    )}
+  </div>
       
       <div className="notifications-list">
   {filteredNotifications.map(notif => (
