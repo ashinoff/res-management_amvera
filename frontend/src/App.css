@@ -7462,6 +7462,9 @@ tr.selected:hover,
 .tp-card .poll-grid:last-child { border-bottom: none; }
 .poll-vl-name { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .poll-vl-name.muted { font-weight: 600; color: var(--text); }
+/* Строка секции шин (тех.учёт) в дереве карты опроса */
+.poll-section-line { background: var(--surface-2); border-radius: 6px; }
+.poll-section-line .section-line-name { font-weight: 600; color: var(--navy); }
 .poll-grid .pu-cell { position: relative; }
 .poll-grid .status-box { position: relative; }
 .spodes-badge { position: absolute; top: -6px; right: -6px; background: var(--navy); color: #fff; font-size: 8px; font-weight: 700; width: 14px; height: 14px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }

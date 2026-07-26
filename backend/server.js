@@ -1530,8 +1530,9 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
     const where = {};
     if (resId) where.resId = resId;
 
-    const [structures, meters] = await Promise.all([
+    const [structures, sections, meters] = await Promise.all([
       NetworkStructure.findAll({ where, include: [ResUnit], order: [['tpName', 'ASC'], ['vlName', 'ASC']] }),
+      TpSection.findAll({ where, include: [ResUnit], order: [['tpName', 'ASC'], ['sectionNumber', 'ASC']] }),
       PolledMeter.findAll()
     ]);
 
@@ -1564,6 +1565,17 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
       };
     });
 
+    // Секции шин (тех.учёт на вводе) — тоже точки мониторинга: статус по techPuNumber.
+    const sectionRows = sections.map(s => {
+      if (s.techPuNumber) structSerials.add(normSerial(s.techPuNumber));
+      return {
+        id: s.id, resId: s.resId, resName: s.ResUnit?.name || '',
+        tpName: s.tpName, sectionNumber: s.sectionNumber, tnKva: s.tnKva,
+        techPuNumber: s.techPuNumber,
+        poll: statusOf(s.techPuNumber)
+      };
+    });
+
     const blank = () => ({ totalPu: 0, collected: 0, notCollected: 0, absent: 0, spodes: 0, noPu: 0 });
     const acc = (agg, cell) => {
       if (cell.status === 'no_pu') { agg.noPu++; return; }
@@ -1576,10 +1588,18 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
     };
     const byResMap = new Map();
     const total = blank();
+    const ensureAgg = (resId, resName) => {
+      if (!byResMap.has(resId)) byResMap.set(resId, { resId, resName, ...blank() });
+      return byResMap.get(resId);
+    };
     for (const r of rows) {
-      if (!byResMap.has(r.resId)) byResMap.set(r.resId, { resId: r.resId, resName: r.resName, ...blank() });
-      const agg = byResMap.get(r.resId);
+      const agg = ensureAgg(r.resId, r.resName);
       [r.poll.start, r.poll.middle, r.poll.end].forEach(c => { acc(agg, c); acc(total, c); });
+    }
+    // Тех.учёты секций входят в сводку покрытия наравне с ПУ ВЛ.
+    for (const s of sectionRows) {
+      const agg = ensureAgg(s.resId, s.resName);
+      acc(agg, s.poll); acc(total, s.poll);
     }
     const pct = (a) => a.totalPu > 0 ? Math.round((a.collected / a.totalPu) * 100) : 0;
     // Без среза — сводка «прочерками» (null): структура РЭС видна, цифр опроса нет.
@@ -1595,7 +1615,7 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
     }
     const orphans = { count: orphanList.length, list: orphanList };
 
-    res.json({ snapshotAt, noData, rows, summary, orphans });
+    res.json({ snapshotAt, noData, rows, sections: sectionRows, summary, orphans });
   } catch (error) {
     console.error('poll-map error:', error);
     res.status(500).json({ error: error.message });

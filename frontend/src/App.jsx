@@ -8576,6 +8576,7 @@ function PollMap({ selectedRes }) {
   const fmtN = (v) => v == null ? '—' : v;   // прочерк, когда среза нет (noData)
 
   const rows = data?.rows || [];
+  const sections = data?.sections || [];
   const filtered = rows.filter(r => {
     if (searchTp && !r.tpName?.toLowerCase().includes(searchTp.toLowerCase())) return false;
     if (statusFilter) {
@@ -8584,12 +8585,20 @@ function PollMap({ selectedRes }) {
     }
     return true;
   });
-  // Группировка РЭС → ТП.
-  const byRes = {};
-  filtered.forEach(r => {
-    (byRes[r.resName] = byRes[r.resName] || {});
-    (byRes[r.resName][r.tpName] = byRes[r.resName][r.tpName] || []).push(r);
+  const secFiltered = sections.filter(s => {
+    if (searchTp && !s.tpName?.toLowerCase().includes(searchTp.toLowerCase())) return false;
+    if (statusFilter && s.poll.status !== statusFilter) return false;
+    return true;
   });
+  // Группировка РЭС → ТП → { secs (тех.учёты), vls }. ТП появляется, даже если у неё
+  // только секции без ВЛ (или наоборот).
+  const byRes = {};
+  const bucket = (resName, tpName) => {
+    (byRes[resName] = byRes[resName] || {});
+    return (byRes[resName][tpName] = byRes[resName][tpName] || { secs: [], vls: [] });
+  };
+  secFiltered.forEach(s => bucket(s.resName, s.tpName).secs.push(s));
+  filtered.forEach(r => bucket(r.resName, r.tpName).vls.push(r));
 
   const puCell = (pu, cell) => (
     <div className="pu-cell" title={cell.status === 'no_data' ? 'Нет данных среза' : (pu || 'ПУ не задан')}>
@@ -8601,14 +8610,18 @@ function PollMap({ selectedRes }) {
   );
 
   const exportExcel = () => {
-    if (!data || !rows.length) { alert('Нет данных для экспорта'); return; }
+    if (!data || (!rows.length && !sections.length)) { alert('Нет данных для экспорта'); return; }
     const stRu = (s) => s === 'collected' ? 'Собирается' : s === 'not_collected' ? 'Не собирается' : s === 'absent' ? 'Отсутствует' : s === 'no_data' ? 'Нет данных' : 'ПУ не задан';
     const mapRows = [];
     rows.forEach(r => {
       [['Начало', r.startPu, r.poll.start], ['Середина', r.middlePu, r.poll.middle], ['Конец', r.endPu, r.poll.end]].forEach(([pos, pu, c]) => {
         if (!pu) return;
-        mapRows.push({ 'РЭС': r.resName, 'ТП': r.tpName, 'ВЛ': r.vlName, 'Позиция': pos, '№ ПУ': pu, 'Статус': stRu(c.status), 'СПОДЭС': c.spodes ? 'да' : '' });
+        mapRows.push({ 'Тип': 'ПУ ВЛ', 'РЭС': r.resName, 'ТП': r.tpName, 'ВЛ': r.vlName, 'Позиция': pos, '№ ПУ': pu, 'Статус': stRu(c.status), 'СПОДЭС': c.spodes ? 'да' : '' });
       });
+    });
+    sections.forEach(sec => {
+      if (!sec.techPuNumber) return;
+      mapRows.push({ 'Тип': 'тех.учёт', 'РЭС': sec.resName, 'ТП': sec.tpName, 'ВЛ': `СШ-${toRoman(sec.sectionNumber)}`, 'Позиция': 'ввод', '№ ПУ': sec.techPuNumber, 'Статус': stRu(sec.poll.status), 'СПОДЭС': sec.poll.spodes ? 'да' : '' });
     });
     const sumRows = [...(data.summary?.byRes || []), { ...data.summary?.total, resName: 'ИТОГО' }].map(a => ({
       'РЭС': a.resName, 'Всего ПУ': a.totalPu, 'Собирается': a.collected, 'Не собирается': a.notCollected,
@@ -8619,7 +8632,7 @@ function PollMap({ selectedRes }) {
     const wb = XLSX.utils.book_new();
     const statusColor = (v) => v === 'Собирается' ? XLS_COLORS.green : v === 'Не собирается' ? XLS_COLORS.amber : v === 'Отсутствует' ? XLS_COLORS.red : XLS_COLORS.gray; // 'Нет данных'/'ПУ не задан' → серый
     const ws1 = XLSX.utils.json_to_sheet(mapRows);
-    ws1['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 8 }];
+    ws1['!cols'] = [{ wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 8 }];
     styleExportSheet(ws1, { 'Статус': statusColor });
     XLSX.utils.book_append_sheet(wb, ws1, 'Карта');
     const ws2 = XLSX.utils.json_to_sheet(sumRows);
@@ -8652,7 +8665,7 @@ function PollMap({ selectedRes }) {
               <IconRefresh className="ico" /> {syncing ? 'Синхронизация...' : 'Синхронизировать'}
             </button>
           )}
-          <button className="pm-btn pm-btn--excel" onClick={exportExcel} disabled={!rows.length}>
+          <button className="pm-btn pm-btn--excel" onClick={exportExcel} disabled={!rows.length && !sections.length}>
             <IconDownload className="ico" /> Excel
           </button>
         </div>
@@ -8740,7 +8753,17 @@ function PollMap({ selectedRes }) {
                       <span className="poll-vl-name muted">{tpName}</span>
                       <span className="pu-col-label">Начало</span><span className="pu-col-label">Середина</span><span className="pu-col-label">Конец</span>
                     </div>
-                    {byRes[resName][tpName].map(r => (
+                    {/* Секции шин (тех.учёт на вводе) */}
+                    {byRes[resName][tpName].secs.map(sec => (
+                      <div key={'s' + sec.id} className="poll-grid poll-section-line">
+                        <span className="poll-vl-name section-line-name">
+                          СШ-{toRoman(sec.sectionNumber)}{sec.tnKva != null ? ` · ${sec.tnKva} кВА` : ''}{sec.techPuNumber ? ` · тех.учёт № ${sec.techPuNumber}` : ''}
+                        </span>
+                        {puCell(sec.techPuNumber, sec.poll)}
+                        <span className="pu-cell-empty" /><span className="pu-cell-empty" />
+                      </div>
+                    ))}
+                    {byRes[resName][tpName].vls.map(r => (
                       <div key={r.id} className="poll-grid">
                         <span className="poll-vl-name">{r.vlName}</span>
                         {puCell(r.startPu, r.poll.start)}
@@ -8752,7 +8775,7 @@ function PollMap({ selectedRes }) {
                 ))}
               </div>
             ))}
-            {filtered.length === 0 && <div className="no-data" style={{ padding: 16 }}>Нет ВЛ по фильтру</div>}
+            {filtered.length === 0 && secFiltered.length === 0 && <div className="no-data" style={{ padding: 16 }}>Нет объектов по фильтру</div>}
           </div>
 
           {/* В опросе, но нет в структуре */}
