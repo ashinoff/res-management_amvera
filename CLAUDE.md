@@ -349,6 +349,17 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — Файловый прокси, «доставка», коммит 2: `handleFileProxy` берёт
+  URL у Cloudinary, а не угадывает. Порядок: (0) кешированный рабочий URL → (1)
+  базовая `signed(primary/upload)` → (2) **`api.resource(secure_url)` для primary,
+  затем alt** (+ `signed(...version)` из того же ответа) → (3) старая цепочка:
+  alt/upload, image/raw authenticated, image no-ext+format. Первый `resp.ok`
+  стримится. Кеш стал `publicId → рабочий URL` (строка): новые шаги в него
+  попадают. Лог неудачи — одной строкой со `status` и `x-cld-error` каждого
+  варианта. Убраны неиспользуемые `buildFileVariants/fileVariantUrl/sameVariant`.
+  Замечание: успешный `secure_url` может отдавать файл, пока старый угаданный URL
+  ещё возвращает закешированную CDN-ошибку — это норма. node --check / npm run
+  build — ОК.
 - **2026-07-26** — Файловый прокси, «доставка», коммит 1: diag читает причину
   отказа доставки. `cloudinaryProbe` для НАЙДЕННОЙ через `api.resource` комбинации
   дополнительно fetch'ит 4 delivery-URL и возвращает `deliveryTests[{label,status,

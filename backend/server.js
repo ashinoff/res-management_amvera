@@ -5274,35 +5274,9 @@ function resolvePublicId(raw) {
   return raw;
 }
 
-// Кэш найденной рабочей комбинации: publicId -> variant (без TTL), чтобы не делать
-// по 4-5 запросов к Cloudinary на каждое открытие файла.
+// Кэш РАБОЧЕГО delivery-URL: publicId -> url (без TTL), чтобы не делать по 4-6
+// запросов к Cloudinary на каждое открытие файла.
 const fileVariantCache = new Map();
-
-// Упорядоченный список попыток: (а) по расширению+upload → (б) альт. resource_type →
-// (в) authenticated для обоих → (г) для image: public_id без расширения + format.
-function buildFileVariants(publicId) {
-  const isPdf = publicId.toLowerCase().endsWith('.pdf');
-  const primary = isPdf ? 'raw' : 'image';
-  const alt = isPdf ? 'image' : 'raw';
-  const withoutExt = publicId.replace(/\.[^/.]+$/, '');
-  const ext = (publicId.match(/\.([^/.]+)$/) || [])[1] || null;
-  const variants = [
-    { resource_type: primary, type: 'upload', id: publicId, format: null },
-    { resource_type: alt, type: 'upload', id: publicId, format: null },
-    { resource_type: 'image', type: 'authenticated', id: publicId, format: null },
-    { resource_type: 'raw', type: 'authenticated', id: publicId, format: null },
-  ];
-  if (ext && withoutExt !== publicId) {
-    variants.push({ resource_type: 'image', type: 'upload', id: withoutExt, format: ext });
-  }
-  return variants;
-}
-const sameVariant = (a, b) => a.resource_type === b.resource_type && a.type === b.type && a.id === b.id && a.format === b.format;
-function fileVariantUrl(v) {
-  const opts = { resource_type: v.resource_type, type: v.type, secure: true, sign_url: true };
-  if (v.format) opts.format = v.format;
-  return cloudinary.url(v.id, opts);
-}
 
 async function handleFileProxy(req, res) {
   try {
@@ -5315,26 +5289,61 @@ async function handleFileProxy(req, res) {
     const originalName = req.query.name || 'file';
     const inline = req.query.inline === '1';
 
-    // Кешированную комбинацию пробуем ПЕРВОЙ (дедуп из общего списка).
-    let variants = buildFileVariants(publicId);
-    const cached = fileVariantCache.get(publicId);
-    if (cached) variants = [cached, ...variants.filter(v => !sameVariant(v, cached))];
+    const isPdf = publicId.toLowerCase().endsWith('.pdf');
+    const primary = isPdf ? 'raw' : 'image';
+    const alt = isPdf ? 'image' : 'raw';
+    const withoutExt = publicId.replace(/\.[^/.]+$/, '');
+    const ext = (publicId.match(/\.([^/.]+)$/) || [])[1] || null;
+    const signed = (id, rt, type, extra = {}) =>
+      cloudinary.url(id, { resource_type: rt, type, secure: true, sign_url: true, ...extra });
 
-    let upstream = null, used = null;
+    let upstream = null, winnerUrl = null;
     const tried = [];
-    for (const v of variants) {
-      tried.push(`${v.resource_type}/${v.type}${v.format ? '+' + v.format : ''}${v.id !== publicId ? '(no-ext)' : ''}`);
+    const tryUrl = async (label, url) => {
+      if (!url || upstream) return;
+      const rec = { label, status: null, xCldError: null };
+      tried.push(rec);
       let r;
-      try { r = await fetch(fileVariantUrl(v)); } catch (e) { continue; }
-      if (r.ok && r.body) { upstream = r; used = v; break; }
+      try { r = await fetch(url); }
+      catch (e) { rec.xCldError = e.message; return; }
+      rec.status = r.status;
+      rec.xCldError = r.headers.get('x-cld-error') || null;
+      if (r.ok && r.body) { upstream = r; winnerUrl = url; rec.ok = true; return; }
       try { r.body && r.body.cancel && r.body.cancel(); } catch (e) {}
-    }
+    };
+    // Берём secure_url прямо из api.resource (не угадываем URL). Возвращает список URL.
+    const resourceUrls = async (rt) => {
+      try {
+        const r = await cloudinary.api.resource(publicId, { resource_type: rt });
+        const out = [];
+        if (r.secure_url) out.push(r.secure_url);
+        if (r.version) out.push(signed(publicId, rt, 'upload', { version: r.version }));
+        return out;
+      } catch (e) { return []; }
+    };
+
+    // 0) Кешированный рабочий URL — первым (обычно 1 запрос).
+    await tryUrl('cached', fileVariantCache.get(publicId));
+
+    // 1) Базовая попытка (как раньше): resource_type по расширению + upload, signed.
+    if (!upstream) await tryUrl(`${primary}/upload signed`, signed(publicId, primary, 'upload'));
+
+    // 2) ПЕРВЫМ после базовой — URL У CLOUDINARY: api.resource(secure_url), raw и image.
+    if (!upstream) for (const u of await resourceUrls(primary)) { await tryUrl(`api.resource(${primary})`, u); if (upstream) break; }
+    if (!upstream) for (const u of await resourceUrls(alt)) { await tryUrl(`api.resource(${alt})`, u); if (upstream) break; }
+
+    // 3) Остальная существующая цепочка: альт. resource_type → authenticated → no-ext.
+    if (!upstream) await tryUrl(`${alt}/upload signed`, signed(publicId, alt, 'upload'));
+    if (!upstream) await tryUrl('image/authenticated signed', signed(publicId, 'image', 'authenticated'));
+    if (!upstream) await tryUrl('raw/authenticated signed', signed(publicId, 'raw', 'authenticated'));
+    if (!upstream && ext && withoutExt !== publicId) await tryUrl('image no-ext +format', signed(withoutExt, 'image', 'upload', { format: ext }));
 
     if (!upstream) {
-      console.error(`File proxy 404 for ${publicId}; tried: ${tried.join(', ')}`);
+      const summary = tried.map(t => `${t.label}=${t.status || 'ERR'}${t.xCldError ? `(${t.xCldError})` : ''}`).join(' | ');
+      console.error(`File proxy 404 for ${publicId}; tried: ${summary}`);
       return res.status(404).json({ error: 'Файл отсутствует в хранилище', publicId });
     }
-    fileVariantCache.set(publicId, used); // запомнить рабочую комбинацию
+    fileVariantCache.set(publicId, winnerUrl); // запомнить рабочий URL
 
     res.setHeader('Content-Type',
       upstream.headers.get('content-type') || 'application/octet-stream');
