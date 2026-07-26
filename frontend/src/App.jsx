@@ -311,11 +311,11 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
     { id: 'problem_vl', label: 'Проблемные ВЛ', icon: <IconAlertTriangle size={18} />, roles: ['admin'], badge: notificationCounts.problem_vl },
     { id: 'power_overload', label: 'Превышение Pном', icon: <IconZap size={18} />, roles: ['admin', 'res_responsible'], badge: notificationCounts.powerOverload },
     { id: 'power_analysis', label: 'Анализ мощности', icon: <IconChart size={18} />, roles: ['admin', 'res_responsible'] },
+    { id: 'analytics', label: 'Анализ напряжения', icon: <IconChart size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
     { id: 'documents', label: 'Загруженные документы', icon: <IconFolder size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
     { id: 'history', label: 'История системы', icon: <IconClock size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
     { id: 'reports', label: 'Отчеты', icon: <IconFileText size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'settings', label: 'Настройки', icon: <IconSettings size={18} />, roles: ['admin'] },
-    { id: 'analytics', label: 'Аналитика', icon: <IconChart size={18} />, roles: ['admin', 'uploader', 'res_responsible'], }
+    { id: 'settings', label: 'Настройки', icon: <IconSettings size={18} />, roles: ['admin'] }
   ];
 
   const visibleItems = menuItems.filter(item => item.roles.includes(userRole));
@@ -6952,7 +6952,7 @@ function Analytics() {
   
   return (
     <div className="analytics-container">
-      <h2><span className="svg-frame"><IconChart size={24} /></span> Аналитика по загрузкам</h2>
+      <h2><span className="svg-frame svg-frame--red"><IconChart size={24} /></span> Анализ напряжения</h2>
       
       {/* НОВОЕ: Индикатор для не-админов */}
       {user.role !== 'admin' && (
@@ -7204,7 +7204,7 @@ function PowerAnalysis({ selectedRes }) {
 
   return (
     <div className="analytics">
-      <h2><span className="svg-frame"><IconZap size={24} /></span> Анализ мощности</h2>
+      <h2><span className="svg-frame svg-frame--red"><IconZap size={24} /></span> Анализ мощности</h2>
 
       {/* Перенесено из «Аналитики»: ТП с перегрузом (последний пик ≥ лимита). */}
       <h2 style={{ marginTop: '8px', fontSize: 20 }}>ТП с перегрузом</h2>
@@ -7260,8 +7260,12 @@ function PowerAnalysis({ selectedRes }) {
           </div>
         )}
         <div className="pm-actions">
-          <button className="refresh-btn" onClick={load} disabled={loading}>{loading ? 'Обновление...' : 'Обновить'}</button>
-          <button className="upload-submit" onClick={exportMatrix}><IconDownload className="ico" /> Выгрузка в Excel</button>
+          <button className="pm-btn pm-btn--refresh" onClick={load} disabled={loading}>
+            <IconRefresh className="ico" /> {loading ? 'Обновление...' : 'Обновить'}
+          </button>
+          <button className="pm-btn pm-btn--excel" onClick={exportMatrix}>
+            <IconDownload className="ico" /> Выгрузка в Excel
+          </button>
         </div>
       </div>
 
