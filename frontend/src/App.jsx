@@ -4,7 +4,7 @@
 // Версия с исправленными фазами и загрузкой из АСКУЭ
 // =====================================================
 
-import React, { useState, useEffect, createContext, useContext, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, createContext, useContext, useCallback, useMemo, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
 import * as XLSX from 'xlsx';
@@ -5841,23 +5841,134 @@ function BlobImage({ file, alt, className, onLost }) {
 }
 
 // Просмотр вложений БЕЗ навигации: файл тянется фоновым XHR в blob:, картинка —
-// в <img>, PDF — в <iframe> внутри модалки. Навигаций/переходов на /api/f нет.
+// PDF в <canvas> через pdf.js (БЕЗ <iframe> — Яндекс Protect режет навигацию
+// вложенных фреймов, включая blob:). blob уже загружен XHR-ом. pdfjs-dist грузим
+// ЛЕНИВО динамическим import — отдельным чанком, не раздувая основной бандл.
+function PdfCanvas({ blob, downloadHref, downloadName }) {
+  const containerRef = useRef(null);
+  const docRef = useRef(null);
+  const [numPages, setNumPages] = useState(0);
+  const [pageNow, setPageNow] = useState(1);
+  const [scale, setScale] = useState(1);       // множитель поверх fit-по-ширине
+  const [status, setStatus] = useState('loading'); // loading | ready | error
+
+  // Загрузка документа (ленивый import pdfjs)
+  useEffect(() => {
+    let dead = false;
+    setStatus('loading'); setNumPages(0); setPageNow(1);
+    (async () => {
+      try {
+        const pdfjsLib = await import('pdfjs-dist');
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+          new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+        const data = await blob.arrayBuffer();
+        if (dead) return;
+        const doc = await pdfjsLib.getDocument({ data }).promise;
+        if (dead) { try { doc.destroy(); } catch (e) {} return; }
+        docRef.current = doc;
+        setNumPages(doc.numPages);
+        setStatus('ready');
+      } catch (e) {
+        console.error('pdf.js error:', e);
+        if (!dead) setStatus('error');
+      }
+    })();
+    return () => {
+      dead = true;
+      if (docRef.current) { try { docRef.current.destroy(); } catch (e) {} docRef.current = null; }
+    };
+  }, [blob]);
+
+  // Рендер всех страниц вертикальной лентой (учёт devicePixelRatio — текст чёткий)
+  useEffect(() => {
+    if (status !== 'ready' || !docRef.current || !containerRef.current) return;
+    let cancelled = false;
+    const doc = docRef.current;
+    const container = containerRef.current;
+    (async () => {
+      container.innerHTML = '';
+      const dpr = window.devicePixelRatio || 1;
+      const cw = (container.clientWidth || 800) - 8;
+      for (let p = 1; p <= doc.numPages; p++) {
+        if (cancelled) return;
+        const page = await doc.getPage(p);
+        const base = page.getViewport({ scale: 1 });
+        const fit = cw / base.width;
+        const viewport = page.getViewport({ scale: fit * scale * dpr });
+        const canvas = document.createElement('canvas');
+        canvas.className = 'pdf-page-canvas';
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.width = (viewport.width / dpr) + 'px';
+        canvas.style.height = (viewport.height / dpr) + 'px';
+        container.appendChild(canvas);
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [status, scale]);
+
+  const onScroll = () => {
+    const c = containerRef.current; if (!c) return;
+    const canvases = c.querySelectorAll('canvas');
+    let cur = 1;
+    for (let i = 0; i < canvases.length; i++) {
+      if (canvases[i].offsetTop - c.scrollTop <= c.clientHeight / 3) cur = i + 1;
+    }
+    setPageNow(cur);
+  };
+
+  if (status === 'error') {
+    return (
+      <div className="file-not-supported">
+        <p style={{ color: 'var(--red)' }}>Не удалось отобразить PDF</p>
+        <a href={downloadHref} download={downloadName} className="download-link">Скачать файл</a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pdf-canvas-viewer">
+      <div className="pdf-toolbar">
+        <span className="pdf-pageinfo">стр. {pageNow} из {numPages || '…'}</span>
+        <div className="pdf-zoom">
+          <button className="pdf-zoom-btn" onClick={() => setScale(s => Math.max(0.5, +(s - 0.2).toFixed(2)))} disabled={status !== 'ready'}>−</button>
+          <span className="pdf-zoom-val">{Math.round(scale * 100)}%</span>
+          <button className="pdf-zoom-btn" onClick={() => setScale(s => Math.min(3, +(s + 0.2).toFixed(2)))} disabled={status !== 'ready'}>+</button>
+        </div>
+        <a href={downloadHref} download={downloadName} className="btn-download-pdf pdf-toolbar-dl">
+          <IconDownload className="ico" /> Скачать
+        </a>
+      </div>
+      {status === 'loading' && <div className="file-viewer-status"><RossetiLoader /></div>}
+      <div className="pdf-pages" ref={containerRef} onScroll={onScroll} />
+    </div>
+  );
+}
+
+// Просмотр вложений БЕЗ навигации: файл тянется фоновым XHR в blob:, картинка —
+// в <img>, PDF — в <canvas> через pdf.js (никаких iframe/object/embed).
 function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
   const currentFile = files[currentIndex];
   const url = (currentFile.url || '').toLowerCase();
   const isImage = url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.gif');
   const isPdf = url.endsWith('.pdf');
 
-  const [blobUrl, setBlobUrl] = useState(null);
+  const [blobUrl, setBlobUrl] = useState(null); // objectURL для <img>
+  const [pdfBlob, setPdfBlob] = useState(null); // сырой blob для pdf.js
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null); // { lost: bool }
 
   useEffect(() => {
     let dead = false, obj = null;
-    setBlobUrl(null); setError(null); setLoading(true);
+    setBlobUrl(null); setPdfBlob(null); setError(null); setLoading(true);
     if (!isImage && !isPdf) { setLoading(false); return; }
     api.get(fileProxyUrl(currentFile, true), { responseType: 'blob' })
-      .then(r => { if (dead) return; obj = URL.createObjectURL(r.data); setBlobUrl(obj); })
+      .then(r => {
+        if (dead) return;
+        if (isImage) { obj = URL.createObjectURL(r.data); setBlobUrl(obj); }
+        else { setPdfBlob(r.data); }
+      })
       .catch(e => { if (dead) return; setError({ lost: e.response?.status === 404 }); })
       .finally(() => { if (!dead) setLoading(false); });
     return () => { dead = true; if (obj) URL.revokeObjectURL(obj); };
@@ -5892,14 +6003,8 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
                 Скачать {currentFile.original_name}
               </a>
             </div>
-          ) : isPdf ? (
-            <div className="pdf-viewer-blob">
-              <iframe src={blobUrl} title={currentFile.original_name} className="pdf-frame" />
-              <a href={fileProxyUrl(currentFile)} download={currentFile.original_name} className="btn-download-pdf">
-                <span><IconDownload className="ico" /></span>
-                Скачать {currentFile.original_name}
-              </a>
-            </div>
+          ) : isPdf && pdfBlob ? (
+            <PdfCanvas blob={pdfBlob} downloadHref={fileProxyUrl(currentFile)} downloadName={currentFile.original_name} />
           ) : (
             <div className="file-not-supported">
               <p>Предпросмотр недоступен</p>

@@ -349,6 +349,20 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — PDF-предпросмотр без фрейма: pdf.js в `<canvas>`. Причина: во
+  iframe Платформы Яндекс Protect режет ЛЮБУЮ навигацию вложенных фреймов, включая
+  `<iframe src=blob:>` (ERR_BLOCKED_BY_CLIENT). Зависимость `pdfjs-dist@4.10.38`,
+  подключается **лениво** (`await import('pdfjs-dist')` при первом открытии PDF) —
+  ушла в отдельные чанки `pdf-*.js`/`pdf.worker.min-*.mjs`, основной бандл не вырос.
+  `workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url)`.
+  Новый компонент `PdfCanvas`: из уже загруженного blob → `arrayBuffer` →
+  `getDocument({data})`, рендер ВСЕХ страниц вертикальной лентой (canvas), масштаб
+  по ширине × `devicePixelRatio` (текст чёткий); тулбар «стр. N из M» + зум ±
+  (пересчёт рендера); лоадер парсинга; ошибка → сообщение + «Скачать»; при
+  закрытии/смене файла `doc.destroy()` + revoke. В `FileViewer` PDF-ветка
+  `<iframe>`→`<PdfCanvas>`; картинки уже на blob-`<img>`. Грепом: `<iframe>/<object>/
+  <embed>` в App.jsx нет; `console.log` из вьюера убран. CSS `.pdf-canvas-viewer/
+  .pdf-toolbar/.pdf-pages/.pdf-page-canvas`. npm run build — ОК, pdfjs в ленивом чанке.
 - **2026-07-26** — Файловый токен без query-строки, коммит 2. Backend `parseFileToken`
   (в `handleFileProxy`): (1) base64url(JSON `{p,n,i}`) — новый формат без query;
   (2) base64url(строка `res-management/…`) — прежний, name/inline из query;
