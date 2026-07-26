@@ -1174,15 +1174,15 @@ const executeClearHistory = async () => {
   </>
 )}
     
-    <button 
-      className="refresh-btn" 
+    <button
+      className="pm-btn pm-btn--refresh"
        onClick={() => {
         setLoading(true);  // Показать загрузку
         loadNetworkStructure();
       }}
       disabled={loading}
     >
-      {loading ? 'Обновление...' : 'Обновить структуру'}
+      <IconRefresh className="ico" /> {loading ? 'Обновление...' : 'Обновить структуру'}
     </button>
     
     <button 
@@ -1338,9 +1338,13 @@ const executeClearHistory = async () => {
                     const d = new Date(section.lastPeakAt);
                     if (!isNaN(d.getTime())) peakDate = d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
                   }
+                  // Квадратик техучёта: по уровню загрузки (оранжевая зона 85–100% → оранжевый),
+                  // иначе по overloadStatus.
+                  const boxCls = pkCls === 'red' ? 'status-error' : pkCls === 'amber' ? 'status-pending'
+                    : pkCls === 'green' ? 'status-ok' : overloadClass(section.overloadStatus);
                   const sectionNameCol = (
                     <span className="section-title-inline">
-                      <span className={`status-box status-box--sm ${overloadClass(section.overloadStatus)}`}
+                      <span className={`status-box status-box--sm ${boxCls}`}
                             style={{ cursor: 'pointer' }}
                             title="Сведения о техучёте"
                             onClick={(e) => { e.stopPropagation(); openTechModal(section); }}></span>
@@ -1356,11 +1360,11 @@ const executeClearHistory = async () => {
                   );
                   const sectionActions = user.role === 'admin' ? (
                     <>
-                      <button className="link-btn" onClick={() => openSectionModal(tp, resId, section)}>
-                        <IconEdit className="ico" />
+                      <button className="link-btn" title="Редактировать секцию" onClick={() => openSectionModal(tp, resId, section)}>
+                        <IconEdit className="ico ico-glow-blue" />
                       </button>
-                      <button className="link-btn" onClick={() => deleteSection(section)}>
-                        <IconTrash className="ico" style={{ color: 'var(--red)' }} />
+                      <button className="link-btn" title="Удалить секцию" onClick={() => deleteSection(section)}>
+                        <IconTrash className="ico ico-glow-red" />
                       </button>
                     </>
                   ) : null;
@@ -1411,10 +1415,8 @@ const executeClearHistory = async () => {
         const srcRu = s.lastProfileSource === '60' ? '60 мин' : s.lastProfileSource === '30' ? '30 мин' : '—';
         return (
           <ModalShell
-            title={<>{s.tpName} · СШ-{toRoman(s.sectionNumber)}</>}
-            dockTitle={`${s.tpName} · СШ-${toRoman(s.sectionNumber)}`}
-            titleExtra={<span className={`tech-pill ${status.cls}`}>{status.t}</span>}
-            headerClassName={`tech-modal-header ${barCls}`}
+            title={<>{s.tpName} · {s.ResUnit?.name || '—'}{pct != null && <> · <span className={`tech-title-pct ${barCls}`}>{Math.round(pct)}%</span></>}</>}
+            dockTitle={`${s.tpName} · ${s.ResUnit?.name || ''}`}
             className="tech-details-modal"
             icon={<IconLayers size={16} />}
             onClose={() => setTechModal(null)}
@@ -1422,6 +1424,7 @@ const executeClearHistory = async () => {
               <div className="modal-body">
                 <div className="modal-info">
                   <p><strong>ТП:</strong> {s.tpName}</p>
+                  <p><strong>РЭС:</strong> {s.ResUnit?.name || '—'}{pct != null && <> · загрузка <span className={`tech-pmax-pct ${barCls}`}>{Math.round(pct)}%</span></>}</p>
                   <p><strong>Секция шин:</strong> СШ-{toRoman(s.sectionNumber)}</p>
                   <p><strong>№ ПУ техучёта:</strong> {s.techPuNumber || '—'}</p>
                 </div>
@@ -4568,14 +4571,14 @@ function FileManagement() {
                     className="btn-icon"
                     title="Открыть"
                   >
-                    <IconEye className="ico" />
+                    <IconEye className="ico ico-glow-blue" />
                   </button>
                   <button
                     onClick={() => runDiag(file)}
                     className="btn-icon"
                     title="Диагностика файла в хранилище"
                   >
-                    <IconSearch className="ico" />
+                    <IconSearch className="ico ico-glow-blue" />
                   </button>
                   <button
                     onClick={() => {
@@ -4585,7 +4588,7 @@ function FileManagement() {
                     className="btn-icon danger"
                     title="Удалить"
                   >
-                    <IconTrash className="ico" />
+                    <IconTrash className="ico ico-glow-red" />
                   </button>
                 </div>
               </div>
@@ -6318,11 +6321,11 @@ function UploadedDocuments() {
                         onClick={() => handleViewFile(doc.attachments)}
                         title="Просмотреть"
                       >
-                        <IconEye className="ico" />
+                        <IconEye className="ico ico-glow-blue" />
                       </button>
                     )}
                       {user.role === 'admin' && (
-      <button 
+      <button
         className="btn-icon danger"
         onClick={() => {
           setDeleteRecordId(doc.id);
@@ -6330,7 +6333,7 @@ function UploadedDocuments() {
         }}
         title="Удалить запись"
       >
-        <IconTrash className="ico" />
+        <IconTrash className="ico ico-glow-red" />
       </button>
     )}
                   </div>
@@ -7458,7 +7461,7 @@ function Analytics() {
       
       {/* ВЛ в работе у РЭС */}
       <h2 style={{ marginTop: '32px' }}><span className="svg-frame"><IconZap size={24} /></span> ВЛ в работе у РЭС</h2>
-      <p className="info-hint" style={{ marginBottom: '12px' }}>
+      <p className="info-hint" style={{ marginTop: '18px', marginBottom: '12px' }}>
         <IconInfo className="ico" style={{color:'var(--blue)'}} /> Текущее состояние: количество ВЛ с нерешёнными проблемами на данный момент
       </p>
       
@@ -7594,7 +7597,7 @@ function PowerAnalysis({ selectedRes }) {
 
       {/* Перенесено из «Аналитики»: ТП с перегрузом (последний пик ≥ лимита). */}
       <h2 style={{ marginTop: '8px', fontSize: 20 }}>ТП с перегрузом</h2>
-      <p className="info-hint" style={{ marginBottom: '12px' }}>
+      <p className="info-hint" style={{ marginTop: '18px', marginBottom: '12px' }}>
         <IconInfo className="ico" style={{ color: 'var(--blue)' }} /> Секции шин, где последний пик мощности достиг или превысил лимит Sном·cosφ
       </p>
       <div className="analytics-table">
@@ -8632,12 +8635,9 @@ const renderContent = () => {
             <div className="header-right">
               <span>{user.fio}</span>
               <span className="user-role">
-                ({user.role === 'admin' ? 'Администратор' : 
+                ({user.role === 'admin' ? 'Администратор' :
                   user.role === 'uploader' ? 'Загрузчик' : 'Ответственный'})
               </span>
-              <button onClick={handleLogout} className="logout-btn">
-                Выйти
-              </button>
             </div>
           </header>
           

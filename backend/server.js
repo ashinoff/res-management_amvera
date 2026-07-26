@@ -1385,6 +1385,7 @@ app.get('/api/network/sections', authenticateToken, async (req, res) => {
 
     const sections = await TpSection.findAll({
       where,
+      include: [{ model: ResUnit, attributes: ['name'] }],
       order: [['tpName', 'ASC'], ['sectionNumber', 'ASC']]
     });
 

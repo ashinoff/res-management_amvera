@@ -7379,3 +7379,40 @@ tr.selected:hover,
 .legend-dot.status-ok.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--green); }
 .legend-dot.status-error.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--red); }
 .legend-dot.status-pending.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--amber); }
+
+/* ===== Правки UI-пакета ===== */
+/* Светящиеся SVG-иконки в кнопках (светится сам рисунок) */
+.ico-glow-blue { color: #2563eb; filter: drop-shadow(0 0 4px rgba(59,130,246,.75)); }
+.ico-glow-red  { color: var(--red); filter: drop-shadow(0 0 4px rgba(239,68,68,.8)); }
+
+/* Процент загрузки в заголовке тех-модалки — цветной */
+.tech-title-pct { font-weight: 800; }
+.tech-title-pct.red { color: var(--red); } .tech-title-pct.amber { color: var(--amber); }
+.tech-title-pct.green { color: var(--green); } .tech-title-pct.gray { color: var(--text-muted); }
+
+/* Селект секции — менее выделенный (проявляется на hover/focus) */
+.vl-section-select { border: 1px solid transparent; background: transparent; color: var(--text-muted); border-radius: 6px; transition: border-color .12s ease, background-color .12s ease, color .12s ease; }
+.vl-section-select:hover, .vl-section-select:focus { border-color: var(--border); background: var(--surface); color: var(--text); outline: none; }
+
+/* Кружки-фильтры структуры: ярче, БЕЗ рамки/панели, по оси нижних FAB (right 30, ширина 50) */
+.legend-dots {
+  right: 30px; top: 96px; width: 50px;
+  align-items: center;
+  background: none; border: none; box-shadow: none; padding: 0;
+}
+.legend-dots .legend-dot { opacity: .8; }
+.legend-dots .legend-dot:hover { opacity: 1; }
+.legend-dots .legend-dot.is-indicator { opacity: .8; }
+@media (max-width: 640px) { .legend-dots { right: 16px; top: 78px; width: 40px; } }
+
+/* Документы: статус «На проверке» (не completed) — оранжевый (мак-жёлтый) */
+.status-badge:not(.status-completed) { background: #febc2e; color: #5a3d00; }
+
+/* Настройки → База данных: строгие ПРОЗРАЧНЫЕ карточки, синие иконки, кнопки как pm-btn--refresh */
+.db-header { background: transparent; color: var(--text); border: 1px solid var(--border); box-shadow: none; padding: 20px 24px; }
+.db-header h3, .db-header p, .db-header-text h3, .db-header-text p { color: var(--text); }
+.db-header-content { align-items: center; }
+.db-header-icon { font-size: 30px; color: #2563eb; filter: drop-shadow(0 0 6px rgba(59,130,246,.6)); display: inline-flex; align-items: center; justify-content: center; }
+.db-header-icon svg, .db-header-icon .ico { color: #2563eb; width: 30px; height: 30px; }
+.btn-check-db { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue); padding: 0 18px; height: 40px; border-radius: 8px; font-size: 14px; box-shadow: none; transition: background-color .12s ease, color .12s ease, border-color .12s ease; }
+.btn-check-db:hover:not(:disabled) { background: var(--blue); color: #fff; }
