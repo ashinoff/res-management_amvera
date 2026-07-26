@@ -4186,6 +4186,9 @@ function FileManagement() {
   // Диагностика файла в Cloudinary
   const [diag, setDiag] = useState(null);        // { file, data|null }
   const [diagLoading, setDiagLoading] = useState(false);
+  // Файлы, отдавшие 404 (утеряны в хранилище) — по public_id
+  const [lostFiles, setLostFiles] = useState(new Set());
+  const markLost = (id) => setLostFiles(prev => { const n = new Set(prev); n.add(id); return n; });
 
   useEffect(() => {
     loadFiles();
@@ -4349,9 +4352,15 @@ function FileManagement() {
                   file.url.toLowerCase().endsWith('.jpeg') || 
                   file.url.toLowerCase().endsWith('.png') || 
                   file.url.toLowerCase().endsWith('.gif')) ? (
-                  <img src={fileProxyUrl(file, true)} alt={file.original_name} className="file-thumbnail" />
+                  <img src={fileProxyUrl(file, true)} alt={file.original_name} className="file-thumbnail"
+                       onError={() => markLost(file.public_id)} />
                 ) : (
                   <div className="file-icon"><IconFileText className="ico" /></div>
+                )}
+                {lostFiles.has(file.public_id) && (
+                  <div className="file-lost-badge" title="Ресурс не найден в Cloudinary">
+                    <IconAlertTriangle className="ico" /> Файл утерян — удалите запись
+                  </div>
                 )}
                 
                 <div className="file-info">

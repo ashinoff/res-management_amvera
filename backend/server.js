@@ -5274,6 +5274,36 @@ function resolvePublicId(raw) {
   return raw;
 }
 
+// Кэш найденной рабочей комбинации: publicId -> variant (без TTL), чтобы не делать
+// по 4-5 запросов к Cloudinary на каждое открытие файла.
+const fileVariantCache = new Map();
+
+// Упорядоченный список попыток: (а) по расширению+upload → (б) альт. resource_type →
+// (в) authenticated для обоих → (г) для image: public_id без расширения + format.
+function buildFileVariants(publicId) {
+  const isPdf = publicId.toLowerCase().endsWith('.pdf');
+  const primary = isPdf ? 'raw' : 'image';
+  const alt = isPdf ? 'image' : 'raw';
+  const withoutExt = publicId.replace(/\.[^/.]+$/, '');
+  const ext = (publicId.match(/\.([^/.]+)$/) || [])[1] || null;
+  const variants = [
+    { resource_type: primary, type: 'upload', id: publicId, format: null },
+    { resource_type: alt, type: 'upload', id: publicId, format: null },
+    { resource_type: 'image', type: 'authenticated', id: publicId, format: null },
+    { resource_type: 'raw', type: 'authenticated', id: publicId, format: null },
+  ];
+  if (ext && withoutExt !== publicId) {
+    variants.push({ resource_type: 'image', type: 'upload', id: withoutExt, format: ext });
+  }
+  return variants;
+}
+const sameVariant = (a, b) => a.resource_type === b.resource_type && a.type === b.type && a.id === b.id && a.format === b.format;
+function fileVariantUrl(v) {
+  const opts = { resource_type: v.resource_type, type: v.type, secure: true, sign_url: true };
+  if (v.format) opts.format = v.format;
+  return cloudinary.url(v.id, opts);
+}
+
 async function handleFileProxy(req, res) {
   try {
     // Express УЖЕ декодировал параметр — второй decodeURIComponent падал на литеральном '%'.
@@ -5285,24 +5315,26 @@ async function handleFileProxy(req, res) {
     const originalName = req.query.name || 'file';
     const inline = req.query.inline === '1';
 
-    // Определяем тип ресурса (PDF хранятся как raw, остальное — image)
-    const isPdf = publicId.toLowerCase().endsWith('.pdf');
-    const resourceType = isPdf ? 'raw' : 'image';
+    // Кешированную комбинацию пробуем ПЕРВОЙ (дедуп из общего списка).
+    let variants = buildFileVariants(publicId);
+    const cached = fileVariantCache.get(publicId);
+    if (cached) variants = [cached, ...variants.filter(v => !sameVariant(v, cached))];
 
-    // Signed URL для доступа к приватным файлам — но идёт по нему СЕРВЕР
-    const fileUrl = cloudinary.url(publicId, {
-      resource_type: resourceType,
-      type: 'upload',
-      secure: true,
-      sign_url: true
-    });
-
-    const upstream = await fetch(fileUrl);
-    if (!upstream.ok || !upstream.body) {
-      console.error('Download proxy: upstream status', upstream.status, 'for', publicId);
-      return res.status(upstream.status === 404 ? 404 : 502)
-        .json({ error: 'Файл недоступен в хранилище' });
+    let upstream = null, used = null;
+    const tried = [];
+    for (const v of variants) {
+      tried.push(`${v.resource_type}/${v.type}${v.format ? '+' + v.format : ''}${v.id !== publicId ? '(no-ext)' : ''}`);
+      let r;
+      try { r = await fetch(fileVariantUrl(v)); } catch (e) { continue; }
+      if (r.ok && r.body) { upstream = r; used = v; break; }
+      try { r.body && r.body.cancel && r.body.cancel(); } catch (e) {}
     }
+
+    if (!upstream) {
+      console.error(`File proxy 404 for ${publicId}; tried: ${tried.join(', ')}`);
+      return res.status(404).json({ error: 'Файл отсутствует в хранилище', publicId });
+    }
+    fileVariantCache.set(publicId, used); // запомнить рабочую комбинацию
 
     res.setHeader('Content-Type',
       upstream.headers.get('content-type') || 'application/octet-stream');

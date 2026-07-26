@@ -7256,3 +7256,13 @@ tr.selected:hover,
 .diag-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .diag-table th, .diag-table td { padding: 6px 10px; border: 1px solid var(--border); text-align: center; }
 .diag-table th { background: var(--surface-2); font-weight: 600; }
+
+/* Бейдж «файл утерян» (Управление файлами, 404 от /api/f) */
+.file-lost-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 8px 0 0; padding: 6px 10px;
+  background: var(--red-bg); color: var(--red);
+  border: 1px solid #f3b4b4; border-radius: 8px;
+  font-size: 12px; font-weight: 600;
+}
+.file-lost-badge .ico { width: 15px; height: 15px; }
