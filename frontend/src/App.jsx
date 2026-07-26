@@ -3572,6 +3572,11 @@ function PowerOverload({ selectedRes }) {
   const [commentError, setCommentError] = useState(false);
   const [files, setFiles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  // Просмотрщик вложений (без навигации)
+  const [showFileViewer, setShowFileViewer] = useState(false);
+  const [viewerFiles, setViewerFiles] = useState([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const openViewer = (attachments, i) => { setViewerFiles(attachments); setViewerIndex(i); setShowFileViewer(true); };
 
   const f1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
   const STAGE_RU = {
@@ -3764,7 +3769,7 @@ function PowerOverload({ selectedRes }) {
                       {Array.isArray(c.attachments) && c.attachments.length > 0 && (
                         <div className="po-attachments">
                           {c.attachments.map((a, i) => (
-                            <a key={i} href={fileProxyUrl(a, true)} target="_blank" rel="noreferrer">Файл {i + 1}</a>
+                            <button key={i} type="button" className="po-attach-link" onClick={() => openViewer(c.attachments, i)}>Файл {i + 1}</button>
                           ))}
                         </div>
                       )}
@@ -3841,6 +3846,16 @@ function PowerOverload({ selectedRes }) {
           </div>
         );
       })()}
+
+      {showFileViewer && (
+        <FileViewer
+          files={viewerFiles}
+          currentIndex={viewerIndex}
+          onClose={() => setShowFileViewer(false)}
+          onNext={() => setViewerIndex((p) => (p + 1) % viewerFiles.length)}
+          onPrev={() => setViewerIndex((p) => (p - 1 + viewerFiles.length) % viewerFiles.length)}
+        />
+      )}
     </div>
   );
 }
@@ -4412,8 +4427,7 @@ function FileManagement() {
                   file.url.toLowerCase().endsWith('.jpeg') || 
                   file.url.toLowerCase().endsWith('.png') || 
                   file.url.toLowerCase().endsWith('.gif')) ? (
-                  <img src={fileProxyUrl(file, true)} alt={file.original_name} className="file-thumbnail"
-                       onError={() => markLost(file.public_id)} />
+                  <BlobImage file={file} alt={file.original_name} className="file-thumbnail" onLost={markLost} />
                 ) : (
                   <div className="file-icon"><IconFileText className="ico" /></div>
                 )}
@@ -4444,15 +4458,13 @@ function FileManagement() {
                 </div>
                 
                 <div className="file-actions">
-                  <a 
-                    href={fileProxyUrl(file, true)} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
+                  <button
+                    onClick={() => { setSelectedFiles([file]); setCurrentFileIndex(0); setShowFileViewer(true); }}
                     className="btn-icon"
                     title="Открыть"
                   >
                     <IconEye className="ico" />
-                  </a>
+                  </button>
                   <button
                     onClick={() => runDiag(file)}
                     className="btn-icon"
@@ -5809,15 +5821,48 @@ function MaintenanceSettings() {
 // =====================================================
 // Компонент для просмотра файлов
 // =====================================================
+// Загружает файл фоновым XHR (blob:) и показывает <img> — БЕЗ subresource-запроса
+// на /api/f (их режут блокировщики Яндекс Protect). onLost — колбэк при 404.
+function BlobImage({ file, alt, className, onLost }) {
+  const [src, setSrc] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let dead = false, obj = null;
+    setSrc(null); setErr(false);
+    api.get(fileProxyUrl(file, true), { responseType: 'blob' })
+      .then(r => { if (dead) return; obj = URL.createObjectURL(r.data); setSrc(obj); })
+      .catch(e => { if (dead) return; setErr(true); if (e.response?.status === 404 && onLost) onLost(file.public_id); });
+    return () => { dead = true; if (obj) URL.revokeObjectURL(obj); };
+  }, [file.public_id]);
+  if (err) return <div className={`blob-img-fallback ${className || ''}`}><IconAlertTriangle className="ico" /></div>;
+  if (!src) return <div className={`blob-img-fallback ${className || ''}`}><RossetiLoader size="small" /></div>;
+  return <img src={src} alt={alt} className={className} />;
+}
+
+// Просмотр вложений БЕЗ навигации: файл тянется фоновым XHR в blob:, картинка —
+// в <img>, PDF — в <iframe> внутри модалки. Навигаций/переходов на /api/f нет.
 function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
-  console.log('FileViewer files:', files);
-  console.log('Current file:', files[currentIndex]);
-  
   const currentFile = files[currentIndex];
-  const url = currentFile.url.toLowerCase();
+  const url = (currentFile.url || '').toLowerCase();
   const isImage = url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.gif');
   const isPdf = url.endsWith('.pdf');
-  
+
+  const [blobUrl, setBlobUrl] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null); // { lost: bool }
+
+  useEffect(() => {
+    let dead = false, obj = null;
+    setBlobUrl(null); setError(null); setLoading(true);
+    if (!isImage && !isPdf) { setLoading(false); return; }
+    api.get(fileProxyUrl(currentFile, true), { responseType: 'blob' })
+      .then(r => { if (dead) return; obj = URL.createObjectURL(r.data); setBlobUrl(obj); })
+      .catch(e => { if (dead) return; setError({ lost: e.response?.status === 404 }); })
+      .finally(() => { if (!dead) setLoading(false); });
+    return () => { dead = true; if (obj) URL.revokeObjectURL(obj); };
+    // eslint-disable-next-line
+  }, [currentFile.public_id]);
+
   return (
     <div className="modal-backdrop file-viewer-backdrop" onClick={onClose}>
       <div className="file-viewer-container" onClick={e => e.stopPropagation()}>
@@ -5825,76 +5870,50 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
           <h3>Просмотр файлов ({currentIndex + 1} из {files.length})</h3>
           <button className="close-btn" onClick={onClose}><IconX className="ico" /></button>
         </div>
-        
+
         <div className="file-viewer-content">
-          {isImage ? (
+          {loading ? (
+            <div className="file-viewer-status"><RossetiLoader /></div>
+          ) : error ? (
+            <div className="file-not-supported">
+              {error.lost
+                ? <div className="file-lost-badge"><IconAlertTriangle className="ico" /> Файл утерян в хранилище</div>
+                : <p style={{ color: 'var(--red)' }}>Не удалось загрузить файл</p>}
+              <a href={fileProxyUrl(currentFile)} download={currentFile.original_name} className="download-link">
+                Попробовать скачать
+              </a>
+            </div>
+          ) : isImage ? (
             <div className="image-viewer-wrap">
-              <img 
-                src={fileProxyUrl(currentFile, true)} 
-                alt={currentFile.original_name}
-                className="file-viewer-image"
-              />
-              <a
-                href={fileProxyUrl(currentFile)}
-                download={currentFile.original_name}
-                className="btn-download-pdf image-download-btn"
-              >
+              <img src={blobUrl} alt={currentFile.original_name} className="file-viewer-image" />
+              <a href={fileProxyUrl(currentFile)} download={currentFile.original_name} className="btn-download-pdf image-download-btn">
                 <span><IconDownload className="ico" /></span>
                 Скачать {currentFile.original_name}
               </a>
             </div>
           ) : isPdf ? (
-            <div className="pdf-viewer-modern">
-              <div className="pdf-preview">
-                <div className="pdf-icon"><IconFileText className="ico" /></div>
-                <h4>{currentFile.original_name}</h4>
-                <p className="pdf-info">PDF документ</p>
-                <div className="pdf-actions">
-                  <a 
-                    href={fileProxyUrl(currentFile, true)} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="btn-view-pdf"
-                  >
-                    <span><IconEye className="ico" /></span>
-                    Открыть в новой вкладке
-                  </a>
-                  <a 
-  href={`${API_URL}/api/f/${toBase64Url(currentFile.public_id)}?name=${encodeURIComponent(currentFile.original_name)}`}
-  target="_blank"
-  download={currentFile.original_name}
-  className="btn-download-pdf"
->
-  <span><IconDownload className="ico" /></span>
-  Скачать {currentFile.original_name}
-</a>
-                </div>
-              </div>
-              <div className="pdf-note">
-                <span><IconLightbulb className="ico" /></span>
-                <p>PDF откроется в новой вкладке браузера</p>
-              </div>
+            <div className="pdf-viewer-blob">
+              <iframe src={blobUrl} title={currentFile.original_name} className="pdf-frame" />
+              <a href={fileProxyUrl(currentFile)} download={currentFile.original_name} className="btn-download-pdf">
+                <span><IconDownload className="ico" /></span>
+                Скачать {currentFile.original_name}
+              </a>
             </div>
           ) : (
             <div className="file-not-supported">
               <p>Предпросмотр недоступен</p>
-              <a 
-                href={fileProxyUrl(currentFile)} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="download-link"
-              >
+              <a href={fileProxyUrl(currentFile)} download={currentFile.original_name} className="download-link">
                 Скачать файл
               </a>
             </div>
           )}
         </div>
-        
+
         <div className="file-viewer-info">
           <p><strong>Имя файла:</strong> {currentFile.original_name}</p>
-          <p><strong>Загружен:</strong> {new Date(currentFile.uploaded_at).toLocaleString('ru-RU')}</p>
+          <p><strong>Загружен:</strong> {currentFile.uploaded_at ? new Date(currentFile.uploaded_at).toLocaleString('ru-RU') : '—'}</p>
         </div>
-        
+
         {files.length > 1 && (
           <div className="file-viewer-navigation">
             <button onClick={onPrev} className="nav-btn">

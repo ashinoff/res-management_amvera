@@ -349,6 +349,21 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — Просмотр вложений БЕЗ навигации (Яндекс Protect режет
+  навигацию на `/api/f/...&inline=1`, фоновые XHR — нет), коммит 1. `FileViewer`
+  переписан: файл тянется `api.get(fileProxyUrl(f,true),{responseType:'blob'})`,
+  `URL.createObjectURL` → картинка в `<img>`, PDF в `<iframe class=pdf-frame>`
+  ВНУТРИ модалки; revoke при закрытии/смене файла (effect по `public_id`), лоадер,
+  ошибка + бейдж «файл утерян» на 404. Убраны `console.log` и «Открыть в новой
+  вкладке»; «Скачать» — обычные `<a download>` через `fileProxyUrl(currentFile)`
+  (без inline, ручная сборка ссылки убрана). Новый `BlobImage` (тот же blob-XHR)
+  заменил subresource-`<img src={fileProxyUrl}>` в превью «Управления файлами».
+  Навигации-ссылки на просмотр переведены на открытие FileViewer: «Открыть» в
+  управлении файлами и вложения в хронологии перегруза (`PowerOverload` получил
+  собственный FileViewer + `.po-attach-link`). Грепом подтверждено: `target=_blank`
+  +fileProxyUrl / window.open / location.href на `/api/f` — нет; остались только
+  blob-XHR и `<a download>`. CSS `.pdf-frame/.pdf-viewer-blob/.blob-img-fallback`.
+  npm run build — ОК.
 - **2026-07-26** — Файловый прокси, «доставка», коммит 2: `handleFileProxy` берёт
   URL у Cloudinary, а не угадывает. Порядок: (0) кешированный рабочий URL → (1)
   базовая `signed(primary/upload)` → (2) **`api.resource(secure_url)` для primary,
