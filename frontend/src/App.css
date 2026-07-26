@@ -7266,3 +7266,11 @@ tr.selected:hover,
   font-size: 12px; font-weight: 600;
 }
 .file-lost-badge .ico { width: 15px; height: 15px; }
+
+/* Массовый выбор/удаление в «Управлении файлами» */
+.file-bulk-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 0 0 16px; padding: 10px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
+.file-selectall { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
+.file-bulk-bar .delete-selected-btn { margin-left: auto; }
+.file-card { position: relative; }
+.file-card.checked { outline: 2px solid var(--accent); outline-offset: -1px; }
+.file-check { position: absolute; top: 10px; left: 10px; width: 18px; height: 18px; cursor: pointer; z-index: 3; accent-color: var(--accent); }

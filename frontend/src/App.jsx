@@ -4189,6 +4189,38 @@ function FileManagement() {
   // Файлы, отдавшие 404 (утеряны в хранилище) — по public_id
   const [lostFiles, setLostFiles] = useState(new Set());
   const markLost = (id) => setLostFiles(prev => { const n = new Set(prev); n.add(id); return n; });
+  // Множественный выбор + удаление выбранных
+  const [checkedIds, setChecked] = useState(new Set());
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkPassword, setBulkPassword] = useState('');
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const toggleCheck = (id) => setChecked(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true);
+    const ids = [...checkedIds];
+    let ok = 0, fail = 0, badPass = false;
+    for (const id of ids) {
+      try {
+        await api.delete(`/api/admin/files/${encodeURIComponent(id)}`, { data: { password: bulkPassword } });
+        ok++;
+      } catch (e) {
+        if (e.response?.status === 403) { badPass = true; break; }
+        fail++;
+      }
+    }
+    setBulkDeleting(false);
+    if (badPass) { alert('Неверный пароль'); return; }
+    setShowBulkModal(false);
+    setBulkPassword('');
+    setChecked(new Set());
+    alert(`Удалено файлов: ${ok}${fail ? `, ошибок: ${fail}` : ''}`);
+    loadFiles();
+  };
 
   useEffect(() => {
     loadFiles();
@@ -4271,9 +4303,19 @@ function FileManagement() {
     
     return true;
   });
-  
+
+  // «Выбрать все показанные» — работает по текущему фильтру.
+  const shownIds = filteredFiles.map(f => f.public_id).filter(Boolean);
+  const allShownChecked = shownIds.length > 0 && shownIds.every(id => checkedIds.has(id));
+  const toggleSelectAll = () => setChecked(prev => {
+    const n = new Set(prev);
+    if (allShownChecked) shownIds.forEach(id => n.delete(id));
+    else shownIds.forEach(id => n.add(id));
+    return n;
+  });
+
   if (loading) return <div className="loading"><RossetiLoader /></div>;
-  
+
   return (
     <div className="settings-section">
       <h3>Управление загруженными файлами</h3>
@@ -4332,7 +4374,21 @@ function FileManagement() {
           <p className="stat-value">{getTotalSize()} MB</p>
         </div>
       </div>
-      
+
+      {filteredFiles.length > 0 && (
+        <div className="file-bulk-bar">
+          <label className="file-selectall">
+            <input type="checkbox" checked={allShownChecked} onChange={toggleSelectAll} />
+            Выбрать все показанные
+          </label>
+          <span className="muted">Выбрано: {checkedIds.size}</span>
+          <button className="delete-selected-btn" disabled={checkedIds.size === 0}
+            onClick={() => setShowBulkModal(true)}>
+            <IconTrash className="ico" /> Удалить выбранные ({checkedIds.size})
+          </button>
+        </div>
+      )}
+
       {filteredFiles.length === 0 ? (
         <div className="no-data">
           <p>
@@ -4347,8 +4403,12 @@ function FileManagement() {
             const statusInfo = getStatusInfo(file.status);
             
             return (
-              <div key={idx} className="file-card">
-                {(file.url.toLowerCase().endsWith('.jpg') || 
+              <div key={idx} className={`file-card ${checkedIds.has(file.public_id) ? 'checked' : ''}`}>
+                <input type="checkbox" className="file-check"
+                  checked={checkedIds.has(file.public_id)}
+                  onChange={() => toggleCheck(file.public_id)}
+                  title="Выбрать файл" />
+                {(file.url.toLowerCase().endsWith('.jpg') ||
                   file.url.toLowerCase().endsWith('.jpeg') || 
                   file.url.toLowerCase().endsWith('.png') || 
                   file.url.toLowerCase().endsWith('.gif')) ? (
@@ -4459,6 +4519,30 @@ function FileManagement() {
             </div>
             <div className="modal-footer">
               <button className="action-btn" onClick={() => setDiag(null)}>Закрыть</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Массовое удаление выбранных файлов */}
+      {showBulkModal && (
+        <div className="modal-backdrop" onClick={() => !bulkDeleting && setShowBulkModal(false)}>
+          <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Удаление выбранных файлов</h3>
+              <button className="close-btn" onClick={() => setShowBulkModal(false)}><IconX className="ico" /></button>
+            </div>
+            <div className="modal-body">
+              <p>Будет удалено файлов: <strong>{checkedIds.size}</strong>. Файлы удаляются из хранилища и отвязываются от историй проверок. Действие необратимо.</p>
+              <input type="password" placeholder="Пароль удаления" value={bulkPassword}
+                onChange={e => setBulkPassword(e.target.value)} className="purge-pass"
+                style={{ marginTop: 10, width: '100%' }} />
+            </div>
+            <div className="modal-footer">
+              <button className="action-btn" onClick={() => setShowBulkModal(false)} disabled={bulkDeleting}>Отмена</button>
+              <button className="delete-selected-btn" onClick={handleBulkDelete} disabled={bulkDeleting || !bulkPassword}>
+                {bulkDeleting ? 'Удаление...' : 'Удалить'}
+              </button>
             </div>
           </div>
         </div>
