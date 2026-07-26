@@ -6953,6 +6953,17 @@ tr.selected:hover,
 .pm-matrix td.pm-red .pm-pct   { color: var(--red); }
 .pm-matrix td.pm-amber .pm-pct { color: var(--amber); }
 .pm-matrix td.pm-green .pm-pct { color: var(--green); }
+
+/* ===== Очистка истории (админ) ===== */
+.purge-date, .purge-pass { padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.purge-preview { margin-top: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.purge-preview-title { font-weight: 600; margin-bottom: 10px; }
+.purge-preview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.purge-preview-grid > div { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.purge-preview-grid span { color: var(--text-muted); font-size: 13px; }
+.purge-preview-grid b { font-size: 16px; }
+.purge-preview-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+.purge-result { margin-top: 12px; padding: 12px 16px; border: 1px solid var(--green); background: var(--green-bg); border-radius: 10px; font-size: 13.5px; }
 .tech-pill { padding: 3px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700; color: #fff; }
 .tech-pill.status-ok { background: var(--green); }
 .tech-pill.status-error { background: var(--red); }

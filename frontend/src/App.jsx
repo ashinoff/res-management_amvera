@@ -7315,6 +7315,39 @@ function DatabaseMaintenance() {
   const [cleaning, setCleaning] = useState(false);
   const [backuping, setBackuping] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  // Очистка истории до даты
+  const [purgeBefore, setPurgeBefore] = useState('');
+  const [purgePreview, setPurgePreview] = useState(null);
+  const [purgePreviewing, setPurgePreviewing] = useState(false);
+  const [purgeConfirm, setPurgeConfirm] = useState(false);
+  const [purgePassword, setPurgePassword] = useState('');
+  const [purging, setPurging] = useState(false);
+  const [purgeResult, setPurgeResult] = useState(null);
+
+  const handlePurgePreview = async () => {
+    if (!purgeBefore) { alert('Выберите дату'); return; }
+    setPurgePreviewing(true); setPurgeResult(null);
+    try {
+      const { data } = await api.post('/api/admin/purge-preview', { before: purgeBefore });
+      setPurgePreview(data);
+    } catch (e) {
+      alert('Ошибка предпросмотра: ' + (e.response?.data?.error || e.message));
+      setPurgePreview(null);
+    } finally { setPurgePreviewing(false); }
+  };
+
+  const handlePurge = async () => {
+    setPurging(true);
+    try {
+      const { data } = await api.post('/api/admin/purge', { before: purgeBefore, password: purgePassword });
+      setPurgeResult(data);
+      setPurgePreview(null);
+      setPurgeConfirm(false);
+      setPurgePassword('');
+    } catch (e) {
+      alert('Ошибка очистки: ' + (e.response?.data?.error || e.message));
+    } finally { setPurging(false); }
+  };
 
     const runHealthCheck = async () => {
     setLoading(true);
@@ -7541,6 +7574,77 @@ function DatabaseMaintenance() {
           </label>
         </div>
       </div>
+
+      {/* Очистка истории до даты */}
+      <div className="db-header" style={{ marginTop: 12 }}>
+        <div className="db-header-content">
+          <div className="db-header-icon"><IconBroom className="ico" /></div>
+          <div className="db-header-text">
+            <h3>Очистка истории</h3>
+            <p>Удаляет истории загрузок/проверок, уведомления и связанные файлы <strong>старше выбранной даты</strong>. Структура сети, тех-учёт, помесячные пики, случаи перегруза и пользователи — сохраняются.</p>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input type="date" value={purgeBefore} className="purge-date"
+            onChange={(e) => { setPurgeBefore(e.target.value); setPurgePreview(null); setPurgeResult(null); }} />
+          <button className="btn-check-db" onClick={handlePurgePreview} disabled={purgePreviewing || !purgeBefore}>
+            {purgePreviewing ? 'Подсчёт...' : 'Показать что будет удалено'}
+          </button>
+        </div>
+      </div>
+
+      {purgePreview && (
+        <div className="purge-preview">
+          <div className="purge-preview-title">Будет удалено (старше {purgeBefore}):</div>
+          <div className="purge-preview-grid">
+            <div><span>Истории загрузок</span><b>{purgePreview.uploadHistory}</b></div>
+            <div><span>Истории по ПУ</span><b>{purgePreview.puUploadHistory}</b></div>
+            <div><span>Истории проверок</span><b>{purgePreview.checkHistory}</b></div>
+            <div><span>Уведомления</span><b>{purgePreview.notifications}</b></div>
+            <div><span>Файлы (Cloudinary)</span><b>{purgePreview.cloudinaryFiles}</b></div>
+          </div>
+          <div className="purge-preview-actions">
+            <input type="password" placeholder="Пароль удаления" value={purgePassword}
+              onChange={(e) => setPurgePassword(e.target.value)} className="purge-pass" />
+            <button className="delete-selected-btn" disabled={!purgePassword}
+              onClick={() => setPurgeConfirm(true)}>Удалить безвозвратно</button>
+          </div>
+        </div>
+      )}
+
+      {purgeResult && (
+        <div className="purge-result">
+          <IconCheck className="ico" style={{ color: 'var(--green)' }} /> Очистка завершена. Удалено:
+          {' '}уведомлений {purgeResult.deleted.notifications ?? 0}, проверок {purgeResult.deleted.checkHistory ?? 0},
+          {' '}загрузок {purgeResult.deleted.uploadHistory ?? 0}, по ПУ {purgeResult.deleted.puUploadHistory ?? 0}.
+          {' '}Файлов Cloudinary: {purgeResult.cloudinaryDeleted}{purgeResult.cloudinaryErrors ? `, ошибок файлов: ${purgeResult.cloudinaryErrors}` : ''}.
+        </div>
+      )}
+
+      {purgeConfirm && (
+        <div className="modal-backdrop" onClick={() => !purging && setPurgeConfirm(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header"><h3>Подтверждение очистки</h3></div>
+            <div className="modal-body">
+              <p>Будут <strong>безвозвратно</strong> удалены данные старше <strong>{purgeBefore}</strong>:</p>
+              <ul style={{ margin: '8px 0 12px 18px' }}>
+                <li>Истории загрузок: {purgePreview?.uploadHistory ?? 0}</li>
+                <li>Истории по ПУ: {purgePreview?.puUploadHistory ?? 0}</li>
+                <li>Истории проверок: {purgePreview?.checkHistory ?? 0}</li>
+                <li>Уведомления: {purgePreview?.notifications ?? 0}</li>
+                <li>Файлы Cloudinary: {purgePreview?.cloudinaryFiles ?? 0}</li>
+              </ul>
+              <p style={{ color: 'var(--green)' }}>Сохраняются: структура сети, тех-учёт секций, <strong>помесячные пики мощности</strong>, случаи перегруза, пользователи и справочники.</p>
+            </div>
+            <div className="modal-footer">
+              <button className="action-btn" onClick={() => setPurgeConfirm(false)} disabled={purging}>Отмена</button>
+              <button className="delete-selected-btn" onClick={handlePurge} disabled={purging}>
+                {purging ? 'Удаление...' : 'Удалить безвозвратно'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="db-loading">

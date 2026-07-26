@@ -349,6 +349,23 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — ЗАДАЧА Б: очистка истории до даты (admin). Два эндпоинта:
+  `POST /api/admin/purge-preview {before:'YYYY-MM-DD'}` — только COUNT
+  ({uploadHistory, puUploadHistory, checkHistory, notifications, cloudinaryFiles});
+  `POST /api/admin/purge {before, password}` (password=DELETE_PASSWORD) — в
+  транзакции: (a) собрать public_id из CheckHistory.attachments старше before;
+  (b) удалить NotificationRead(по id уведомлений)→Notification(createdAt<before, все
+  типы)→CheckHistory→UploadHistory→PuUploadHistory(uploadedAt<before) — все через
+  `model.destroy` (хук инвалидации кэша counts срабатывает); (c) commit, ПОСЛЕ —
+  `purgeCloudinary` (батчи по 100, отдельно image/raw, not_found не ошибка), ошибки
+  копятся счётчиком, БД НЕ откатывается. Ответ `{deleted, cloudinaryDeleted,
+  cloudinaryErrors}`. **НИКОГДА не трогаются** NetworkStructure, PuStatus, TpSection,
+  **SectionMonthlyPeak**, OverloadCase, Users, ResUnits (подтверждено: в purge только
+  5 моделей историй/уведомлений). Фронт: в «Настройки → Обслуживание»
+  (`DatabaseMaintenance`) блок «Очистка истории» — date picker, «Показать что будет
+  удалено» (preview-счётчики), пароль + «Удалить безвозвратно» с confirm-модалкой
+  (перечислено что удаляется/сохраняется, вкл. помесячные пики), сводка результата.
+  CSS `.purge-*`. node --check / npm run build / py_compile — ОК.
 - **2026-07-26** — ЗАДАЧА А: помесячные пики + раздел «Анализ мощности». Новая
   модель **`SectionMonthlyPeak`** (sectionId FK, year, month 1-12, peakKw, peakAt,
   source; уник. индекс `idx_smp_unique (sectionId,year,month)`; таблица создаётся

@@ -209,6 +209,37 @@ async function cleanupCloudinary(publicIds) {
   ));
 }
 
+// Пакетное удаление файлов из Cloudinary (для purge истории). Батчи по 100,
+// отдельно image и raw (pdf) — как в существующем коде. Ошибки НЕ бросаем, а
+// копим счётчиком (сирота в Cloudinary лучше битой ссылки в БД). not_found — не ошибка.
+async function purgeCloudinary(publicIds) {
+  const result = { deleted: 0, errors: 0 };
+  if (!publicIds || !publicIds.length) return result;
+  const uniq = [...new Set(publicIds)];
+  const groups = [
+    ['image', uniq.filter(id => !id.toLowerCase().endsWith('.pdf'))],
+    ['raw', uniq.filter(id => id.toLowerCase().endsWith('.pdf'))]
+  ];
+  for (const [rtype, ids] of groups) {
+    for (let i = 0; i < ids.length; i += 100) {
+      const batch = ids.slice(i, i + 100);
+      if (!batch.length) continue;
+      try {
+        const resp = await cloudinary.api.delete_resources(batch, { resource_type: rtype, type: 'upload' });
+        const map = (resp && resp.deleted) || {};
+        for (const k of Object.keys(map)) {
+          if (map[k] === 'deleted') result.deleted++;
+          else if (map[k] !== 'not_found') result.errors++;
+        }
+      } catch (e) {
+        console.error('Cloudinary purge batch error:', e.message);
+        result.errors += batch.length;
+      }
+    }
+  }
+  return result;
+}
+
 
 // =====================================================
 // ПОДКЛЮЧЕНИЕ К БД (PostgreSQL на Render)
@@ -5276,6 +5307,95 @@ async function handleFileProxy(req, res) {
 }
 app.get('/api/download/:public_id', handleFileProxy); // legacy — не удалять
 app.get('/api/f/:public_id', handleFileProxy);        // новый (обход блокировщиков)
+
+// =====================================================
+// ОЧИСТКА ИСТОРИИ ДО ДАТЫ (admin). Удаляются истории/уведомления/файлы СТАРШЕ
+// даты. НИКОГДА не трогаются: NetworkStructure, PuStatus, TpSection,
+// SectionMonthlyPeak, OverloadCase, Users, ResUnits.
+// =====================================================
+
+// Валидация before → Date (начало суток UTC) или null.
+function parseBeforeDate(before) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(before || ''))) return null;
+  const d = new Date(before + 'T00:00:00Z');
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Собрать Cloudinary public_id из CheckHistory старше before (в транзакции, если есть).
+async function collectPurgeFileIds(beforeDate, transaction) {
+  const checks = await CheckHistory.findAll({
+    where: { createdAt: { [Op.lt]: beforeDate } },
+    attributes: ['attachments'],
+    transaction
+  });
+  const ids = [];
+  for (const ch of checks) {
+    const atts = Array.isArray(ch.attachments) ? ch.attachments : [];
+    for (const a of atts) if (a && a.public_id) ids.push(a.public_id);
+  }
+  return ids;
+}
+
+// Предпросмотр: только COUNT, ничего не удаляет.
+app.post('/api/admin/purge-preview', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const beforeDate = parseBeforeDate(req.body.before);
+    if (!beforeDate) return res.status(400).json({ error: 'Некорректная дата (нужен формат YYYY-MM-DD)' });
+    const [uploadHistory, puUploadHistory, checkHistory, notifications, fileIds] = await Promise.all([
+      UploadHistory.count({ where: { createdAt: { [Op.lt]: beforeDate } } }),
+      PuUploadHistory.count({ where: { uploadedAt: { [Op.lt]: beforeDate } } }),
+      CheckHistory.count({ where: { createdAt: { [Op.lt]: beforeDate } } }),
+      Notification.count({ where: { createdAt: { [Op.lt]: beforeDate } } }),
+      collectPurgeFileIds(beforeDate, null)
+    ]);
+    res.json({ uploadHistory, puUploadHistory, checkHistory, notifications, cloudinaryFiles: fileIds.length });
+  } catch (error) {
+    console.error('purge-preview error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Удаление. Транзакция БД, затем (после commit) — файлы Cloudinary батчами.
+app.post('/api/admin/purge', authenticateToken, checkRole(['admin']), async (req, res) => {
+  const { before, password } = req.body;
+  if (password !== DELETE_PASSWORD) return res.status(403).json({ error: 'Неверный пароль' });
+  const beforeDate = parseBeforeDate(before);
+  if (!beforeDate) return res.status(400).json({ error: 'Некорректная дата (нужен формат YYYY-MM-DD)' });
+
+  const transaction = await sequelize.transaction();
+  let fileIds = [];
+  const deleted = {};
+  try {
+    // a) собрать файлы из CheckHistory ДО удаления строк
+    fileIds = await collectPurgeFileIds(beforeDate, transaction);
+
+    // b) порядок: NotificationRead (по удаляемым уведомлениям) → Notification →
+    // CheckHistory → UploadHistory → PuUploadHistory. Notification.destroy идёт
+    // ЧЕРЕЗ МОДЕЛЬ (не raw SQL), чтобы сработал хук инвалидации кэша counts.
+    const notifIds = (await Notification.findAll({
+      where: { createdAt: { [Op.lt]: beforeDate } }, attributes: ['id'], transaction
+    })).map(n => n.id);
+    if (notifIds.length) {
+      await NotificationRead.destroy({ where: { notificationId: notifIds }, transaction });
+    }
+    deleted.notifications = await Notification.destroy({ where: { createdAt: { [Op.lt]: beforeDate } }, transaction });
+    deleted.checkHistory = await CheckHistory.destroy({ where: { createdAt: { [Op.lt]: beforeDate } }, transaction });
+    deleted.uploadHistory = await UploadHistory.destroy({ where: { createdAt: { [Op.lt]: beforeDate } }, transaction });
+    deleted.puUploadHistory = await PuUploadHistory.destroy({ where: { uploadedAt: { [Op.lt]: beforeDate } }, transaction });
+
+    // c) commit ДО работы с Cloudinary
+    await transaction.commit();
+  } catch (error) {
+    await transaction.rollback();
+    console.error('purge error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+
+  // После commit — удаляем файлы; ошибки Cloudinary НЕ откатывают БД.
+  const cl = await purgeCloudinary(fileIds);
+  invalidateNotifCountsCache(); // на всякий случай (destroy уже дёрнул хук)
+  res.json({ deleted, cloudinaryDeleted: cl.deleted, cloudinaryErrors: cl.errors });
+});
 
 // =====================================================
 // БЭКАП / ВОССТАНОВЛЕНИЕ (перенос данных Render → Amvera)
