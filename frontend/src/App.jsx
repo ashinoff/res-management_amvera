@@ -8626,13 +8626,18 @@ function PollMap({ selectedRes }) {
   secFiltered.forEach(s => bucket(s.resName, s.tpName).secs.push(s));
   filtered.forEach(r => bucket(r.resName, r.tpName).vls.push(r));
 
-  const puCell = (pu, cell) => (
-    <div className="pu-cell" title={cell.status === 'no_data' ? 'Нет данных среза' : (pu || 'ПУ не задан')}>
-      <div className={`status-box ${boxCls(cell.status)}`}>{cell.status === 'no_pu' ? 'X' : ''}</div>
-      <span className="pu-num-line">{pu || ''}</span>
-      {cell.spodes && (cell.status === 'collected' || cell.status === 'not_collected') && <SpodesBadge />}
-    </div>
-  );
+  const puCell = (pu, cell) => {
+    // Зона бейджа резервируется ВСЕГДА (фикс. высота) — квадраты всех ПУ ряда
+    // стоят на одной линии независимо от наличия «СПОДЭС».
+    const showSp = cell.spodes && (cell.status === 'collected' || cell.status === 'not_collected');
+    return (
+      <div className="pu-cell poll-pu-cell" title={cell.status === 'no_data' ? 'Нет данных среза' : (pu || 'ПУ не задан')}>
+        <div className={`status-box ${boxCls(cell.status)}`}>{cell.status === 'no_pu' ? 'X' : ''}</div>
+        <span className="pu-num-line">{pu || ''}</span>
+        <span className="pu-badge-zone">{showSp && <SpodesBadge />}</span>
+      </div>
+    );
+  };
 
   // Лукап кандидатов/совпадения ТП по «resName||tpName».
   const tpInfo = {};
@@ -8813,8 +8818,8 @@ function PollMap({ selectedRes }) {
                 <h3 className="poll-res-title">{resName}</h3>
                 {Object.keys(byRes[resName]).sort((a, b) => a.localeCompare(b, 'ru')).map(tpName => (
                   <div key={tpName} className="tp-card">
-                    <div className="poll-grid poll-grid--head">
-                      <span className="poll-vl-name muted">{tpName}</span>
+                    <div className="poll-grid poll-grid--head poll-tp-head">
+                      <span className="poll-vl-name poll-tp-name">{tpName}</span>
                       <span className="pu-col-label">Начало</span><span className="pu-col-label">Середина</span><span className="pu-col-label">Конец</span>
                     </div>
                     {/* Секции шин (тех.учёт на вводе) — клик открывает рекомендации */}
@@ -8892,22 +8897,27 @@ function PollMap({ selectedRes }) {
                     <div className="poll-notice-main"><IconAlertTriangle className="ico" /> Срез не синхронизирован — показан только состав. Выполните синхронизацию для рекомендаций.</div>
                   </div>
                 )}
+                <div className="poll-rec-tablewrap">
                 <table className="poll-rec-table">
                   <thead><tr><th>Позиция</th><th>№ ПУ</th><th>Статус</th><th>Вывод</th></tr></thead>
                   <tbody>
                     {sorted.map((it, i) => (
                       <tr key={i}>
                         <td>{it.position}</td>
-                        <td>{it.pu || '—'}{it.cell.spodes && <SpodesBadge />}</td>
+                        <td className="poll-rec-pu">{it.pu || '—'}{it.cell.spodes && <SpodesBadge />}</td>
                         <td><span className={`rec-status rec-st-${it.cell.status}`}>{stLabel(it.cell.status)}</span></td>
                         <td>{it.verdict ? <span className={`rec-verdict rec-v-${it.verdict.color}`}>{it.verdict.text}</span> : <span className="muted">—</span>}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                </div>
                 {!nd && (
                   <div className="poll-rec-footer">
-                    К замене: <b>{buckets.toReplace}</b> · Восстановить опрос: <b>{buckets.toRestore}</b> · Заполнить: <b>{buckets.toFill}</b> · В порядке: <b>{buckets.ok}</b>
+                    <span className="poll-rec-foot-item"><span className="rec-dot rec-v-red" />К замене: <b>{buckets.toReplace}</b></span>
+                    <span className="poll-rec-foot-item"><span className="rec-dot rec-v-amber" />Восстановить опрос: <b>{buckets.toRestore}</b></span>
+                    <span className="poll-rec-foot-item"><span className="rec-dot rec-v-gray" />Заполнить: <b>{buckets.toFill}</b></span>
+                    <span className="poll-rec-foot-item"><span className="rec-dot rec-v-green" />В порядке: <b>{buckets.ok}</b></span>
                   </div>
                 )}
                 {tpDataAvailable && (

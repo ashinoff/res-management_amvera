@@ -7458,16 +7458,21 @@ tr.selected:hover,
 .status-legend.is-muted { opacity: .45; }
 .poll-res { margin-bottom: 18px; }
 .poll-res-title { font-size: 16px; font-weight: 700; margin: 14px 0 8px; color: var(--navy); }
-.poll-grid { display: grid; grid-template-columns: minmax(160px, 1fr) 90px 90px 90px; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.poll-grid { display: grid; grid-template-columns: minmax(160px, 1fr) 90px 90px 90px; align-items: start; gap: 8px; padding: 8px 6px; border-bottom: 1px solid var(--border); }
 .tp-card .poll-grid:last-child { border-bottom: none; }
-.poll-vl-name { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.poll-vl-name { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-top: 3px; }
 .poll-vl-name.muted { font-weight: 600; color: var(--text); }
+/* Обособленный заголовок ТП: лёгкая подложка + акцентный цвет названия */
+.poll-tp-head { align-items: center; background: var(--surface-2); border-radius: 8px 8px 0 0; border-bottom: 1px solid var(--border); padding-top: 6px; padding-bottom: 6px; }
+.poll-tp-name { font-size: 14.5px; font-weight: 700; color: var(--navy); letter-spacing: .2px; padding-top: 0; }
 /* Строка секции шин (тех.учёт) в дереве карты опроса */
 .poll-section-line { background: var(--surface-2); border-radius: 6px; }
-.poll-section-line .section-line-name { font-weight: 600; color: var(--navy); }
-.poll-grid .pu-cell { position: relative; }
+.poll-section-line .section-line-name { font-weight: 600; color: var(--navy); padding-top: 3px; }
 .poll-grid .status-box { position: relative; }
-.spodes-badge { position: absolute; top: -6px; right: -6px; background: var(--navy); color: #fff; font-size: 8px; font-weight: 700; width: 14px; height: 14px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+/* Ячейка ПУ в карте опроса: квадрат сверху + номер + ВСЕГДА зона бейджа
+   фиксированной высоты, чтобы квадраты ряда стояли на одной линии. */
+.poll-pu-cell { min-height: 0; justify-content: flex-start; gap: 4px; overflow: visible; }
+.pu-badge-zone { height: 16px; display: flex; align-items: center; justify-content: center; overflow: visible; }
 .poll-orphans { margin-top: 18px; }
 .poll-orphans-toggle { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text); padding: 6px 0; }
 .poll-orphans-toggle .ico { width: 16px; height: 16px; }
@@ -7489,21 +7494,31 @@ tr.selected:hover,
 .poll-vl-mini .mini-amber { color: var(--amber); }
 .poll-vl-mini .mini-red { color: var(--red); }
 
-/* Модалка рекомендаций */
-.poll-rec-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.poll-rec-table th, .poll-rec-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-.poll-rec-table th { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+/* Модалка рекомендаций — просторная, «дышащая» (как остальные модалки) */
+.modal-shell.poll-rec-modal { max-width: 760px; width: min(760px, 96vw); }
+.poll-rec { padding: 20px 22px 22px; }
+.poll-rec-tablewrap { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow-sm); }
+.poll-rec-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
+.poll-rec-table th, .poll-rec-table td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.poll-rec-table thead th { background: var(--surface-2); font-size: 11.5px; letter-spacing: .4px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
+.poll-rec-table tbody tr { transition: background .12s; }
+.poll-rec-table tbody tr:hover { background: var(--surface-2); }
+.poll-rec-table tbody tr:last-child td { border-bottom: none; }
+.poll-rec-table td:first-child { color: var(--text-muted); white-space: nowrap; }
+.poll-rec-pu { font-weight: 700; color: var(--text); }
 .rec-status { font-weight: 600; }
 .rec-st-collected { color: var(--green); }
 .rec-st-not_collected { color: var(--amber); }
 .rec-st-absent { color: var(--red); }
 .rec-st-no_pu, .rec-st-no_data { color: var(--text-faint); }
-.rec-verdict { display: inline-block; font-size: 12.5px; }
+.rec-verdict { display: inline-block; font-size: 12.5px; line-height: 1.5; }
 .rec-v-red { color: var(--red); font-weight: 600; }
 .rec-v-amber { color: var(--amber); font-weight: 600; }
 .rec-v-gray { color: var(--text-faint); }
 .rec-v-green { color: var(--green); }
-.poll-rec-footer { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text); }
+.poll-rec-footer { margin-top: 16px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); font-size: 13px; color: var(--text); display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.poll-rec-foot-item { display: inline-flex; align-items: center; }
+.rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: currentColor; vertical-align: middle; }
 .spodes-badge-inline { display: inline-block; margin-left: 6px; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: var(--navy); color: #fff; vertical-align: middle; }
 
 /* Явный бейдж СПОДЭС: насыщенный синий + двухслойное СТАТИЧНОЕ неоновое свечение
