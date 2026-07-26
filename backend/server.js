@@ -5325,6 +5325,47 @@ async function handleFileProxy(req, res) {
 app.get('/api/download/:public_id', handleFileProxy); // legacy — не удалять
 app.get('/api/f/:public_id', handleFileProxy);        // новый (обход блокировщиков)
 
+// Диагностика: проверяем существование ресурса во ВСЕХ комбинациях Cloudinary —
+// resource_type(image|raw) × type(upload|authenticated) × public_id(как есть|без
+// расширения). Возвращаем матрицу: где нашёлся (bytes/format/created_at), где 404.
+async function cloudinaryProbe(publicId) {
+  const withoutExt = publicId.replace(/\.[^/.]+$/, '');
+  const ext = (publicId.match(/\.([^/.]+)$/) || [])[1] || null;
+  const idVariants = [{ label: 'as-is', id: publicId }];
+  if (withoutExt !== publicId) idVariants.push({ label: 'no-ext', id: withoutExt });
+  const results = [];
+  let found = null;
+  for (const rtype of ['image', 'raw']) {
+    for (const type of ['upload', 'authenticated']) {
+      for (const v of idVariants) {
+        const combo = { resource_type: rtype, type, idVariant: v.label, publicId: v.id };
+        try {
+          const r = await cloudinary.api.resource(v.id, { resource_type: rtype, type });
+          const ok = { ...combo, ok: true, bytes: r.bytes, format: r.format, created_at: r.created_at };
+          results.push(ok);
+          if (!found) found = ok;
+        } catch (e) {
+          results.push({ ...combo, ok: false, http: (e && (e.error?.http_code || e.http_code)) || null });
+        }
+      }
+    }
+  }
+  return { publicId, ext, found, results };
+}
+
+app.get('/api/admin/files/diag/:token', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const publicId = resolvePublicId(req.params.token);
+    if (!publicId || !publicId.startsWith('res-management/')) {
+      return res.status(400).json({ error: 'Некорректный идентификатор файла' });
+    }
+    res.json(await cloudinaryProbe(publicId));
+  } catch (error) {
+    console.error('files diag error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // =====================================================
 // ОЧИСТКА ИСТОРИИ ДО ДАТЫ (admin). Удаляются истории/уведомления/файлы СТАРШЕ
 // даты. НИКОГДА не трогаются: NetworkStructure, PuStatus, TpSection,

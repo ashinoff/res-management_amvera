@@ -349,6 +349,16 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — Файловый прокси, коммит 2: диагностика. Backend
+  `GET /api/admin/files/diag/:token` (admin, token — base64url/сырой через
+  `resolvePublicId`): `cloudinaryProbe` проверяет ресурс во ВСЕХ комбинациях
+  resource_type(image|raw) × type(upload|authenticated) × public_id(как есть|без
+  расширения) → JSON `{publicId, ext, found:{resource_type,type,idVariant,bytes,
+  format,created_at}|null, results:[…]}`. Frontend «Управление файлами»: кнопка
+  «Диагностика» (IconSearch) у каждого файла → модалка с найденной комбинацией и
+  матрицей результатов (OK/HTTP-код). CSS `.diag-table`. node --check / npm run
+  build — ОК. **TODO (после деплоя):** прогнать 2-3 проблемных файла диагностикой,
+  записать сюда рабочую комбинацию/отсутствие — это первопричина 404.
 - **2026-07-26** — Файловый прокси, коммит 1: base64url-ссылки + защита. Проблема:
   блокировщики матчились на 'attachment_' внутри public_id, видимого в
   `/api/f/res-management%2Fattachment_…`. Backend: `resolvePublicId(raw)` —

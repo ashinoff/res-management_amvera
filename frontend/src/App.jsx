@@ -4183,10 +4183,24 @@ function FileManagement() {
   // НОВОЕ: Фильтры
   const [searchTp, setSearchTp] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  
+  // Диагностика файла в Cloudinary
+  const [diag, setDiag] = useState(null);        // { file, data|null }
+  const [diagLoading, setDiagLoading] = useState(false);
+
   useEffect(() => {
     loadFiles();
   }, []);
+
+  const runDiag = async (file) => {
+    setDiag({ file, data: null }); setDiagLoading(true);
+    try {
+      const token = toBase64Url(file.public_id || file.filename);
+      const { data } = await api.get(`/api/admin/files/diag/${token}`);
+      setDiag({ file, data });
+    } catch (e) {
+      setDiag({ file, data: { error: e.response?.data?.error || e.message } });
+    } finally { setDiagLoading(false); }
+  };
   
   const loadFiles = async () => {
     try {
@@ -4370,7 +4384,14 @@ function FileManagement() {
                   >
                     <IconEye className="ico" />
                   </a>
-                  <button 
+                  <button
+                    onClick={() => runDiag(file)}
+                    className="btn-icon"
+                    title="Диагностика файла в хранилище"
+                  >
+                    <IconSearch className="ico" />
+                  </button>
+                  <button
                     onClick={() => {
                       setSelectedFile(file);
                       setShowDeleteModal(true);
@@ -4386,7 +4407,54 @@ function FileManagement() {
           })}
         </div>
       )}
-      
+
+      {/* Диагностика файла: матрица комбинаций Cloudinary */}
+      {diag && (
+        <div className="modal-backdrop" onClick={() => setDiag(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Диагностика файла</h3>
+              <button className="close-btn" onClick={() => setDiag(null)}><IconX className="ico" /></button>
+            </div>
+            <div className="modal-body">
+              <p className="file-name">{diag.file.original_name}</p>
+              <p className="muted" style={{ fontSize: 12, wordBreak: 'break-all', marginBottom: 12 }}>{diag.file.public_id}</p>
+              {diagLoading ? (
+                <div className="loading"><RossetiLoader /></div>
+              ) : diag.data?.error ? (
+                <p style={{ color: 'var(--red)' }}>{diag.data.error}</p>
+              ) : diag.data ? (
+                <>
+                  <p style={{ marginBottom: 10 }}>
+                    {diag.data.found ? (
+                      <span style={{ color: 'var(--green)', fontWeight: 700 }}>
+                        Найден: {diag.data.found.resource_type}/{diag.data.found.type} ({diag.data.found.idVariant}) · {diag.data.found.bytes} байт · {diag.data.found.format || '—'}
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--red)', fontWeight: 700 }}>Файл не найден ни в одной комбинации — утерян в хранилище</span>
+                    )}
+                  </p>
+                  <table className="diag-table">
+                    <thead><tr><th>resource_type</th><th>type</th><th>public_id</th><th>Результат</th></tr></thead>
+                    <tbody>
+                      {diag.data.results.map((r, i) => (
+                        <tr key={i}>
+                          <td>{r.resource_type}</td><td>{r.type}</td><td>{r.idVariant}</td>
+                          <td>{r.ok ? <span style={{ color: 'var(--green)', fontWeight: 700 }}>OK</span> : <span style={{ color: 'var(--red)' }}>{r.http || 404}</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              ) : null}
+            </div>
+            <div className="modal-footer">
+              <button className="action-btn" onClick={() => setDiag(null)}>Закрыть</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Модальное окно удаления */}
       {showDeleteModal && (
         <div className="modal-backdrop" onClick={() => setShowDeleteModal(false)}>

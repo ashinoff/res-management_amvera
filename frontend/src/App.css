@@ -7251,3 +7251,8 @@ tr.selected:hover,
   padding: 0;
   overflow: visible;
 }
+
+/* Таблица диагностики файла (Управление файлами) */
+.diag-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.diag-table th, .diag-table td { padding: 6px 10px; border: 1px solid var(--border); text-align: center; }
+.diag-table th { background: var(--surface-2); font-weight: 600; }
