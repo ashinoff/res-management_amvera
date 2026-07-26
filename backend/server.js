@@ -1545,6 +1545,9 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
 
     const statusOf = (pu) => {
       if (!pu) return { status: 'no_pu', spodes: false };
+      // Срез не синхронизирован — структура видна, но данных опроса нет:
+      // нейтральный статус 'no_data' (не путать с 'absent' = есть срез, ПУ в нём нет).
+      if (noData) return { status: 'no_data', spodes: false };
       const m = map.get(normSerial(pu));
       if (!m) return { status: 'absent', spodes: false };
       return { status: m.isCollected ? 'collected' : 'not_collected', spodes: !!m.isSpodes };
@@ -1564,6 +1567,7 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
     const blank = () => ({ totalPu: 0, collected: 0, notCollected: 0, absent: 0, spodes: 0, noPu: 0 });
     const acc = (agg, cell) => {
       if (cell.status === 'no_pu') { agg.noPu++; return; }
+      if (cell.status === 'no_data') return;   // срез не синхронизирован — счётчики не трогаем
       agg.totalPu++;
       if (cell.status === 'collected') agg.collected++;
       else if (cell.status === 'not_collected') agg.notCollected++;
@@ -1578,9 +1582,12 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
       [r.poll.start, r.poll.middle, r.poll.end].forEach(c => { acc(agg, c); acc(total, c); });
     }
     const pct = (a) => a.totalPu > 0 ? Math.round((a.collected / a.totalPu) * 100) : 0;
-    const byRes = [...byResMap.values()].map(a => ({ ...a, coveragePct: pct(a) }))
+    // Без среза — сводка «прочерками» (null): структура РЭС видна, цифр опроса нет.
+    const dash = { totalPu: null, collected: null, notCollected: null, absent: null, spodes: null, noPu: null, coveragePct: null };
+    const byRes = [...byResMap.values()]
+      .map(a => noData ? { resId: a.resId, resName: a.resName, ...dash } : { ...a, coveragePct: pct(a) })
       .sort((x, y) => (x.resName || '').localeCompare(y.resName || '', 'ru'));
-    const summary = { byRes, total: { ...total, coveragePct: pct(total) } };
+    const summary = { byRes, total: noData ? { ...dash } : { ...total, coveragePct: pct(total) } };
 
     const orphanList = [];
     for (const m of meters) {

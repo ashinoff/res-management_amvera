@@ -8571,8 +8571,9 @@ function PollMap({ selectedRes }) {
 
   const pctCls = (p) => p >= 90 ? 'green' : p >= 70 ? 'amber' : 'red';
   const boxCls = (st) => st === 'collected' ? 'status-ok' : st === 'not_collected' ? 'status-pending'
-    : st === 'absent' ? 'status-error' : 'status-empty';
+    : st === 'absent' ? 'status-error' : st === 'no_data' ? 'status-nodata' : 'status-empty';
   const fmtDate = (d) => d ? new Date(d).toLocaleString('ru-RU') : '—';
+  const fmtN = (v) => v == null ? '—' : v;   // прочерк, когда среза нет (noData)
 
   const rows = data?.rows || [];
   const filtered = rows.filter(r => {
@@ -8591,7 +8592,7 @@ function PollMap({ selectedRes }) {
   });
 
   const puCell = (pu, cell) => (
-    <div className="pu-cell" title={pu || 'ПУ не задан'}>
+    <div className="pu-cell" title={cell.status === 'no_data' ? 'Нет данных среза' : (pu || 'ПУ не задан')}>
       <div className={`status-box ${boxCls(cell.status)}`}>{cell.status === 'no_pu' ? 'X' : ''}
         {cell.spodes && (cell.status === 'collected' || cell.status === 'not_collected') && <span className="spodes-badge">С</span>}
       </div>
@@ -8601,7 +8602,7 @@ function PollMap({ selectedRes }) {
 
   const exportExcel = () => {
     if (!data || !rows.length) { alert('Нет данных для экспорта'); return; }
-    const stRu = (s) => s === 'collected' ? 'Собирается' : s === 'not_collected' ? 'Не собирается' : s === 'absent' ? 'Отсутствует' : 'ПУ не задан';
+    const stRu = (s) => s === 'collected' ? 'Собирается' : s === 'not_collected' ? 'Не собирается' : s === 'absent' ? 'Отсутствует' : s === 'no_data' ? 'Нет данных' : 'ПУ не задан';
     const mapRows = [];
     rows.forEach(r => {
       [['Начало', r.startPu, r.poll.start], ['Середина', r.middlePu, r.poll.middle], ['Конец', r.endPu, r.poll.end]].forEach(([pos, pu, c]) => {
@@ -8616,7 +8617,7 @@ function PollMap({ selectedRes }) {
     const orphRows = (data.orphans?.list || []).map(o => ({ '№ ПУ': o.serial, 'СПОДЭС': o.isSpodes ? 'да' : '', 'Собирается': o.isCollected ? 'да' : '' }));
 
     const wb = XLSX.utils.book_new();
-    const statusColor = (v) => v === 'Собирается' ? XLS_COLORS.green : v === 'Не собирается' ? XLS_COLORS.amber : v === 'Отсутствует' ? XLS_COLORS.red : XLS_COLORS.gray;
+    const statusColor = (v) => v === 'Собирается' ? XLS_COLORS.green : v === 'Не собирается' ? XLS_COLORS.amber : v === 'Отсутствует' ? XLS_COLORS.red : XLS_COLORS.gray; // 'Нет данных'/'ПУ не задан' → серый
     const ws1 = XLSX.utils.json_to_sheet(mapRows);
     ws1['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 8 }];
     styleExportSheet(ws1, { 'Статус': statusColor });
@@ -8672,13 +8673,21 @@ function PollMap({ selectedRes }) {
 
       {loading ? (
         <div className="loading"><RossetiLoader /></div>
-      ) : data?.noData ? (
-        <div className="no-data" style={{ padding: 24, textAlign: 'center' }}>
-          <span className="svg-frame" style={{ marginBottom: 8 }}><IconMapPin size={24} /></span>
-          <p>Нет данных среза. {canSync ? 'Выполните синхронизацию.' : 'Дождитесь синхронизации администратором.'}</p>
-        </div>
       ) : (
         <>
+          {/* Срез не синхронизирован — структура всё равно видна, данные опроса «прочерками» */}
+          {data?.noData && (
+            <div className="poll-notice warn poll-nosync">
+              <div className="poll-notice-main">
+                <IconAlertTriangle className="ico" /> Срез не синхронизирован — показана структура сети без данных опроса.
+              </div>
+              {canSync
+                ? <button className="pm-btn pm-btn--refresh poll-nosync-btn" onClick={sync} disabled={syncing}>
+                    <IconRefresh className="ico" /> {syncing ? 'Синхронизация...' : 'Синхронизировать'}
+                  </button>
+                : <div className="poll-notice-tech">Дождитесь синхронизации администратором.</div>}
+            </div>
+          )}
           {/* Сводка покрытия */}
           <div className="pm-table-wrap" style={{ marginBottom: 18 }}>
             <table className="pm-matrix">
@@ -8689,17 +8698,17 @@ function PollMap({ selectedRes }) {
                 {(data.summary?.byRes || []).map(a => (
                   <tr key={a.resId}>
                     <td className="pm-sticky"><strong>{a.resName}</strong></td>
-                    <td>{a.totalPu}</td><td>{a.collected}</td><td>{a.notCollected}</td>
-                    <td>{a.absent}</td><td>{a.spodes}</td><td>{a.noPu}</td>
-                    <td className={`pm-${pctCls(a.coveragePct)}`}><strong>{a.coveragePct}%</strong></td>
+                    <td>{fmtN(a.totalPu)}</td><td>{fmtN(a.collected)}</td><td>{fmtN(a.notCollected)}</td>
+                    <td>{fmtN(a.absent)}</td><td>{fmtN(a.spodes)}</td><td>{fmtN(a.noPu)}</td>
+                    <td className={a.coveragePct == null ? '' : `pm-${pctCls(a.coveragePct)}`}><strong>{a.coveragePct == null ? '—' : `${a.coveragePct}%`}</strong></td>
                   </tr>
                 ))}
                 {data.summary?.total && (
                   <tr className="poll-total-row">
                     <td className="pm-sticky"><strong>ИТОГО</strong></td>
-                    <td>{data.summary.total.totalPu}</td><td>{data.summary.total.collected}</td><td>{data.summary.total.notCollected}</td>
-                    <td>{data.summary.total.absent}</td><td>{data.summary.total.spodes}</td><td>{data.summary.total.noPu}</td>
-                    <td className={`pm-${pctCls(data.summary.total.coveragePct)}`}><strong>{data.summary.total.coveragePct}%</strong></td>
+                    <td>{fmtN(data.summary.total.totalPu)}</td><td>{fmtN(data.summary.total.collected)}</td><td>{fmtN(data.summary.total.notCollected)}</td>
+                    <td>{fmtN(data.summary.total.absent)}</td><td>{fmtN(data.summary.total.spodes)}</td><td>{fmtN(data.summary.total.noPu)}</td>
+                    <td className={data.summary.total.coveragePct == null ? '' : `pm-${pctCls(data.summary.total.coveragePct)}`}><strong>{data.summary.total.coveragePct == null ? '—' : `${data.summary.total.coveragePct}%`}</strong></td>
                   </tr>
                 )}
               </tbody>
@@ -8707,7 +8716,7 @@ function PollMap({ selectedRes }) {
           </div>
 
           {/* Легенда-фильтры */}
-          <div className={`status-legend ${legendCollapsed ? 'is-collapsed' : ''}`}>
+          <div className={`status-legend ${legendCollapsed ? 'is-collapsed' : ''} ${data?.noData ? 'is-muted' : ''}`}>
             {[['collected', 'status-ok', 'Собирается'], ['not_collected', 'status-pending', 'В опросе, не собирается'], ['absent', 'status-error', 'В опросе отсутствует'], ['no_pu', 'status-empty', 'ПУ не задан']].map(([k, cls, lbl]) => (
               <div key={k} className={`legend-item ${statusFilter === k ? 'active' : ''}`} onClick={() => setStatusFilter(statusFilter === k ? null : k)}>
                 <span className={`status-box ${cls}`}>{k === 'no_pu' ? 'X' : ''}</span> {lbl}
