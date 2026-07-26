@@ -7329,3 +7329,9 @@ tr.selected:hover,
 /* Развёрнутая модалка выше дока */
 .modal-backdrop { z-index: 1500; }
 .modal-backdrop--confirm { z-index: 1600; } /* confirm поверх активной модалки */
+
+/* Модалка редактирования ПУ (структура сети): старый / новый номер */
+.pu-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }
+.pu-edit-grid .form-group { margin: 0; }
+.pu-edit-old { background: var(--surface-2); color: var(--text-muted); cursor: default; }
+@media (max-width: 560px) { .pu-edit-grid { grid-template-columns: 1fr; } }

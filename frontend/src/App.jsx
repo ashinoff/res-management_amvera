@@ -539,8 +539,8 @@ function NetworkStructure({ onSectionChange } = {}) {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [statusFilter, setStatusFilter] = useState(null);
   
-  // Для редактирования
-  const [editingCell, setEditingCell] = useState(null);
+  // Для редактирования ПУ (mac-модалка: { item, position, oldValue })
+  const [puEdit, setPuEdit] = useState(null);
   const [editValue, setEditValue] = useState('');
   
   // Для выбора и удаления
@@ -777,43 +777,41 @@ function NetworkStructure({ onSectionChange } = {}) {
       
       
   
-  // Начать редактирование
+  // Начать редактирование — открываем mac-модалку (старый ПУ / новый ПУ).
   const startEdit = (item, position) => {
     if (user.role !== 'admin') return;
-    
-    setEditingCell(`${item.id}-${position}`);
-    const currentValue = position === 'start' ? item.startPu : 
-                        position === 'middle' ? item.middlePu : 
+    const currentValue = position === 'start' ? item.startPu :
+                        position === 'middle' ? item.middlePu :
                         item.endPu;
+    setPuEdit({ item, position, oldValue: currentValue || '' });
     setEditValue(currentValue || '');
   };
-  
-  // Сохранить изменения
-  const saveEdit = async (item) => {
+
+  // Сохранить изменения ПУ из модалки
+  const saveEdit = async () => {
+    if (!puEdit) return;
+    const { item, position } = puEdit;
     try {
       const updateData = {
         startPu: item.startPu,
         middlePu: item.middlePu,
         endPu: item.endPu
       };
-      
-      const position = editingCell.split('-')[1];
       if (position === 'start') updateData.startPu = editValue || null;
       if (position === 'middle') updateData.middlePu = editValue || null;
       if (position === 'end') updateData.endPu = editValue || null;
-      
+
       await api.put(`/api/network/structure/${item.id}`, updateData);
-      
       await loadNetworkStructure();
-      setEditingCell(null);
+      setPuEdit(null);
       setEditValue('');
     } catch (error) {
       alert('Ошибка при сохранении');
     }
   };
-  
+
   const cancelEdit = () => {
-    setEditingCell(null);
+    setPuEdit(null);
     setEditValue('');
   };
   
@@ -936,30 +934,10 @@ const executeClearHistory = async () => {
 
   
   const renderPuCell = (item, position) => {
-    const puNumber = position === 'start' ? item.startPu : 
-                     position === 'middle' ? item.middlePu : 
+    const puNumber = position === 'start' ? item.startPu :
+                     position === 'middle' ? item.middlePu :
                      item.endPu;
-    const isEditing = editingCell === `${item.id}-${position}`;
-    
-    if (isEditing) {
-      return (
-        <div className="edit-cell">
-          <input
-            type="text"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onKeyPress={(e) => {
-              if (e.key === 'Enter') saveEdit(item);
-              if (e.key === 'Escape') cancelEdit();
-            }}
-            autoFocus
-          />
-          <button onClick={() => saveEdit(item)} className="save-btn"><IconCheck className="ico" style={{color:'var(--green)'}} /></button>
-          <button onClick={cancelEdit} className="cancel-btn"><IconX className="ico" /></button>
-        </div>
-      );
-    }
-    
+
     // Всегда рендерим ровно один квадрат + строку номера фиксированной высоты,
     // чтобы во всех строках было ровно 3 квадрата в идеальных вертикальных колонках.
     return (
@@ -1513,6 +1491,41 @@ const executeClearHistory = async () => {
               <button className="cancel-btn" onClick={() => setSectionModal(null)}>Отмена</button>
               <button className="confirm-btn" onClick={saveSection}
                 disabled={sectionForm.sectionNumber === ''}>Сохранить</button>
+            </div>
+        </ModalShell>
+      )}
+
+      {puEdit && (
+        <ModalShell
+          title="Редактирование ПУ"
+          dockTitle={`ПУ · ${puEdit.item.tpName}`}
+          icon={<IconEdit size={16} />}
+          className="pu-edit-modal"
+          onClose={cancelEdit}
+        >
+            <div className="modal-body">
+              <div className="modal-info">
+                <p><strong>ТП:</strong> {puEdit.item.tpName} · <strong>ВЛ:</strong> {puEdit.item.vlName}</p>
+                <p><strong>Позиция:</strong> {puEdit.position === 'start' ? 'Начало' : puEdit.position === 'middle' ? 'Середина' : 'Конец'}</p>
+              </div>
+              <div className="pu-edit-grid">
+                <div className="form-group">
+                  <label>Старый номер ПУ</label>
+                  <input type="text" value={puEdit.oldValue || '—'} readOnly className="pu-edit-old" />
+                </div>
+                <div className="form-group">
+                  <label>Новый номер ПУ</label>
+                  <input type="text" value={editValue} autoFocus
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); }}
+                    placeholder="Пусто — убрать ПУ из позиции" />
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="cancel-btn" onClick={cancelEdit}>Отмена</button>
+              <button className="confirm-btn" onClick={saveEdit}
+                disabled={editValue === (puEdit.oldValue || '')}>Сохранить</button>
             </div>
         </ModalShell>
       )}
