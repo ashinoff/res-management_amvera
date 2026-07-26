@@ -590,12 +590,51 @@ body {
   border-radius: 12px 12px 0 0; /* Скругление только сверху */
   box-shadow: var(--shadow-sm);
   margin-bottom: 0;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  
+  /* БЕЗ sticky/fixed — иначе между шапкой и полосой при скролле оставалась щель.
+     Полоса в потоке; при скролле за порог плавно растворяется, появляются кружки. */
   height: 70px;
   box-sizing: border-box;
+  transition: opacity .25s ease, transform .25s ease; /* крупный переход — осознанное исключение из .12s */
+}
+.status-legend.is-collapsed { opacity: 0; transform: translateY(-8px); pointer-events: none; }
+
+/* Компактные кружки-фильтры (появляются при свёрнутой полосе). fixed в правом
+   верхнем углу контента; ниже модалок (1500) и дока (1400). */
+.legend-dots {
+  position: fixed;
+  top: 84px;            /* ниже шапки приложения */
+  right: 22px;          /* отступ от правого края / скроллбара */
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity .25s ease, transform .25s ease;
+}
+.legend-dots.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.legend-dot {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: none; padding: 0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-faint); font-size: 12px; font-weight: 700; line-height: 1;
+  opacity: .5;
+  box-shadow: 0 0 0 2px transparent;
+  transition: opacity .12s ease, box-shadow .12s ease;
+}
+.legend-dot:hover { opacity: .85; }
+.legend-dot.active { opacity: 1; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px currentColor; }
+.legend-dot.is-indicator { cursor: default; opacity: .5; }
+.legend-dot.is-indicator:hover { opacity: .5; }
+@media (max-width: 640px) {
+  .legend-dots { top: 72px; right: 10px; gap: 8px; padding: 6px; }
+  .legend-dot { width: 18px; height: 18px; font-size: 11px; }
 }
 /* Каждый элемент легенды */
 .status-legend > div {
@@ -7335,3 +7374,8 @@ tr.selected:hover,
 .pu-edit-grid .form-group { margin: 0; }
 .pu-edit-old { background: var(--surface-2); color: var(--text-muted); cursor: default; }
 @media (max-width: 560px) { .pu-edit-grid { grid-template-columns: 1fr; } }
+
+/* Кольцо активного кружка — цвета статуса (currentColor = цвет X-текста, не фон) */
+.legend-dot.status-ok.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--green); }
+.legend-dot.status-error.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--red); }
+.legend-dot.status-pending.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--amber); }

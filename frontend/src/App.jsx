@@ -537,6 +537,7 @@ function NetworkStructure({ onSectionChange } = {}) {
   const [clearHistoryType, setClearHistoryType] = useState(''); // 'pu', 'tp', 'all'
   const [clearHistoryPu, setClearHistoryPu] = useState('');
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [legendCollapsed, setLegendCollapsed] = useState(false); // полоса фильтров → кружки при скролле
   const [statusFilter, setStatusFilter] = useState(null);
   
   // Для редактирования ПУ (mac-модалка: { item, position, oldValue })
@@ -697,17 +698,29 @@ function NetworkStructure({ onSectionChange } = {}) {
 
   useEffect(() => {
     // .content может ещё не быть в DOM на момент маунта — ждём через rAF,
-    // иначе слушатель не привяжется и кнопка «наверх» не появится.
+    // иначе слушатель не привяжется. Здесь же — сворачивание полосы фильтров в кружки.
     let contentElement = null;
     let rafId = null;
+    let ticking = false;
+    const COLLAPSE_AT = 130; // ≈ высота полосы + запас
+    const EXPAND_AT = 80;    // гистерезис ~50px — на границе не мигает
+    const evaluate = () => {
+      ticking = false;
+      if (!contentElement) return;
+      const top = contentElement.scrollTop;
+      setShowScrollTop(top > 300);
+      // Меняем состояние ТОЛЬКО при пересечении порога (функц. апдейт — React
+      // бэйлит при том же значении → без ре-рендеров на каждый пиксель).
+      setLegendCollapsed(prev => (!prev && top > COLLAPSE_AT) ? true : (prev && top < EXPAND_AT) ? false : prev);
+    };
     const handleScroll = () => {
-      if (contentElement) setShowScrollTop(contentElement.scrollTop > 300);
+      if (!ticking) { ticking = true; requestAnimationFrame(evaluate); }
     };
     const attach = () => {
       contentElement = document.querySelector('.content');
       if (contentElement) {
-        contentElement.addEventListener('scroll', handleScroll);
-        handleScroll();
+        contentElement.addEventListener('scroll', handleScroll, { passive: true });
+        evaluate();
       } else {
         rafId = requestAnimationFrame(attach);
       }
@@ -1183,20 +1196,20 @@ const executeClearHistory = async () => {
 
      
       
-      <div className="status-legend">
-  <div 
+      <div className={`status-legend ${legendCollapsed ? 'is-collapsed' : ''}`}>
+  <div
     className={`legend-item ${statusFilter === 'checked_ok' ? 'active' : ''}`}
     onClick={() => setStatusFilter(statusFilter === 'checked_ok' ? null : 'checked_ok')}
   >
     <span className="status-box status-ok"></span> Проверен без отклонений
   </div>
-  <div 
+  <div
     className={`legend-item ${statusFilter === 'checked_error' ? 'active' : ''}`}
     onClick={() => setStatusFilter(statusFilter === 'checked_error' ? null : 'checked_error')}
   >
     <span className="status-box status-error"></span> Проверен с отклонениями
   </div>
-  <div 
+  <div
     className={`legend-item ${statusFilter === 'pending_recheck' ? 'active' : ''}`}
     onClick={() => setStatusFilter(statusFilter === 'pending_recheck' ? null : 'pending_recheck')}
   >
@@ -1208,6 +1221,22 @@ const executeClearHistory = async () => {
   <div className="legend-item disabled">
     <span className="status-box status-empty">X</span> ПУ не задан
   </div>
+</div>
+
+{/* Компактные кружки-фильтры при скролле (тот же statusFilter — один источник правды).
+    Три кликабельных (как в полосе) + два индикатора (как disabled-строки полосы). */}
+<div className={`legend-dots ${legendCollapsed ? 'show' : ''}`} aria-hidden={!legendCollapsed}>
+  <button type="button" title="Проверен без отклонений"
+    className={`legend-dot status-ok ${statusFilter === 'checked_ok' ? 'active' : ''}`}
+    onClick={() => setStatusFilter(statusFilter === 'checked_ok' ? null : 'checked_ok')} />
+  <button type="button" title="Проверен с отклонениями"
+    className={`legend-dot status-error ${statusFilter === 'checked_error' ? 'active' : ''}`}
+    onClick={() => setStatusFilter(statusFilter === 'checked_error' ? null : 'checked_error')} />
+  <button type="button" title="Ожидает проверки"
+    className={`legend-dot status-pending ${statusFilter === 'pending_recheck' ? 'active' : ''}`}
+    onClick={() => setStatusFilter(statusFilter === 'pending_recheck' ? null : 'pending_recheck')} />
+  <span className="legend-dot status-unchecked is-indicator" title="Не проверен" />
+  <span className="legend-dot status-empty is-indicator" title="ПУ не задан">X</span>
 </div>
       
       <div className="structure-grouped">
