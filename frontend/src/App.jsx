@@ -18,13 +18,14 @@ import RossetiLoader from './RossetiLoader.jsx';
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Все файлы (фото/PDF из Cloudinary) показываем и скачиваем ТОЛЬКО через свой
-// бэкенд (/api/download) — прямые ссылки на res.cloudinary.com блокируются
-// браузерами (Яндекс.Браузер и др.). inline=true — открыть в браузере.
+// бэкенд (/api/f) — прямые ссылки на res.cloudinary.com блокируются браузерами,
+// а старый путь /api/download резали блокировщики рекламы (ERR_BLOCKED_BY_CLIENT).
+// inline=true — открыть в браузере.
 const fileProxyUrl = (file, inline = false) => {
   if (!file) return '';
   if (!file.public_id) return file.url; // старые записи без public_id — как было
   const q = `name=${encodeURIComponent(file.original_name || 'file')}${inline ? '&inline=1' : ''}`;
-  return `${API_URL}/api/download/${encodeURIComponent(file.public_id)}?${q}`;
+  return `${API_URL}/api/f/${encodeURIComponent(file.public_id)}?${q}`;
 };
 // Единый вход через платформу (SSO): origin платформы и признак встраивания в iframe.
 const PLATFORM_ORIGIN = import.meta.env.VITE_PLATFORM_ORIGIN || 'https://sue-system-ashinoff.amvera.io';
@@ -5570,7 +5571,7 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
                     Открыть в новой вкладке
                   </a>
                   <a 
-  href={`${API_URL}/api/download/${encodeURIComponent(currentFile.public_id)}?name=${encodeURIComponent(currentFile.original_name)}`}
+  href={`${API_URL}/api/f/${encodeURIComponent(currentFile.public_id)}?name=${encodeURIComponent(currentFile.original_name)}`}
   target="_blank"
   download={currentFile.original_name}
   className="btn-download-pdf"

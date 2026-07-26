@@ -130,7 +130,7 @@ const upload = multer({
 });
 
 // Функция загрузки в Cloudinary
-async function uploadToCloudinary(file, type = 'attachment') {
+async function uploadToCloudinary(file, type = 'doc') {
   const isPdf = file.mimetype === 'application/pdf';
   
   return new Promise((resolve, reject) => {
@@ -148,7 +148,10 @@ async function uploadToCloudinary(file, type = 'attachment') {
       .replace(/[^a-zA-Z0-9_-]/g, '_')
       .substring(0, 50);
     
-    const finalPublicId = `${type}_${timestamp}_${safeName}${ext}`;
+    // Нейтральный префикс public_id: слово-триггер "attachment_" режется
+    // блокировщиками рекламы. Старые public_id в БД не трогаем — они работают.
+    const prefix = (!type || type === 'attachment') ? 'doc' : type;
+    const finalPublicId = `${prefix}_${timestamp}_${safeName}${ext}`;
     
     const uploadOptions = {
       folder: 'res-management',
@@ -5094,7 +5097,11 @@ app.post('/api/admin/database-cleanup',
 // res.cloudinary.com (общий CDN-домен, его блокируют Яндекс.Браузер/фильтры) —
 // сервер сам скачивает файл и отдаёт его со своего домена.
 // ?inline=1 — показать в браузере (картинки/просмотр), без — скачать файлом.
-app.get('/api/download/:public_id', async (req, res) => {
+// Прокси файлов Cloudinary через свой бэкенд. ОДИН обработчик на два пути:
+// /api/download — старый (обратная совместимость, вдруг где-то сохранены ссылки),
+// /api/f — новый, т.к. слова "download"/"attachment_" в URL режут блокировщики
+// рекламы (ERR_BLOCKED_BY_CLIENT: Яндекс Protect, AdGuard, uBlock).
+async function handleFileProxy(req, res) {
   try {
     const publicId = decodeURIComponent(req.params.public_id);
     const originalName = req.query.name || 'file';
@@ -5136,7 +5143,9 @@ app.get('/api/download/:public_id', async (req, res) => {
       res.status(500).json({ error: 'Ошибка скачивания файла: ' + error.message });
     }
   }
-});
+}
+app.get('/api/download/:public_id', handleFileProxy); // legacy — не удалять
+app.get('/api/f/:public_id', handleFileProxy);        // новый (обход блокировщиков)
 
 // =====================================================
 // БЭКАП / ВОССТАНОВЛЕНИЕ (перенос данных Render → Amvera)
