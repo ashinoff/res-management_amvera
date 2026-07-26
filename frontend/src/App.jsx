@@ -8,6 +8,7 @@ import React, { useState, useEffect, createContext, useContext, useCallback, use
 import axios from 'axios';
 import './App.css';
 import * as XLSX from 'xlsx';
+import * as XLSXStyle from 'xlsx-js-style';
 import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo, IconMeter, IconUpload, IconSettings } from './icons.jsx';
 import RossetiLoader from './RossetiLoader.jsx';
 
@@ -27,6 +28,69 @@ const fileProxyUrl = (file, inline = false) => {
   const q = `name=${encodeURIComponent(file.original_name || 'file')}${inline ? '&inline=1' : ''}`;
   return `${API_URL}/api/f/${encodeURIComponent(file.public_id)}?${q}`;
 };
+// ── Оформление Excel-выгрузок (xlsx-js-style) ────────────────────────────────
+// Аккуратно, «как в качественном ПО»: тёмно-синяя шапка с белым жирным текстом,
+// тонкие светлые рамки, лёгкая зебра, цветной ТЕКСТ только у статусов/процентов.
+const XLS_HEADER_FILL = '25476A';   // сине-стальной, не кричащий
+const XLS_ZEBRA = 'F5F8FB';
+const XLS_BORDER = { style: 'thin', color: { rgb: 'D9DEE5' } };
+const XLS_ALL_BORDERS = { top: XLS_BORDER, bottom: XLS_BORDER, left: XLS_BORDER, right: XLS_BORDER };
+const XLS_COLORS = { red: 'B91C1C', green: '15803D', amber: 'B45309', gray: '6B7280' };
+const XLS_HEADER_STYLE = {
+  font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } },
+  fill: { fgColor: { rgb: XLS_HEADER_FILL } },
+  alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+  border: XLS_ALL_BORDERS
+};
+const xlsStatusColor = (val) => {
+  const v = String(val == null ? '' : val).trim();
+  if (v === 'Перегруз' || v === 'Ошибка') return XLS_COLORS.red;
+  if (v === 'Норма' || v === 'Проверен') return XLS_COLORS.green;
+  if (v === 'Ожидает перепроверки') return XLS_COLORS.amber;
+  if (v === 'Нет данных' || v === 'Не проверен' || v === 'Пусто' || v === '—') return XLS_COLORS.gray;
+  return null;
+};
+const xlsLoadColor = (val) => {
+  const n = Number(val);
+  if (!isFinite(n)) return XLS_COLORS.gray;
+  if (n > 100) return XLS_COLORS.red;
+  if (n >= 85) return XLS_COLORS.amber;
+  return XLS_COLORS.green;
+};
+// Применяет оформление ко всему листу. colorFns: имя колонки → (значение)→rgb|null
+// (цветной жирный текст ячейки). Плюс автофильтр и высота шапки.
+const styleExportSheet = (ws, colorFns = {}) => {
+  if (!ws['!ref']) return;
+  const range = XLSXStyle.utils.decode_range(ws['!ref']);
+  const headerName = {};
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    const cell = ws[XLSXStyle.utils.encode_cell({ r: range.s.r, c })];
+    if (cell) { cell.s = XLS_HEADER_STYLE; headerName[c] = String(cell.v); }
+  }
+  for (let r = range.s.r + 1; r <= range.e.r; r++) {
+    const zebra = (r - range.s.r) % 2 === 0;
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = ws[XLSXStyle.utils.encode_cell({ r, c })];
+      if (!cell) continue;
+      const st = {
+        font: { sz: 10.5, color: { rgb: '1F2937' } },
+        alignment: { vertical: 'center' },
+        border: XLS_ALL_BORDERS
+      };
+      if (zebra) st.fill = { fgColor: { rgb: XLS_ZEBRA } };
+      const fn = colorFns[headerName[c]];
+      if (fn) {
+        const col = fn(cell.v);
+        if (col) st.font = { sz: 10.5, bold: true, color: { rgb: col } };
+        st.alignment = { vertical: 'center', horizontal: 'center' };
+      }
+      cell.s = st;
+    }
+  }
+  ws['!autofilter'] = { ref: ws['!ref'] };
+  ws['!rows'] = [{ hpt: 22 }];
+};
+
 // Единый вход через платформу (SSO): origin платформы и признак встраивания в iframe.
 const PLATFORM_ORIGIN = import.meta.env.VITE_PLATFORM_ORIGIN || 'https://sue-system-ashinoff.amvera.io';
 const EMBEDDED = typeof window !== 'undefined' && window.self !== window.top;
@@ -850,9 +914,9 @@ const executeClearHistory = async () => {
       };
     });
 
-    // Создаем Excel файл
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(exportData);
+    // Создаем Excel файл (xlsx-js-style — со стилями ячеек)
+    const wb = XLSXStyle.utils.book_new();
+    const ws = XLSXStyle.utils.json_to_sheet(exportData);
 
     // Устанавливаем ширину колонок
     ws['!cols'] = [
@@ -871,7 +935,13 @@ const executeClearHistory = async () => {
       { wch: 20 }  // Последнее обновление
     ];
 
-    XLSX.utils.book_append_sheet(wb, ws, 'Структура');
+    styleExportSheet(ws, {
+      'Статус секции': xlsStatusColor,
+      'Статус начала': xlsStatusColor,
+      'Статус середины': xlsStatusColor,
+      'Статус конца': xlsStatusColor
+    });
+    XLSXStyle.utils.book_append_sheet(wb, ws, 'Структура');
 
     // Второй лист «Секции (техучёт)» — по секциям: привязка + техучёт + перегруз.
     const vlCountBySection = filteredData.reduce((acc, i) => {
@@ -899,16 +969,17 @@ const executeClearHistory = async () => {
         };
       });
     if (sectionsData.length > 0) {
-      const wsSec = XLSX.utils.json_to_sheet(sectionsData);
+      const wsSec = XLSXStyle.utils.json_to_sheet(sectionsData);
       wsSec['!cols'] = [
         { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 18 }, { wch: 12 },
         { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }
       ];
-      XLSX.utils.book_append_sheet(wb, wsSec, 'Секции (техучёт)');
+      styleExportSheet(wsSec, { 'Статус': xlsStatusColor, 'Загрузка, %': xlsLoadColor });
+      XLSXStyle.utils.book_append_sheet(wb, wsSec, 'Секции (техучёт)');
     }
 
     const fileName = `Структура_сети_${selectedRes ? `РЭС_${selectedRes}_` : ''}${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+    XLSXStyle.writeFile(wb, fileName);
 
     alert(` экспортирована в файл: ${fileName}`);
   };
