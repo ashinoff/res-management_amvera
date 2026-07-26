@@ -349,6 +349,20 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — Аутентификация файлового прокси (коммит 1). `/api/f` и
+  `/api/download` были ОТКРЫТЫ — закрыты. Backend: `makeFileToken(user)` —
+  отдельный JWT `{id,role,resId,scope:'files'}` на 24ч; возвращается в
+  `/api/auth/login`, `/api/auth/platform`, `/api/auth/me` как `fileToken` (в URL
+  не светим сессионный JWT). Middleware `authenticateFileAccess` на обоих
+  прокси-роутах: принимает `Authorization: Bearer` ИЛИ `?t=<jwt>`, verify тем же
+  секретом (годится и сессионный, и scope 'files'); нет/протух → 401. diag-роут
+  (admin-only) не тронут. Frontend: `fileToken` сохраняется рядом с `token` при
+  login/platform/me и чистится везде, где чистится `token` (логаут, 401-интерсептор,
+  inactivity, EMBEDDED). `fileProxyUrl` добавляет `?t=<fileToken>` ко всем ссылкам
+  (t в query, в JSON-токен не вшит — ссылки протухают с сессией); просмотр через
+  axios не менялся (Authorization уже уходит). Ранее разосланные прямые ссылки
+  без входа перестанут открываться — это цель фикса. Осн. JS-чанк ДО дедупа
+  SheetJS: **1 475.82 kB** (gzip 585.91). node --check / npm run build — ОК.
 - **2026-07-26** — PDF-предпросмотр без фрейма: pdf.js в `<canvas>`. Причина: во
   iframe Платформы Яндекс Protect режет ЛЮБУЮ навигацию вложенных фреймов, включая
   `<iframe src=blob:>` (ERR_BLOCKED_BY_CLIENT). Зависимость `pdfjs-dist@4.10.38`,

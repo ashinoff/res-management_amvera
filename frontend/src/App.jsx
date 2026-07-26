@@ -36,7 +36,10 @@ const fileProxyUrl = (file, inline = false) => {
   if (!file) return '';
   if (!file.public_id) return file.url; // старые записи без public_id — как было
   const token = toBase64Url(JSON.stringify({ p: file.public_id, n: file.original_name || 'file', i: inline ? 1 : 0 }));
-  return `${API_URL}/api/f/${token}`;
+  // Файловый токен в query (?t=): нужен для скачивания обычными <a>-ссылками (у них
+  // нет Authorization). В сам JSON-токен НЕ вшиваем — так ссылки протухают с сессией.
+  const ft = localStorage.getItem('fileToken');
+  return `${API_URL}/api/f/${token}${ft ? `?t=${encodeURIComponent(ft)}` : ''}`;
 };
 // ── Оформление Excel-выгрузок (xlsx-js-style) ────────────────────────────────
 // Аккуратно, «как в качественном ПО»: тёмно-синяя шапка с белым жирным текстом,
@@ -137,6 +140,7 @@ api.interceptors.response.use(
   error => {
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
+      localStorage.removeItem('fileToken');
       // В iframe платформы не редиректим на логин (иначе перезагрузка окна на 401).
       if (!EMBEDDED) window.location.href = '/';
     }
@@ -181,6 +185,7 @@ function LoginForm({ onLogin }) {
     try {
       const response = await api.post('/api/auth/login', credentials);
       localStorage.setItem('token', response.data.token);
+      if (response.data.fileToken) localStorage.setItem('fileToken', response.data.fileToken);
       onLogin(response.data.user);
     } catch (err) {
       setError(err.response?.data?.error || 'Ошибка входа');
@@ -8350,12 +8355,14 @@ export default function App() {
     // свежий токен платформы (иначе мигнёт предыдущий пользователь).
     if (EMBEDDED) {
       localStorage.removeItem('token');
+      localStorage.removeItem('fileToken');
       return;
     }
     const token = localStorage.getItem('token');
     if (token) {
       api.get('/api/auth/me')
         .then(response => {
+          if (response.data.fileToken) localStorage.setItem('fileToken', response.data.fileToken);
           setUser(response.data.user);
           setSelectedRes(response.data.user.resId);
         })
@@ -8370,6 +8377,7 @@ export default function App() {
             setSelectedRes(payload.resId);
           } catch (error) {
             localStorage.removeItem('token');
+            localStorage.removeItem('fileToken');
           }
         });
     }
@@ -8389,10 +8397,12 @@ export default function App() {
         if (!resp.ok) throw new Error('sso failed');
         const data = await resp.json();
         localStorage.setItem('token', data.token);
+        if (data.fileToken) localStorage.setItem('fileToken', data.fileToken);
         setUser(data.user);
         if (data.user?.resId) setSelectedRes(data.user.resId);
       } catch {
         localStorage.removeItem('token');
+        localStorage.removeItem('fileToken');
         setUser(null); // упадём на обычную форму логина
       } finally {
         setSsoPending(false);
@@ -8455,6 +8465,7 @@ export default function App() {
     clearTimeout(inactivityTimer);
     inactivityTimer = setTimeout(() => {
       localStorage.removeItem('token');
+      localStorage.removeItem('fileToken');
       setUser(null);
       alert('Сессия истекла из-за неактивности. Пожалуйста, войдите снова.');
     }, INACTIVITY_TIME);
@@ -8480,6 +8491,7 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('fileToken');
     setUser(null);
     setSelectedRes(null);
   };

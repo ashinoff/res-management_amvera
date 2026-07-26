@@ -1011,6 +1011,31 @@ const checkRole = (roles) => {
   };
 };
 
+// Файловый скоуп-токен — отдельный от сессионного, кладётся в URL (?t=) для
+// скачивания вложений обычными <a>-ссылками. В URL не светим полноценный
+// сессионный JWT (URL попадают в историю/логи). Живёт 24ч, как и сессия.
+function makeFileToken(user) {
+  return jwt.sign(
+    { id: user.id, role: user.role, resId: user.resId, scope: 'files' },
+    JWT_SECRET,
+    { expiresIn: '24h' }
+  );
+}
+
+// Доступ к файловому прокси (/api/f, /api/download): принимаем ЛИБО
+// Authorization: Bearer (просмотр через axios), ЛИБО ?t=<jwt> (скачивание
+// ссылкой). Годится и обычный сессионный токен, и файловый scope 'files'.
+const authenticateFileAccess = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = (authHeader && authHeader.split(' ')[1]) || req.query.t;
+  if (!token) return res.status(401).json({ error: 'Access denied' });
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(401).json({ error: 'Invalid token' });
+    req.user = user;
+    next();
+  });
+};
+
 // Настройка multer для загрузки файлов с ограничением размера
 const storageExcel = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -1102,6 +1127,7 @@ app.post('/api/auth/login', async (req, res) => {
     
     res.json({
       token,
+      fileToken: makeFileToken(user),
       user: {
         id: user.id,
         fio: user.fio,
@@ -1168,6 +1194,7 @@ app.post('/api/auth/platform', async (req, res) => {
     );
     res.json({
       token: appToken,
+      fileToken: makeFileToken(user),
       user: {
         id: user.id,
         fio: user.fio,
@@ -1233,6 +1260,7 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     }
     
     res.json({
+      fileToken: makeFileToken(user),
       user: {
         id: user.id,
         fio: user.fio,
@@ -5390,8 +5418,8 @@ async function handleFileProxy(req, res) {
     }
   }
 }
-app.get('/api/download/:public_id', handleFileProxy); // legacy — не удалять
-app.get('/api/f/:public_id', handleFileProxy);        // новый (обход блокировщиков)
+app.get('/api/download/:public_id', authenticateFileAccess, handleFileProxy); // legacy — не удалять
+app.get('/api/f/:public_id', authenticateFileAccess, handleFileProxy);        // новый (обход блокировщиков)
 
 // Диагностика: проверяем существование ресурса во ВСЕХ комбинациях Cloudinary —
 // resource_type(image|raw) × type(upload|authenticated) × public_id(как есть|без
