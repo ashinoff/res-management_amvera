@@ -801,13 +801,26 @@ const executeClearHistory = async () => {
       return;
     }
 
-    // Подготавливаем данные
+    // Хелперы секций/техучёта (те же формулы, что и в UI).
+    const sectionsById = new Map(sections.map(s => [s.id, s]));
+    const resNameById = new Map(filteredData.map(i => [i.resId, i.ResUnit?.name]).filter(([, n]) => n));
+    const round1 = (v) => (v == null ? null : Math.round(Number(v) * 10) / 10);
+    const sectionLimit = (sec) => (sec && sec.tnKva != null)
+      ? sec.tnKva * (sec.cosPhi != null ? sec.cosPhi : 0.9) : null;
+    const sectionPct = (sec) => {
+      const lim = sectionLimit(sec);
+      return (lim && sec.lastPeakKw != null) ? (sec.lastPeakKw / lim) * 100 : null;
+    };
+    const statusRu = (sec) => sec?.overloadStatus === 'overload' ? 'Перегруз'
+      : sec?.overloadStatus === 'ok' ? 'Норма' : 'Нет данных';
+
+    // Подготавливаем данные (лист «Структура»)
     const exportData = filteredData.map(item => {
       // Находим статусы для каждого ПУ
       const getStatus = (puNumber, position) => {
         if (!puNumber) return 'Пусто';
         const status = item.PuStatuses?.find(s => s.puNumber === puNumber && s.position === position);
-        
+
         switch(status?.status) {
           case 'checked_ok': return 'Проверен';
           case 'checked_error': return 'Ошибка';
@@ -817,10 +830,15 @@ const executeClearHistory = async () => {
         }
       };
 
+      const sec = item.sectionId != null ? sectionsById.get(item.sectionId) : null;
+
       return {
         'РЭС': item.ResUnit?.name || '',
         'ТП': item.tpName || '',
         'ВЛ': item.vlName || '',
+        'Секция': sec ? `СШ-${toRoman(sec.sectionNumber)}` : '—',
+        '№ ПУ тех.учёта': sec?.techPuNumber || '—',
+        'Статус секции': sec ? statusRu(sec) : '—',
         'ПУ Начало': item.startPu || '-',
         'Статус начала': getStatus(item.startPu, 'start'),
         'ПУ Середина': item.middlePu || '-',
@@ -834,12 +852,15 @@ const executeClearHistory = async () => {
     // Создаем Excel файл
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(exportData);
-    
+
     // Устанавливаем ширину колонок
     ws['!cols'] = [
       { wch: 20 }, // РЭС
       { wch: 15 }, // ТП
       { wch: 15 }, // ВЛ
+      { wch: 10 }, // Секция
+      { wch: 18 }, // № ПУ тех.учёта
+      { wch: 14 }, // Статус секции
       { wch: 15 }, // ПУ Начало
       { wch: 20 }, // Статус начала
       { wch: 15 }, // ПУ Середина
@@ -848,12 +869,46 @@ const executeClearHistory = async () => {
       { wch: 20 }, // Статус конца
       { wch: 20 }  // Последнее обновление
     ];
-    
-    XLSX.utils.book_append_sheet(wb, ws, '');
-    
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Структура');
+
+    // Второй лист «Секции (техучёт)» — по секциям: привязка + техучёт + перегруз.
+    const vlCountBySection = filteredData.reduce((acc, i) => {
+      if (i.sectionId != null) acc[i.sectionId] = (acc[i.sectionId] || 0) + 1;
+      return acc;
+    }, {});
+    const sectionsData = sections
+      .slice()
+      .sort((a, b) => (a.tpName || '').localeCompare(b.tpName || '', 'ru') || (a.sectionNumber - b.sectionNumber))
+      .map(sec => {
+        const pct = sectionPct(sec);
+        return {
+          'РЭС': resNameById.get(sec.resId) || '',
+          'ТП': sec.tpName || '',
+          'Секция': `СШ-${toRoman(sec.sectionNumber)}`,
+          '№ ПУ тех.учёта': sec.techPuNumber || '—',
+          'Привязано ВЛ': vlCountBySection[sec.id] || 0,
+          'Sном, кВА': sec.tnKva != null ? sec.tnKva : '—',
+          'cosφ': sec.cosPhi != null ? sec.cosPhi : 0.9,
+          'Лимит, кВт': round1(sectionLimit(sec)) ?? '—',
+          'Пик, кВт': sec.lastPeakKw != null ? round1(sec.lastPeakKw) : '—',
+          'Загрузка, %': pct != null ? Math.round(pct) : '—',
+          'Статус': statusRu(sec),
+          'Дата профиля': sec.lastProfileAt ? new Date(sec.lastProfileAt).toLocaleDateString('ru-RU') : '—'
+        };
+      });
+    if (sectionsData.length > 0) {
+      const wsSec = XLSX.utils.json_to_sheet(sectionsData);
+      wsSec['!cols'] = [
+        { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 18 }, { wch: 12 },
+        { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }
+      ];
+      XLSX.utils.book_append_sheet(wb, wsSec, 'Секции (техучёт)');
+    }
+
     const fileName = `Структура_сети_${selectedRes ? `РЭС_${selectedRes}_` : ''}${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`;
     XLSX.writeFile(wb, fileName);
-    
+
     alert(` экспортирована в файл: ${fileName}`);
   };
   
@@ -1040,7 +1095,7 @@ const executeClearHistory = async () => {
                   const fmt1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
                   const hasPeak = section.lastPeakKw != null;
                   const pkPct = (hasPeak && limitKw) ? (section.lastPeakKw / limitKw) * 100 : null;
-                  const pkCls = pkPct == null ? '' : pkPct > 100 ? 'red' : pkPct >= 90 ? 'amber' : 'green';
+                  const pkCls = pkPct == null ? '' : pkPct > 100 ? 'red' : pkPct >= 85 ? 'amber' : 'green';
                   let peakDate = '';
                   if (section.lastPeakAt) {
                     const d = new Date(section.lastPeakAt);
@@ -1115,12 +1170,12 @@ const executeClearHistory = async () => {
         // Шкала загрузки: 0..120% лимита → 0..100% ширины полосы.
         const pct = (limitKw && hasData) ? (s.lastPeakKw / limitKw) * 100 : null;
         const barW = pct != null ? Math.min(pct, 120) * 100 / 120 : 0;
-        const barCls = pct == null ? 'gray' : pct > 100 ? 'red' : pct >= 90 ? 'amber' : 'green';
+        const barCls = pct == null ? 'gray' : pct > 100 ? 'red' : pct >= 85 ? 'amber' : 'green';
         const srcRu = s.lastProfileSource === '60' ? '60 мин' : s.lastProfileSource === '30' ? '30 мин' : '—';
         return (
           <div className="modal-backdrop" onClick={() => setTechModal(null)}>
             <div className="modal-content tech-details-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
+              <div className={`modal-header tech-modal-header ${barCls}`}>
                 <h3>{s.tpName} · СШ-{toRoman(s.sectionNumber)}</h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span className={`tech-pill ${status.cls}`}>{status.t}</span>
