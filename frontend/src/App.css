@@ -7294,3 +7294,38 @@ tr.selected:hover,
 /* Ссылка-вложение в хронологии перегруза — как ссылка, но без навигации */
 .po-attach-link { background: none; border: none; padding: 0; font: inherit; color: var(--blue); text-decoration: underline; cursor: pointer; transition: color .12s ease; }
 .po-attach-link:hover { color: var(--navy); }
+
+/* ===== Оконная оболочка модалок: mac-«светофор» + fullscreen + док ===== */
+.modal-shell { transition: width .12s ease, height .12s ease, border-radius .12s ease; }
+.modal-shell--fs { width: calc(100vw - 24px) !important; height: calc(100vh - 24px) !important; max-width: none !important; max-height: none !important; border-radius: 10px; }
+.modal-shell-body { overflow: auto; }
+.modal-shell--fs .modal-shell-body { flex: 1; }
+.modal-shell--fs { display: flex; flex-direction: column; }
+
+.modal-shell-bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.modal-shell-title { font-size: 18px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal-shell-extra { margin-left: auto; display: inline-flex; align-items: center; }
+
+.traffic-lights { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.tl { width: 13px; height: 13px; border-radius: 50%; border: none; padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; position: relative; line-height: 0; }
+.tl-red { background: #ff5f57; } .tl-yellow { background: #febc2e; } .tl-green { background: #28c840; }
+.tl:hover { filter: brightness(0.92); }
+.tl > * { opacity: 0; transition: opacity .12s ease; color: rgba(0,0,0,.55); }
+.traffic-lights:hover .tl > * { opacity: 1; }
+.tl-ico { width: 9px; height: 9px; }
+.tl-min { width: 7px; height: 0; border-top: 1.6px solid rgba(0,0,0,.6); border-radius: 1px; }
+.tl-fs { width: 6px; height: 6px; border: 1.6px solid rgba(0,0,0,.6); border-radius: 1px; }
+
+/* Док свёрнутых окон */
+.modal-dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1400; display: flex; gap: 10px; padding: 8px 12px; background: rgba(15,26,42,0.96); border-top: 1px solid rgba(255,255,255,0.12); overflow-x: auto; }
+.modal-dock-chip { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; max-width: 260px; padding: 6px 8px 6px 12px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); border-radius: 8px; color: #e6eefc; transition: background-color .12s ease, border-color .12s ease; }
+.modal-dock-chip:hover { background: rgba(255,255,255,0.14); }
+.modal-dock-ico { display: inline-flex; color: #7dd3fc; flex: 0 0 auto; }
+.modal-dock-ico svg { width: 16px; height: 16px; }
+.modal-dock-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal-dock-btn { width: 26px; height: 26px; border: none; background: transparent; color: #cdd8ea; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background-color .12s ease; }
+.modal-dock-btn:hover { background: rgba(255,255,255,0.14); }
+.modal-dock-btn .ico { width: 15px; height: 15px; }
+/* Развёрнутая модалка выше дока */
+.modal-backdrop { z-index: 1500; }
+.modal-backdrop--confirm { z-index: 1600; } /* confirm поверх активной модалки */

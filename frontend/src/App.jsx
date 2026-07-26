@@ -390,6 +390,127 @@ function PageHeader({ icon, title }) {
   );
 }
 
+// ===== Оконная оболочка модалок: mac-«светофор» + сворачивание в док + «одно активное окно» =====
+const ModalDockCtx = createContext(null);
+
+function ModalDockProvider({ children }) {
+  const [chips, setChips] = useState([]);          // видимые плашки дока [{id,title,icon}]
+  const regs = useRef(new Map());                  // id -> { minimize, restore, close }
+  const activeId = useRef(null);                    // текущее развёрнутое обычное окно
+
+  const api = useMemo(() => ({
+    register(id, handlers) { regs.current.set(id, handlers); },
+    unregister(id) {
+      regs.current.delete(id);
+      if (activeId.current === id) activeId.current = null;
+      setChips(cs => cs.filter(c => c.id !== id));   // мёртвых плашек не оставляем
+    },
+    // Окно стало активным (открыто/развёрнуто): свернуть предыдущее активное.
+    setActive(id) {
+      const prev = activeId.current;
+      if (prev && prev !== id) { const h = regs.current.get(prev); if (h) h.minimize(); }
+      activeId.current = id;
+      setChips(cs => cs.filter(c => c.id !== id));
+    },
+    clearActive(id) { if (activeId.current === id) activeId.current = null; },
+    toDock(id, chip) { setChips(cs => cs.some(c => c.id === id) ? cs : [...cs, chip]); },
+  }), []);
+
+  return (
+    <ModalDockCtx.Provider value={api}>
+      {children}
+      <ModalDockBar chips={chips} regs={regs} />
+    </ModalDockCtx.Provider>
+  );
+}
+
+function ModalDockBar({ chips, regs }) {
+  if (!chips.length) return null;
+  const call = (id, k) => { const h = regs.current.get(id); if (h && h[k]) h[k](); };
+  return (
+    <div className="modal-dock">
+      {chips.map(c => (
+        <div className="modal-dock-chip" key={c.id}>
+          <span className="modal-dock-ico">{c.icon}</span>
+          <span className="modal-dock-title" title={c.title}>{c.title}</span>
+          <button className="modal-dock-btn" title="Развернуть" onClick={() => call(c.id, 'restore')}><IconArrowUp className="ico" /></button>
+          <button className="modal-dock-btn" title="Закрыть" onClick={() => call(c.id, 'close')}><IconX className="ico" /></button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Контекст оболочки — детям (напр. FileViewer) для реакции на fullscreen.
+const ModalShellCtx = createContext({ fullscreen: false });
+
+let __modalSeq = 0;
+// title — узел заголовка; dockTitle — строка для плашки дока (если title не строка).
+function ModalShell({ title, dockTitle, titleExtra, icon, onClose, onBackdrop, variant = 'normal', className = '', headerClassName = '', children }) {
+  const dock = useContext(ModalDockCtx);
+  const id = useRef('m' + (++__modalSeq)).current;
+  const isConfirm = variant === 'confirm';
+  const [minimized, setMinimized] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
+  const chipTitle = dockTitle || (typeof title === 'string' ? title : 'Окно');
+
+  const minimize = () => {
+    if (isConfirm || !dock) return;
+    setMinimized(true);
+    dock.toDock(id, { id, title: chipTitle, icon });
+    dock.clearActive(id);
+  };
+
+  // Регистрация + политика «одно окно» (только обычные модалки, не confirm).
+  useEffect(() => {
+    if (isConfirm || !dock) return;
+    dock.register(id, {
+      minimize: () => { setMinimized(true); dock.toDock(id, { id, title: chipTitle, icon }); },
+      restore: () => { setMinimized(false); dock.setActive(id); },
+      close: () => { onCloseRef.current && onCloseRef.current(); },
+    });
+    dock.setActive(id);            // при открытии стать активной (свернёт предыдущую)
+    return () => dock.unregister(id);
+    // eslint-disable-next-line
+  }, []);
+
+  // Esc закрывает активную (не свёрнутую) модалку.
+  useEffect(() => {
+    if (minimized) return;
+    const h = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onCloseRef.current && onCloseRef.current(); } };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [minimized]);
+
+  if (minimized) return null;
+
+  const handleBackdrop = () => {
+    if (onBackdrop === null) return;                  // явно отключено
+    const fn = onBackdrop || onClose;
+    if (fn) fn();
+  };
+
+  return (
+    <ModalShellCtx.Provider value={{ fullscreen }}>
+      <div className={`modal-backdrop ${isConfirm ? 'modal-backdrop--confirm' : ''}`} onClick={handleBackdrop}>
+        <div className={`modal-content modal-shell ${fullscreen ? 'modal-shell--fs' : ''} ${className}`} onClick={(e) => e.stopPropagation()}>
+          <div className={`modal-shell-bar ${headerClassName}`}>
+            <div className="traffic-lights">
+              <button className="tl tl-red" title="Закрыть" onClick={() => onCloseRef.current && onCloseRef.current()}><IconX className="tl-ico" /></button>
+              {!isConfirm && <button className="tl tl-yellow" title="Свернуть в док" onClick={minimize}><span className="tl-min" /></button>}
+              {!isConfirm && <button className="tl tl-green" title={fullscreen ? 'Обычный размер' : 'Во весь экран'} onClick={() => setFullscreen(f => !f)}><span className="tl-fs" /></button>}
+            </div>
+            <div className="modal-shell-title">{title}</div>
+            {titleExtra && <div className="modal-shell-extra">{titleExtra}</div>}
+          </div>
+          <div className="modal-shell-body">{children}</div>
+        </div>
+      </div>
+    </ModalShellCtx.Provider>
+  );
+}
+
 // =====================================================
 // КОМПОНЕНТ СТРУКТУРЫ СЕТИ
 // =====================================================
@@ -1282,15 +1403,15 @@ const executeClearHistory = async () => {
         const barCls = pct == null ? 'gray' : pct > 100 ? 'red' : pct >= 85 ? 'amber' : 'green';
         const srcRu = s.lastProfileSource === '60' ? '60 мин' : s.lastProfileSource === '30' ? '30 мин' : '—';
         return (
-          <div className="modal-backdrop" onClick={() => setTechModal(null)}>
-            <div className="modal-content tech-details-modal" onClick={(e) => e.stopPropagation()}>
-              <div className={`modal-header tech-modal-header ${barCls}`}>
-                <h3>{s.tpName} · СШ-{toRoman(s.sectionNumber)}</h3>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span className={`tech-pill ${status.cls}`}>{status.t}</span>
-                  <button className="close-btn" onClick={() => setTechModal(null)}><IconX className="ico" /></button>
-                </div>
-              </div>
+          <ModalShell
+            title={<>{s.tpName} · СШ-{toRoman(s.sectionNumber)}</>}
+            dockTitle={`${s.tpName} · СШ-${toRoman(s.sectionNumber)}`}
+            titleExtra={<span className={`tech-pill ${status.cls}`}>{status.t}</span>}
+            headerClassName={`tech-modal-header ${barCls}`}
+            className="tech-details-modal"
+            icon={<IconLayers size={16} />}
+            onClose={() => setTechModal(null)}
+          >
               <div className="modal-body">
                 <div className="modal-info">
                   <p><strong>ТП:</strong> {s.tpName}</p>
@@ -1350,19 +1471,17 @@ const executeClearHistory = async () => {
               <div className="modal-footer">
                 <button className="action-btn" onClick={() => setTechModal(null)}>Закрыть</button>
               </div>
-            </div>
-          </div>
+          </ModalShell>
         );
       })()}
 
       {/* Форма секции шин ТП */}
       {sectionModal && (
-        <div className="modal-backdrop" onClick={() => setSectionModal(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{sectionModal.id ? 'Редактировать секцию' : 'Новая секция'} — ТП {sectionModal.tpName}</h3>
-              <button className="close-btn" onClick={() => setSectionModal(null)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell
+          title={`${sectionModal.id ? 'Редактировать секцию' : 'Новая секция'} — ТП ${sectionModal.tpName}`}
+          icon={<IconLayers size={16} />}
+          onClose={() => setSectionModal(null)}
+        >
             <div className="modal-body">
               <div className="form-group">
                 <label>Номер секции шин</label>
@@ -1395,11 +1514,10 @@ const executeClearHistory = async () => {
               <button className="confirm-btn" onClick={saveSection}
                 disabled={sectionForm.sectionNumber === ''}>Сохранить</button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
-      
-      <ErrorDetailsModal 
+
+      <ErrorDetailsModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         details={selectedDetails}
@@ -1429,12 +1547,12 @@ const executeClearHistory = async () => {
       
       {/* Модальное окно для удаления */}
       {showDeleteModal && (
-        <div className="modal-backdrop" onClick={() => {setShowDeleteModal(false); setDeletePassword('');}}>
-          <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Подтверждение удаления</h3>
-              <button className="close-btn" onClick={() => {setShowDeleteModal(false); setDeletePassword('');}}><IconX className="ico" /></button>
-            </div>
+        <ModalShell
+          variant="confirm"
+          title="Подтверждение удаления"
+          className="delete-modal"
+          onClose={() => {setShowDeleteModal(false); setDeletePassword('');}}
+        >
             <div className="modal-body">
               <p>Вы собираетесь удалить {selectedIds.length} записей.</p>
               <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
@@ -1463,8 +1581,7 @@ const executeClearHistory = async () => {
                 Удалить
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
 {/* Модальное окно очистки истории */}
@@ -4498,12 +4615,12 @@ function FileManagement() {
 
       {/* Диагностика файла: матрица комбинаций Cloudinary */}
       {diag && (
-        <div className="modal-backdrop" onClick={() => setDiag(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Диагностика файла</h3>
-              <button className="close-btn" onClick={() => setDiag(null)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell
+          title="Диагностика файла"
+          dockTitle={`Диагностика: ${diag.file.original_name}`}
+          icon={<IconSearch size={16} />}
+          onClose={() => setDiag(null)}
+        >
             <div className="modal-body">
               <p className="file-name">{diag.file.original_name}</p>
               <p className="muted" style={{ fontSize: 12, wordBreak: 'break-all', marginBottom: 12 }}>{diag.file.public_id}</p>
@@ -4560,8 +4677,7 @@ function FileManagement() {
             <div className="modal-footer">
               <button className="action-btn" onClick={() => setDiag(null)}>Закрыть</button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* Массовое удаление выбранных файлов */}
@@ -5857,6 +5973,24 @@ function PdfCanvas({ blob, downloadHref, downloadName }) {
   const [pageNow, setPageNow] = useState(1);
   const [scale, setScale] = useState(1);       // множитель поверх fit-по-ширине
   const [status, setStatus] = useState('loading'); // loading | ready | error
+  const [renderTick, setRenderTick] = useState(0); // перерисовка при смене ширины (fullscreen/resize)
+
+  // Перерисовать канвас при заметной смене ширины контейнера (fullscreen, ресайз окна) —
+  // НЕ CSS-растяжение готового канваса (мыло), а честный ре-рендер под новую ширину.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let lastW = el.clientWidth, t = null;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      if (Math.abs(w - lastW) < 4) return;
+      lastW = w;
+      clearTimeout(t);
+      t = setTimeout(() => setRenderTick(x => x + 1), 120);
+    });
+    ro.observe(el);
+    return () => { ro.disconnect(); clearTimeout(t); };
+  }, []);
 
   // Загрузка документа (ленивый import pdfjs)
   useEffect(() => {
@@ -5912,7 +6046,7 @@ function PdfCanvas({ blob, downloadHref, downloadName }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [status, scale]);
+  }, [status, scale, renderTick]);
 
   const onScroll = () => {
     const c = containerRef.current; if (!c) return;
@@ -5982,13 +6116,13 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
   }, [currentFile.public_id]);
 
   return (
-    <div className="modal-backdrop file-viewer-backdrop" onClick={onClose}>
-      <div className="file-viewer-container" onClick={e => e.stopPropagation()}>
-        <div className="file-viewer-header">
-          <h3>Просмотр файлов ({currentIndex + 1} из {files.length})</h3>
-          <button className="close-btn" onClick={onClose}><IconX className="ico" /></button>
-        </div>
-
+    <ModalShell
+      title={`Просмотр файлов (${currentIndex + 1} из ${files.length})`}
+      dockTitle={currentFile.original_name}
+      icon={<IconFolder size={16} />}
+      className="file-viewer-container"
+      onClose={onClose}
+    >
         <div className="file-viewer-content">
           {loading ? (
             <div className="file-viewer-status"><RossetiLoader /></div>
@@ -6036,8 +6170,7 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
             </button>
           </div>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -8559,8 +8692,9 @@ const renderContent = () => {
 
   return (
     <AuthContext.Provider value={{ user, selectedRes }}>
+      <ModalDockProvider>
       <div className="app">
-        <MainMenu 
+        <MainMenu
           activeSection={activeSection} 
           onSectionChange={setActiveSection}
           userRole={user.role}
@@ -8605,6 +8739,7 @@ const renderContent = () => {
           </main>
         </div>
       </div>
+      </ModalDockProvider>
     </AuthContext.Provider>
   );
 }

@@ -349,6 +349,27 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — Оконная оболочка модалок, ФАЗА 1 (движок + ключевые модалки;
+  согласовано с владельцем — остальные переводятся тем же паттерном следующими
+  заходами). Добавлены: `ModalShell` (backdrop+окно+строка заголовка с mac-
+  «светофором»: 🔴 закрыть=onClose, 🟡 свернуть в док, 🟢 fullscreen
+  `calc(100vw/vh−24px)` c переходом .12s; иконки в кнопках проявляются на hover
+  группы; confirm-вариант — только 🔴), `ModalDockProvider`/`ModalDockCtx`/
+  `ModalDockBar` (реестр свёрнутых окон, док внизу, политика «одно активное окно»:
+  открытие/разворот сворачивает предыдущее; confirm не участвует; unmount
+  снимает плашку → смена раздела чистит док), Esc закрывает активную. `PdfCanvas`
+  получил `ResizeObserver` → в fullscreen канвас честно перерисовывается под
+  ширину (не CSS-растяжение). Дерево обёрнуто в `ModalDockProvider`. CSS
+  `.modal-shell/.traffic-lights/.tl-*/.modal-dock*`. **Аудит модалок (~30, все
+  по паттерну `modal-backdrop→modal-content→modal-header`):** confirm (только
+  🔴) — удаления с паролем/подтверждения (NetworkStructure/Reports/ProblemVL/
+  FileManagement/purge/cleanup/clear-history ≈13 шт); обычные — тех-учёт, секция,
+  ErrorDetailsModal, детали/мероприятия перегруза, комментарий, детали/e-mail
+  ВЛ, mass-fix/fix, создание/редакт. пользователя, просмотр документов ≈17 шт.
+  **Переведены в этой фазе:** тех-учёт, секция (add/edit), удаление выбранных
+  (confirm), диагностика файла, **FileViewer** (fullscreen-PDF, используется в
+  Reports/FileManagement/UploadedDocuments/PowerOverload — покрыт разом). Остальные
+  ⬜ — следующими заходами. npm run build — ОК.
 - **2026-07-26** — Убран дубль SheetJS из бандла (коммит 2). Во фронте были и
   `xlsx`, и `xlsx-js-style` (drop-in форк с тем же API). Заменил
   `import * as XLSX from 'xlsx'` → из `xlsx-js-style`, слил `XLSXStyle`→`XLSX`
