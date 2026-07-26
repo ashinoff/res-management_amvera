@@ -223,6 +223,11 @@ body {
   color: #7dd3fc;
   filter: drop-shadow(0 0 8px rgba(125,211,252,.9));
 }
+/* Активный пункт меню — тонкий белый кантик вокруг (inset-ring, без сдвига раскладки). */
+.main-menu .menu-item.active {
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.6);
+  background: rgba(255,255,255,0.05);
+}
 
 .main-menu h3 {
   margin-bottom: 32px;
