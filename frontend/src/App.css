@@ -7506,6 +7506,30 @@ tr.selected:hover,
 .poll-rec-footer { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text); }
 .spodes-badge-inline { display: inline-block; margin-left: 6px; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: var(--navy); color: #fff; vertical-align: middle; }
 
+/* Явный бейдж СПОДЭС: насыщенный синий + двухслойное СТАТИЧНОЕ неоновое свечение
+   (в стиле иконок PageHeader). Усиление на hover, переход .12s, БЕЗ пульсаций. */
+.spodes-neon {
+  display: inline-flex; align-items: center; vertical-align: middle;
+  margin-left: 6px; padding: 1px 5px; border-radius: 4px;
+  font-size: 9px; font-weight: 800; letter-spacing: .3px; line-height: 1.5;
+  background: #1d4ed8; color: #fff;
+  box-shadow: 0 0 4px rgba(37, 99, 235, .7), 0 0 10px rgba(37, 99, 235, .45);
+  transition: box-shadow .12s ease, background .12s ease;
+}
+.pu-cell .spodes-neon { margin-left: 0; margin-top: 1px; }
+.spodes-neon .sb-short { display: none; }
+.poll-row-click:hover .spodes-neon,
+.poll-rec-table tr:hover .spodes-neon,
+.poll-cand-item:hover .spodes-neon,
+.poll-orphan-chip:hover .spodes-neon {
+  background: #2563eb;
+  box-shadow: 0 0 6px rgba(37, 99, 235, .95), 0 0 16px rgba(37, 99, 235, .6);
+}
+@media (max-width: 640px) {
+  .spodes-neon .sb-full { display: none; }
+  .spodes-neon .sb-short { display: inline; }
+}
+
 /* Кандидаты СПОДЭС в модалке */
 .poll-cand { margin-top: 16px; }
 .poll-cand-body { margin-top: 8px; }

@@ -8528,6 +8528,12 @@ const pollVerdict = (cell) => {
   return POLL_VERDICTS.ok;                                       // СПОДЭС + собирается
 };
 
+// Явный бейдж СПОДЭС: полное слово, неоново-синее СТАТИЧНОЕ свечение (стиль иконок
+// PageHeader — без пульсаций). На узких экранах сокращается до «СПДС» через CSS.
+const SpodesBadge = () => (
+  <span className="spodes-neon"><span className="sb-full">СПОДЭС</span><span className="sb-short">СПДС</span></span>
+);
+
 // ═══ Раздел «Карта опроса структуры сети»: сверка ПУ структуры со срезом «Опрос ПУ» ═══
 function PollMap({ selectedRes }) {
   const { user } = useContext(AuthContext);
@@ -8622,10 +8628,9 @@ function PollMap({ selectedRes }) {
 
   const puCell = (pu, cell) => (
     <div className="pu-cell" title={cell.status === 'no_data' ? 'Нет данных среза' : (pu || 'ПУ не задан')}>
-      <div className={`status-box ${boxCls(cell.status)}`}>{cell.status === 'no_pu' ? 'X' : ''}
-        {cell.spodes && (cell.status === 'collected' || cell.status === 'not_collected') && <span className="spodes-badge">С</span>}
-      </div>
+      <div className={`status-box ${boxCls(cell.status)}`}>{cell.status === 'no_pu' ? 'X' : ''}</div>
       <span className="pu-num-line">{pu || ''}</span>
+      {cell.spodes && (cell.status === 'collected' || cell.status === 'not_collected') && <SpodesBadge />}
     </div>
   );
 
@@ -8852,7 +8857,7 @@ function PollMap({ selectedRes }) {
                     <span key={i} className="poll-orphan-chip">
                       {o.serial}
                       {o.isCollected && <span className="mini-badge green">собирается</span>}
-                      {o.isSpodes && <span className="mini-badge">СПОДЭС</span>}
+                      {o.isSpodes && <SpodesBadge />}
                     </span>
                   ))}
                 </div>
@@ -8893,7 +8898,7 @@ function PollMap({ selectedRes }) {
                     {sorted.map((it, i) => (
                       <tr key={i}>
                         <td>{it.position}</td>
-                        <td>{it.pu || '—'}{it.cell.spodes && <span className="spodes-badge-inline">СПОДЭС</span>}</td>
+                        <td>{it.pu || '—'}{it.cell.spodes && <SpodesBadge />}</td>
                         <td><span className={`rec-status rec-st-${it.cell.status}`}>{stLabel(it.cell.status)}</span></td>
                         <td>{it.verdict ? <span className={`rec-verdict rec-v-${it.verdict.color}`}>{it.verdict.text}</span> : <span className="muted">—</span>}</td>
                       </tr>
@@ -8925,7 +8930,7 @@ function PollMap({ selectedRes }) {
                                   {c.serial}{copiedSerial === c.serial && <span className="poll-copied">скопировано</span>}
                                 </button>
                                 {c.tuPath && <span className="poll-cand-addr muted">{c.tuPath}</span>}
-                                <span className="spodes-badge-inline">СПОДЭС</span>
+                                <SpodesBadge />
                                 {c.isCollected && <span className="mini-badge green">собирается</span>}
                               </div>
                             ))}
