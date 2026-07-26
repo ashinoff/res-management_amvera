@@ -5262,9 +5262,26 @@ app.post('/api/admin/database-cleanup',
 // /api/download — старый (обратная совместимость, вдруг где-то сохранены ссылки),
 // /api/f — новый, т.к. слова "download"/"attachment_" в URL режут блокировщики
 // рекламы (ERR_BLOCKED_BY_CLIENT: Яндекс Protect, AdGuard, uBlock).
+// Идентификатор из URL → public_id. Новый /api/f шлёт base64url (прячем
+// 'attachment_'/'download' от блокировщиков рекламы). Если это не наш base64url —
+// трактуем как сырой public_id (старые ссылки /api/f/res-management%2F… и /api/download).
+function resolvePublicId(raw) {
+  if (!raw) return null;
+  try {
+    const decoded = Buffer.from(String(raw), 'base64url').toString('utf8');
+    if (decoded && decoded.startsWith('res-management/')) return decoded;
+  } catch (e) {}
+  return raw;
+}
+
 async function handleFileProxy(req, res) {
   try {
-    const publicId = decodeURIComponent(req.params.public_id);
+    // Express УЖЕ декодировал параметр — второй decodeURIComponent падал на литеральном '%'.
+    const publicId = resolvePublicId(req.params.public_id);
+    // Защита от открытого прокси: отдаём только файлы нашего аккаунта.
+    if (!publicId || !publicId.startsWith('res-management/')) {
+      return res.status(403).json({ error: 'Недопустимый идентификатор файла' });
+    }
     const originalName = req.query.name || 'file';
     const inline = req.query.inline === '1';
 

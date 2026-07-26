@@ -18,15 +18,24 @@ import RossetiLoader from './RossetiLoader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+// base64url от строки (юникод-безопасно: btoa не умеет не-latin1). +/→-_, без '='.
+// Прячем public_id (со словом 'attachment_') из URL — иначе блокировщики режут запрос.
+const toBase64Url = (str) => {
+  const bytes = new TextEncoder().encode(String(str));
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
 // Все файлы (фото/PDF из Cloudinary) показываем и скачиваем ТОЛЬКО через свой
 // бэкенд (/api/f) — прямые ссылки на res.cloudinary.com блокируются браузерами,
-// а старый путь /api/download резали блокировщики рекламы (ERR_BLOCKED_BY_CLIENT).
-// inline=true — открыть в браузере.
+// а слова download/attachment_ в пути режут блокировщики (ERR_BLOCKED_BY_CLIENT),
+// поэтому public_id прячем в base64url. inline=true — открыть в браузере.
 const fileProxyUrl = (file, inline = false) => {
   if (!file) return '';
   if (!file.public_id) return file.url; // старые записи без public_id — как было
   const q = `name=${encodeURIComponent(file.original_name || 'file')}${inline ? '&inline=1' : ''}`;
-  return `${API_URL}/api/f/${encodeURIComponent(file.public_id)}?${q}`;
+  return `${API_URL}/api/f/${toBase64Url(file.public_id)}?${q}`;
 };
 // ── Оформление Excel-выгрузок (xlsx-js-style) ────────────────────────────────
 // Аккуратно, «как в качественном ПО»: тёмно-синяя шапка с белым жирным текстом,
@@ -5669,7 +5678,7 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
                     Открыть в новой вкладке
                   </a>
                   <a 
-  href={`${API_URL}/api/f/${encodeURIComponent(currentFile.public_id)}?name=${encodeURIComponent(currentFile.original_name)}`}
+  href={`${API_URL}/api/f/${toBase64Url(currentFile.public_id)}?name=${encodeURIComponent(currentFile.original_name)}`}
   target="_blank"
   download={currentFile.original_name}
   className="btn-download-pdf"

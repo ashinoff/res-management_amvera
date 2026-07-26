@@ -349,6 +349,19 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — Файловый прокси, коммит 1: base64url-ссылки + защита. Проблема:
+  блокировщики матчились на 'attachment_' внутри public_id, видимого в
+  `/api/f/res-management%2Fattachment_…`. Backend: `resolvePublicId(raw)` —
+  `Buffer.from(raw,'base64url')`; принимаем только если декодировалось в строку с
+  префиксом `res-management/`, иначе трактуем raw как сырой public_id (старые
+  ссылки живут). В `handleFileProxy` убран лишний `decodeURIComponent` (Express уже
+  декодирует; падал на литеральном '%'); добавлена 403-защита от открытого прокси
+  (publicId обязан начинаться с `res-management/`) — на обоих путях (`/api/f`,
+  `/api/download`). Frontend: `toBase64Url(str)` (TextEncoder→btoa, `+/`→`-_`, без
+  `=`), `fileProxyUrl` и прямая ссылка «Скачать» строят `/api/f/<base64url>`.
+  Проверено: roundtrip ок; сырой public_id уходит в fallback (не ложно-base64url).
+  Тонкий белый кантик активного пункта левого меню (`inset ring`). node --check /
+  npm run build — ОК.
 - **2026-07-26** — Унификация шаблона страниц (App.jsx/App.css, только вёрстка/
   стили, логика не тронута). **Аудит внешних рамок:** эталонные (контент на фоне,
   без рамки) — «Структура сети» (`.network-structure`), «Отчёты» (`.reports`),
