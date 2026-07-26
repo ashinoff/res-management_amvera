@@ -4306,6 +4306,23 @@ function FileManagement() {
   // НОВОЕ: Фильтры
   const [searchTp, setSearchTp] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [resFilter, setResFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [fmShowTop, setFmShowTop] = useState(false);
+
+  // Кнопка «наверх» для списка файлов (скролл у .content).
+  useEffect(() => {
+    let el = null, raf = null;
+    const onScroll = () => { if (el) setFmShowTop(el.scrollTop > 300); };
+    const attach = () => {
+      el = document.querySelector('.content');
+      if (el) { el.addEventListener('scroll', onScroll, { passive: true }); onScroll(); }
+      else raf = requestAnimationFrame(attach);
+    };
+    attach();
+    return () => { if (raf) cancelAnimationFrame(raf); if (el) el.removeEventListener('scroll', onScroll); };
+  }, []);
   // Диагностика файла в Cloudinary
   const [diag, setDiag] = useState(null);        // { file, data|null }
   const [diagLoading, setDiagLoading] = useState(false);
@@ -4413,17 +4430,28 @@ function FileManagement() {
   };
   
   // НОВОЕ: Фильтрация файлов
+  // Список РЭС для фильтра (из файлов).
+  const resOptions = [...new Set(files.map(f => f.resName).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+
   const filteredFiles = files.filter(file => {
     // Фильтр по ТП
     if (searchTp && !file.tpName?.toLowerCase().includes(searchTp.toLowerCase())) {
       return false;
     }
-    
     // Фильтр по статусу
     if (statusFilter && file.status !== statusFilter) {
       return false;
     }
-    
+    // Фильтр по РЭС
+    if (resFilter && file.resName !== resFilter) {
+      return false;
+    }
+    // Фильтр по периоду загрузки (uploadDate)
+    if (file.uploadDate) {
+      const d = new Date(file.uploadDate);
+      if (dateFrom && d < new Date(dateFrom + 'T00:00:00')) return false;
+      if (dateTo && d > new Date(dateTo + 'T23:59:59')) return false;
+    }
     return true;
   });
 
@@ -4458,7 +4486,7 @@ function FileManagement() {
         
         <div className="filter-group">
           <label><IconChart className="ico" /> Статус:</label>
-          <select 
+          <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="status-filter"
@@ -4469,14 +4497,28 @@ function FileManagement() {
             <option value="awaiting_work">Ожидает мероприятий</option>
           </select>
         </div>
-        
-        {(searchTp || statusFilter) && (
-          <button 
+
+        <div className="filter-group">
+          <label><IconBuilding className="ico" /> РЭС:</label>
+          <select value={resFilter} onChange={(e) => setResFilter(e.target.value)} className="status-filter">
+            <option value="">Все РЭС</option>
+            {resOptions.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+
+        <div className="filter-group">
+          <label><IconCalendar className="ico" /> Период:</label>
+          <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="search-input" />
+            <span>—</span>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="search-input" />
+          </div>
+        </div>
+
+        {(searchTp || statusFilter || resFilter || dateFrom || dateTo) && (
+          <button
             className="clear-filters-btn"
-            onClick={() => {
-              setSearchTp('');
-              setStatusFilter('');
-            }}
+            onClick={() => { setSearchTp(''); setStatusFilter(''); setResFilter(''); setDateFrom(''); setDateTo(''); }}
           >
             <IconX className="ico" /> Очистить фильтры
           </button>
@@ -4595,6 +4637,13 @@ function FileManagement() {
             );
           })}
         </div>
+      )}
+
+      {fmShowTop && (
+        <button className="scroll-to-top" title="Наверх"
+          onClick={() => { const c = document.querySelector('.content'); if (c) c.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+          <IconArrowUp className="ico" />
+        </button>
       )}
 
       {/* Диагностика файла: матрица комбинаций Cloudinary */}
@@ -8139,7 +8188,45 @@ function DatabaseMaintenance() {
               </div>
             </div>
           </div>
-          
+
+          {/* Занятое место в базе + оценка запаса */}
+          {healthCheck.stats.dbSize && (() => {
+            const s = healthCheck.stats.dbSize;
+            const mb = (b) => (b / 1024 / 1024).toFixed(1) + ' МБ';
+            return (
+              <div className="db-records-section">
+                <h4><IconDatabase className="ico" /> Занятое место в базе</h4>
+                <div className="db-records-grid">
+                  <div className="record-stat"><span className="record-label">Размер БД:</span><span className="record-value">{mb(s.bytes)}</span></div>
+                  <div className="record-stat"><span className="record-label">Новых записей за 30 дней:</span><span className="record-value">{s.rows30}</span></div>
+                  <div className="record-stat"><span className="record-label">Прирост в месяц (≈):</span><span className="record-value">{s.bytesPerMonth ? mb(s.bytesPerMonth) : '—'}</span></div>
+                  {s.quotaMb ? (
+                    <>
+                      <div className="record-stat"><span className="record-label">Квота (DB_QUOTA_MB):</span><span className="record-value">{s.quotaMb} МБ</span></div>
+                      <div className="record-stat"><span className="record-label">Хватит ещё (≈):</span><span className="record-value">{s.monthsLeft != null ? `~${s.monthsLeft} мес` : '—'}</span></div>
+                    </>
+                  ) : (
+                    <div className="record-stat" style={{ gridColumn: '1 / -1' }}>
+                      <span className="record-label">Оценка «хватит на N месяцев»:</span>
+                      <span className="record-value" style={{ fontSize: 12, color: 'var(--text-muted)' }}>задайте env DB_QUOTA_MB (квота БД в МБ)</span>
+                    </div>
+                  )}
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <div className="record-label" style={{ marginBottom: 6 }}>Крупнейшие таблицы:</div>
+                  <table className="diag-table">
+                    <thead><tr><th>Таблица</th><th>Размер</th><th>Записей (≈)</th></tr></thead>
+                    <tbody>
+                      {s.tables.map((t, i) => (
+                        <tr key={i}><td style={{ textAlign: 'left' }}>{t.table}</td><td>{mb(t.bytes)}</td><td>{Number(t.rows).toLocaleString('ru-RU')}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Обнаруженные проблемы */}
           {healthCheck.issues.length === 0 ? (
             <div className="db-no-issues">

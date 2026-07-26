@@ -7345,15 +7345,16 @@ tr.selected:hover,
 .modal-shell-title { font-size: 18px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modal-shell-extra { margin-left: auto; display: inline-flex; align-items: center; }
 
-.traffic-lights { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.tl { width: 13px; height: 13px; border-radius: 50%; border: none; padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; position: relative; line-height: 0; }
+/* Светофор ~в 2 раза крупнее (как на основном ПО). */
+.traffic-lights { display: inline-flex; align-items: center; gap: 11px; flex: 0 0 auto; }
+.tl { width: 24px; height: 24px; border-radius: 50%; border: none; padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; position: relative; line-height: 0; }
 .tl-red { background: #ff5f57; } .tl-yellow { background: #febc2e; } .tl-green { background: #28c840; }
 .tl:hover { filter: brightness(0.92); }
-.tl > * { opacity: 0; transition: opacity .12s ease; color: rgba(0,0,0,.55); }
+.tl > * { opacity: 0; transition: opacity .12s ease; color: rgba(0,0,0,.6); }
 .traffic-lights:hover .tl > * { opacity: 1; }
-.tl-ico { width: 9px; height: 9px; }
-.tl-min { width: 7px; height: 0; border-top: 1.6px solid rgba(0,0,0,.6); border-radius: 1px; }
-.tl-fs { width: 6px; height: 6px; border: 1.6px solid rgba(0,0,0,.6); border-radius: 1px; }
+.tl-ico { width: 15px; height: 15px; }
+.tl-min { width: 12px; height: 0; border-top: 2px solid rgba(0,0,0,.6); border-radius: 1px; }
+.tl-fs { width: 11px; height: 11px; border: 2px solid rgba(0,0,0,.6); border-radius: 2px; }
 
 /* Док свёрнутых окон */
 .modal-dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1400; display: flex; gap: 10px; padding: 8px 12px; background: rgba(15,26,42,0.96); border-top: 1px solid rgba(255,255,255,0.12); overflow-x: auto; }
@@ -7405,8 +7406,17 @@ tr.selected:hover,
 .legend-dots .legend-dot.is-indicator { opacity: .8; }
 @media (max-width: 640px) { .legend-dots { right: 16px; top: 78px; width: 40px; } }
 
-/* Документы: статус «На проверке» (не completed) — оранжевый (мак-жёлтый) */
-.status-badge:not(.status-completed) { background: #febc2e; color: #5a3d00; }
+/* Документы: статус — само СЛОВО цветом, фон прозрачный (без пилюли) */
+.status-badge { background: transparent; padding: 0; font-weight: 700; }
+.status-badge.status-completed { color: var(--green); }
+.status-badge:not(.status-completed) { color: #d97706; } /* На проверке — оранжевый */
+
+/* Кнопки под файлами (документы/управление файлами) — как в структуре: фон
+   ПРОЗРАЧНЫЙ, светится сам SVG. Кнопка «посмотреть» не выделяется синим фоном. */
+.btn-view, .btn-icon, .btn-icon.danger { background: transparent; border: none; box-shadow: none; }
+.btn-view:hover, .btn-icon:hover { background: transparent; }
+.btn-view { color: inherit; padding: 4px; }
+.btn-icon { transition: none; }
 
 /* Настройки → База данных: строгие ПРОЗРАЧНЫЕ карточки, синие иконки, кнопки как pm-btn--refresh */
 .db-header { background: transparent; color: var(--text); border: 1px solid var(--border); box-shadow: none; padding: 20px 24px; }

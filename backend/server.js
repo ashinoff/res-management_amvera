@@ -4923,8 +4923,49 @@ try {
 }
       
       // Итоговая статистика
+      // Размер БД + топ-таблицы + оценка роста (для планирования места).
+      let dbSize = null;
+      if (sequelize.getDialect() === 'postgres') {
+        try {
+          const rows = await sequelize.query(
+            `SELECT pg_database_size(current_database()) AS bytes, current_database() AS name`,
+            { type: Sequelize.QueryTypes.SELECT });
+          const tbls = await sequelize.query(
+            `SELECT c.relname AS "table", pg_total_relation_size(c.oid) AS bytes, c.reltuples::bigint AS rows
+               FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE c.relkind = 'r' AND n.nspname = 'public'
+              ORDER BY pg_total_relation_size(c.oid) DESC LIMIT 8`,
+            { type: Sequelize.QueryTypes.SELECT });
+          const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+          const g = await sequelize.query(
+            `SELECT
+               (SELECT COUNT(*) FROM "CheckHistories" WHERE "createdAt" >= :since) +
+               (SELECT COUNT(*) FROM "UploadHistories" WHERE "createdAt" >= :since) +
+               (SELECT COUNT(*) FROM "PuUploadHistories" WHERE "uploadedAt" >= :since) +
+               (SELECT COUNT(*) FROM "Notifications" WHERE "createdAt" >= :since) AS rows30`,
+            { replacements: { since }, type: Sequelize.QueryTypes.SELECT });
+          const bytes = Number(rows[0].bytes);
+          const totalRows = tbls.reduce((s, t) => s + Number(t.rows || 0), 0);
+          const bytesPerRow = totalRows > 0 ? bytes / totalRows : 0;
+          const rows30 = Number(g[0].rows30 || 0);
+          const bytesPerMonth = Math.round(bytesPerRow * rows30);
+          const quotaMb = Number(process.env.DB_QUOTA_MB) || null;
+          let monthsLeft = null;
+          if (quotaMb && bytesPerMonth > 0) {
+            const free = quotaMb * 1024 * 1024 - bytes;
+            monthsLeft = free > 0 ? Math.floor(free / bytesPerMonth) : 0;
+          }
+          dbSize = {
+            bytes, name: rows[0].name,
+            tables: tbls.map(t => ({ table: t.table, bytes: Number(t.bytes), rows: Number(t.rows) })),
+            rows30, bytesPerMonth, quotaMb, monthsLeft
+          };
+        } catch (e) { console.warn('dbSize failed:', e.message); }
+      }
+
       const stats = {
   totalIssues: issues.length,
+  dbSize,
   byType: {
     error: issues.filter(i => i.severity === 'error').length,
     warning: issues.filter(i => i.severity === 'warning').length,
