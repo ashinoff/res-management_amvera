@@ -406,6 +406,23 @@ const TpSection = sequelize.define('TpSection', {
   }
 });
 
+// 3b. Помесячный максимум пика по секции (раздел «Анализ мощности»). Живёт ОТДЕЛЬНО
+// от истории загрузок: истории могут стираться (задача purge), пики — навсегда.
+// Уникальность (sectionId, year, month) обеспечивает индекс в initializeDatabase().
+const SectionMonthlyPeak = sequelize.define('SectionMonthlyPeak', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  sectionId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: { model: TpSection, key: 'id' }
+  },
+  year: { type: DataTypes.INTEGER, allowNull: false },
+  month: { type: DataTypes.INTEGER, allowNull: false },   // 1-12
+  peakKw: { type: DataTypes.FLOAT, allowNull: false },
+  peakAt: { type: DataTypes.DATE, allowNull: true },      // момент пика (может быть null, если только по периоду)
+  source: { type: DataTypes.STRING, allowNull: true }     // '30' | '60'
+});
+
 // 3c. Случай перегрузки секции (workflow мероприятий по превышению Pном, этап 3).
 // Живёт на секции (sectionId), не на ВЛ. Стадии: askue_limit → res_work →
 // awaiting_recheck → completed. cycles растёт при повторном перегрузе.
@@ -853,6 +870,8 @@ TpSection.hasMany(NetworkStructure, { foreignKey: 'sectionId', as: 'lines' });
 // Случаи перегрузки секции
 OverloadCase.belongsTo(TpSection, { foreignKey: 'sectionId', as: 'section' });
 TpSection.hasMany(OverloadCase, { foreignKey: 'sectionId', as: 'cases' });
+SectionMonthlyPeak.belongsTo(TpSection, { foreignKey: 'sectionId', as: 'section' });
+TpSection.hasMany(SectionMonthlyPeak, { foreignKey: 'sectionId', as: 'monthlyPeaks' });
 OverloadCase.belongsTo(ResUnit, { foreignKey: 'resId' });
 OverloadCase.belongsTo(User, { as: 'askueUser', foreignKey: 'askueUserId' });
 OverloadCase.belongsTo(User, { as: 'resUser', foreignKey: 'resUserId' });
@@ -1637,15 +1656,46 @@ async function processProfileFile(filePath, userId) {
       limitKw, decision: overloadStatus
     });
 
+    const peakAtDate = parsePeakAt(r.peakAt);
+
     await section.update({
       lastPeakKw: r.peakKw,
-      lastPeakAt: parsePeakAt(r.peakAt),
+      lastPeakAt: peakAtDate,
       lastProfilePeriod: period,
       lastProfileSource: r.source || null,
       lastProfileAt: new Date(),
       overloadStatus
     });
     sectionsUpdated++;
+
+    // Помесячный пик (раздел «Анализ мощности»): месяц по peakAt, иначе по периоду.
+    // «Максимум побеждает» одним запросом ON CONFLICT — без гонки read-then-write.
+    let ym = null;
+    if (peakAtDate) {
+      ym = { year: peakAtDate.getFullYear(), month: peakAtDate.getMonth() + 1 };
+    } else if (period) {
+      const pm = String(period).match(/(\d{2})\.(\d{2})\.(\d{4})/);
+      if (pm) ym = { year: Number(pm[3]), month: Number(pm[2]) };
+    }
+    if (ym) {
+      try {
+        await sequelize.query(
+          `INSERT INTO "SectionMonthlyPeaks"
+             ("sectionId","year","month","peakKw","peakAt","source","createdAt","updatedAt")
+           VALUES (:sectionId,:year,:month,:peakKw,:peakAt,:source, NOW(), NOW())
+           ON CONFLICT ("sectionId","year","month") DO UPDATE
+             SET "peakKw"=EXCLUDED."peakKw", "peakAt"=EXCLUDED."peakAt",
+                 "source"=EXCLUDED."source", "updatedAt"=NOW()
+           WHERE EXCLUDED."peakKw" > "SectionMonthlyPeaks"."peakKw"`,
+          { replacements: {
+              sectionId: section.id, year: ym.year, month: ym.month,
+              peakKw: r.peakKw, peakAt: peakAtDate, source: r.source || null
+          } }
+        );
+      } catch (e) {
+        console.error('[PROFILE] monthly peak upsert error:', e.message);
+      }
+    }
 
     if (!hasLimit) continue;
 
@@ -3267,6 +3317,86 @@ app.get('/api/reports/overload', authenticateToken, async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('Overload report error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Матрица помесячных пиков «секции × месяцы» (раздел «Анализ мощности»).
+// from/to = YYYY-MM (default: последние 12 месяцев), resId опц. (res_responsible —
+// принудительно свой). Всё двумя запросами (секции + пики за диапазон), без циклов.
+app.get('/api/power/monthly-peaks', authenticateToken, async (req, res) => {
+  try {
+    const now = new Date();
+    const fmt = (y, m) => `${y}-${String(m).padStart(2, '0')}`;
+    const parseYM = (s) => { const m = String(s || '').match(/^(\d{4})-(\d{1,2})$/); return m ? { y: +m[1], mo: +m[2] } : null; };
+    const toP = parseYM(req.query.to) || { y: now.getFullYear(), mo: now.getMonth() + 1 };
+    let fromP = parseYM(req.query.from);
+    if (!fromP) { let y = toP.y, mo = toP.mo - 11; while (mo <= 0) { mo += 12; y--; } fromP = { y, mo }; }
+
+    // Список месяцев from..to включительно (страховка от кривого диапазона).
+    const months = [];
+    let cy = fromP.y, cm = fromP.mo;
+    while ((cy < toP.y || (cy === toP.y && cm <= toP.mo)) && months.length <= 60) {
+      months.push(fmt(cy, cm));
+      cm++; if (cm > 12) { cm = 1; cy++; }
+    }
+
+    const where = {};
+    if (req.user.role === 'res_responsible') where.resId = req.user.resId;
+    else if (req.query.resId) where.resId = parseInt(req.query.resId, 10);
+
+    const sections = await TpSection.findAll({
+      where,
+      include: [{ model: ResUnit, attributes: ['name'] }],
+      order: [['tpName', 'ASC'], ['sectionNumber', 'ASC']]
+    });
+    const sectionIds = sections.map(s => s.id);
+
+    let peaks = [];
+    if (sectionIds.length) {
+      peaks = await sequelize.query(
+        `SELECT "sectionId","year","month","peakKw","peakAt"
+           FROM "SectionMonthlyPeaks"
+          WHERE "sectionId" IN (:ids)
+            AND ("year" * 100 + "month") BETWEEN :fromYM AND :toYM`,
+        {
+          replacements: { ids: sectionIds, fromYM: fromP.y * 100 + fromP.mo, toYM: toP.y * 100 + toP.mo },
+          type: Sequelize.QueryTypes.SELECT
+        }
+      );
+    }
+    const bySection = new Map();
+    for (const p of peaks) {
+      if (!bySection.has(p.sectionId)) bySection.set(p.sectionId, {});
+      bySection.get(p.sectionId)[fmt(p.year, p.month)] = p;
+    }
+
+    const rows = sections.map(s => {
+      const cosPhi = s.cosPhi != null ? s.cosPhi : 0.9;
+      const limitKw = s.tnKva != null ? s.tnKva * cosPhi : null;
+      const pmap = bySection.get(s.id) || {};
+      const peaksOut = {};
+      for (const mo of months) {
+        const p = pmap[mo];
+        peaksOut[mo] = p
+          ? { peakKw: Math.round(p.peakKw * 10) / 10, peakAt: p.peakAt, ratioPct: limitKw ? Math.round((p.peakKw / limitKw) * 100) : null }
+          : null;
+      }
+      return {
+        sectionId: s.id,
+        resName: s.ResUnit?.name || '',
+        tpName: s.tpName,
+        sectionNumber: s.sectionNumber,
+        tnKva: s.tnKva,
+        cosPhi,
+        limitKw: limitKw != null ? Math.round(limitKw * 10) / 10 : null,
+        peaks: peaksOut
+      };
+    });
+
+    res.json({ months, rows });
+  } catch (error) {
+    console.error('monthly-peaks error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -5356,6 +5486,9 @@ async function initializeDatabase() {
       // Случаи перегрузки секции (этап 3)
       `CREATE INDEX IF NOT EXISTS idx_overloadcase_section ON "OverloadCases" ("sectionId")`,
       `CREATE INDEX IF NOT EXISTS idx_overloadcase_res_stage ON "OverloadCases" ("resId", "stage")`,
+      // Помесячные пики секции: уникальность (sectionId, year, month) — нужна и для
+      // ON CONFLICT «максимум побеждает» в пайплайне профиля/бэкфилле.
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_smp_unique ON "SectionMonthlyPeaks" ("sectionId", "year", "month")`,
       // Источник ряда и дата обновления профиля на секции (для модалки техучёта)
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileSource" VARCHAR(10)`,
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileAt" TIMESTAMP WITH TIME ZONE`
@@ -5368,6 +5501,29 @@ async function initializeDatabase() {
       }
     }
     console.log('Performance indexes ensured');
+
+    // Backfill помесячных пиков из текущих lastPeakKw/lastPeakAt секций (однократно,
+    // идемпотентно через ON CONFLICT «максимум побеждает»). Повторный старт не ломает.
+    if (sequelize.getDialect() === 'postgres') {
+      try {
+        await sequelize.query(`
+          INSERT INTO "SectionMonthlyPeaks" ("sectionId","year","month","peakKw","peakAt","source","createdAt","updatedAt")
+          SELECT id,
+                 EXTRACT(YEAR FROM "lastPeakAt")::int,
+                 EXTRACT(MONTH FROM "lastPeakAt")::int,
+                 "lastPeakKw", "lastPeakAt", "lastProfileSource", NOW(), NOW()
+            FROM "TpSections"
+           WHERE "lastPeakKw" IS NOT NULL AND "lastPeakAt" IS NOT NULL
+          ON CONFLICT ("sectionId","year","month") DO UPDATE
+            SET "peakKw"=EXCLUDED."peakKw", "peakAt"=EXCLUDED."peakAt",
+                "source"=EXCLUDED."source", "updatedAt"=NOW()
+           WHERE EXCLUDED."peakKw" > "SectionMonthlyPeaks"."peakKw"
+        `);
+        console.log('SectionMonthlyPeaks backfill ensured');
+      } catch (bfErr) {
+        console.warn('SectionMonthlyPeaks backfill skipped:', bfErr.message);
+      }
+    }
 
     // Новое значение enum уведомлений 'power_overload' (перегруз секции по профилю).
     // sequelize.sync ENUM не расширяет → ALTER TYPE ... ADD VALUE IF NOT EXISTS.

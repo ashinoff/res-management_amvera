@@ -349,6 +349,26 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — ЗАДАЧА А: помесячные пики + раздел «Анализ мощности». Новая
+  модель **`SectionMonthlyPeak`** (sectionId FK, year, month 1-12, peakKw, peakAt,
+  source; уник. индекс `idx_smp_unique (sectionId,year,month)`; таблица создаётся
+  обычным `sync()` без DB_ALTER). В пайплайне профиля (`processProfileFile`, после
+  `section.update`) — upsert помесячного пика: месяц по `parsePeakAt(peakAt)`, иначе
+  по периоду, иначе пропуск; «максимум побеждает» одним `INSERT … ON CONFLICT
+  (sectionId,year,month) DO UPDATE … WHERE EXCLUDED.peakKw > …` (без гонки).
+  Существующее поведение (lastPeak*/overloadStatus/OverloadCase/уведомления) не
+  тронуто. Бэкфилл при старте (`initializeDatabase`, postgres): из TpSection с
+  непустыми lastPeakKw+lastPeakAt тем же ON CONFLICT (идемпотентно). API
+  **`GET /api/power/monthly-peaks`** (from/to=YYYY-MM, default 12 мес, resId опц.,
+  res_responsible — свой) → `{ months, rows:[{…, peaks:{'YYYY-MM':{peakKw,peakAt,
+  ratioPct}|null}}] }`, двумя запросами. Фронт: новый пункт меню «Анализ мощности»
+  (admin/res_responsible), компонент `PowerAnalysis` — блок «ТП с перегрузом»
+  ПЕРЕНЕСЁН as-is из «Аналитики» (оттуда удалён) + матрица помесячных пиков
+  (пресеты 6/12 мес или произвольный from/to, ячейка peakKw·%, цвет текста >100
+  red/≥85 amber/иначе green, пусто — серым, фильтр РЭС для админа через
+  глобальный selectedRes) + выгрузка Excel матрицы через `styleExportSheet`
+  (`cellColor` — цвет по %). CSS `.pm-*` (без infinite, переходы .12s, hover
+  строк→surface-2). node --check / npm run build / py_compile — ОК.
 - **2026-07-26** — Обход блокировщиков рекламы для вложений. Adblock/uBlock/Яндекс
   Protect резали `/api/download/...` и `attachment_`-public_id
   (`ERR_BLOCKED_BY_CLIENT`) — PDF/фото не открывались. (backend) логика скачивания

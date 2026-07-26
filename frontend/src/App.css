@@ -6926,6 +6926,33 @@ tr.selected:hover,
 .tech-modal-header.red h3    { color: var(--red); }
 .tech-modal-header.amber h3  { color: var(--amber); }
 .tech-modal-header.green h3  { color: var(--green); }
+
+/* ===== Раздел «Анализ мощности» — матрица помесячных пиков ===== */
+.pm-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 8px 0 16px; }
+.pm-presets { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.pm-preset { padding: 7px 14px; background: var(--surface); color: var(--text); border: none; cursor: pointer; font-size: 13px; transition: background .12s, color .12s; }
+.pm-preset + .pm-preset { border-left: 1px solid var(--border); }
+.pm-preset:hover { background: var(--surface-2); }
+.pm-preset.active { background: var(--navy); color: #fff; }
+.pm-custom { display: inline-flex; align-items: center; gap: 8px; }
+.pm-custom input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.pm-actions { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
+.pm-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.pm-matrix { border-collapse: collapse; width: 100%; font-size: 13px; }
+.pm-matrix th, .pm-matrix td { padding: 8px 12px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); white-space: nowrap; text-align: center; }
+.pm-matrix th { background: var(--surface-2); font-weight: 600; }
+.pm-matrix tbody tr:hover td { background: var(--surface-2); }
+.pm-matrix .pm-sticky { position: sticky; left: 0; background: var(--surface); text-align: left; z-index: 1; }
+.pm-matrix th.pm-sticky { z-index: 2; background: var(--surface-2); }
+.pm-matrix td.pm-empty { color: var(--text-muted); font-size: 12px; }
+.pm-kw { font-weight: 700; }
+.pm-pct { color: var(--text-muted); font-size: 12px; }
+.pm-matrix td.pm-red   { color: var(--red); }
+.pm-matrix td.pm-amber { color: var(--amber); }
+.pm-matrix td.pm-green { color: var(--green); }
+.pm-matrix td.pm-red .pm-pct   { color: var(--red); }
+.pm-matrix td.pm-amber .pm-pct { color: var(--amber); }
+.pm-matrix td.pm-green .pm-pct { color: var(--green); }
 .tech-pill { padding: 3px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700; color: #fff; }
 .tech-pill.status-ok { background: var(--green); }
 .tech-pill.status-error { background: var(--red); }

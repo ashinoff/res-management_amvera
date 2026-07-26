@@ -58,8 +58,10 @@ const xlsLoadColor = (val) => {
   return XLS_COLORS.green;
 };
 // Применяет оформление ко всему листу. colorFns: имя колонки → (значение)→rgb|null
-// (цветной жирный текст ячейки). Плюс автофильтр и высота шапки.
-const styleExportSheet = (ws, colorFns = {}) => {
+// (цветной жирный текст). cellColor(dataRowIdx, colName, value)→rgb|null — для
+// матриц, где цвет зависит не от значения ячейки (напр. % загрузки, а не сам кВт).
+// Плюс автофильтр и высота шапки.
+const styleExportSheet = (ws, colorFns = {}, cellColor = null) => {
   if (!ws['!ref']) return;
   const range = XLSXStyle.utils.decode_range(ws['!ref']);
   const headerName = {};
@@ -83,6 +85,13 @@ const styleExportSheet = (ws, colorFns = {}) => {
         const col = fn(cell.v);
         if (col) st.font = { sz: 10.5, bold: true, color: { rgb: col } };
         st.alignment = { vertical: 'center', horizontal: 'center' };
+      }
+      if (cellColor) {
+        const col2 = cellColor(r - range.s.r - 1, headerName[c], cell.v);
+        if (col2) {
+          st.font = { sz: 10.5, bold: true, color: { rgb: col2 } };
+          st.alignment = { vertical: 'center', horizontal: 'center' };
+        }
       }
       cell.s = st;
     }
@@ -301,6 +310,7 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
     { id: 'askue_pending', label: 'Ожидающие проверки АСКУЭ', icon: <IconClipboard size={18} />, roles: ['admin', 'uploader'], badge: notificationCounts.askue_pending },
     { id: 'problem_vl', label: 'Проблемные ВЛ', icon: <IconAlertTriangle size={18} />, roles: ['admin'], badge: notificationCounts.problem_vl },
     { id: 'power_overload', label: 'Превышение Pном', icon: <IconZap size={18} />, roles: ['admin', 'res_responsible'], badge: notificationCounts.powerOverload },
+    { id: 'power_analysis', label: 'Анализ мощности', icon: <IconChart size={18} />, roles: ['admin', 'res_responsible'] },
     { id: 'documents', label: 'Загруженные документы', icon: <IconFolder size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
     { id: 'history', label: 'История системы', icon: <IconClock size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
     { id: 'reports', label: 'Отчеты', icon: <IconFileText size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
@@ -6788,7 +6798,6 @@ function Analytics() {
   const [analytics, setAnalytics] = useState([]);
   const [totals, setTotals] = useState({});
   const [vlWorkload, setVlWorkload] = useState([]);
-  const [overloadRows, setOverloadRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingDetailed, setLoadingDetailed] = useState(false);
   const [dateFrom, setDateFrom] = useState(
@@ -6800,21 +6809,7 @@ function Analytics() {
   useEffect(() => {
     loadAnalytics();
     loadVlWorkload();
-    loadOverload();
   }, [dateFrom, dateTo]);
-
-  // ТП с перегрузом: секции, где пик ≥ лимита (ratioPct ≥ 100).
-  const loadOverload = async () => {
-    try {
-      const response = await api.get('/api/reports/overload');
-      const rows = (response.data || []).filter(r => r.ratioPct != null && r.ratioPct >= 100);
-      rows.sort((a, b) => (b.ratioPct || 0) - (a.ratioPct || 0));
-      setOverloadRows(rows);
-    } catch (error) {
-      console.error('Error loading overload report:', error);
-      setOverloadRows([]);
-    }
-  };
 
   const loadVlWorkload = async () => {
     try {
@@ -7126,9 +7121,93 @@ function Analytics() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
 
-      {/* ТП с перегрузом (по профилю мощности) */}
-      <h2 style={{ marginTop: '32px' }}><span className="svg-frame"><IconZap size={24} /></span> ТП с перегрузом</h2>
+// ═══ Раздел «Анализ мощности»: перенесённый блок «ТП с перегрузом» + матрица
+// помесячных пиков (секции × месяцы). Роли admin / res_responsible. ═══
+function PowerAnalysis({ selectedRes }) {
+  const { user } = useContext(AuthContext);
+  const [overloadRows, setOverloadRows] = useState([]);
+  const [monthly, setMonthly] = useState({ months: [], rows: [] });
+  const [loading, setLoading] = useState(false);
+  const [preset, setPreset] = useState('12'); // '6' | '12' | 'custom'
+  const ymNow = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  const ymShift = (months) => { const d = new Date(); d.setMonth(d.getMonth() - months); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  const [from, setFrom] = useState(ymShift(11));
+  const [to, setTo] = useState(ymNow());
+
+  const fmt1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
+  const loadCls = (pct) => pct == null ? '' : pct > 100 ? 'pm-red' : pct >= 85 ? 'pm-amber' : 'pm-green';
+  const monLabel = (ym) => { const [y, m] = ym.split('-'); return `${m}.${y}`; };
+
+  const range = () => {
+    if (preset === '6') return { from: ymShift(5), to: ymNow() };
+    if (preset === '12') return { from: ymShift(11), to: ymNow() };
+    return { from, to };
+  };
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { from: f, to: t } = range();
+      const params = { from: f, to: t };
+      if (user.role === 'admin' && selectedRes) params.resId = selectedRes;
+      const [ov, mp] = await Promise.all([
+        api.get('/api/reports/overload', { params: user.role === 'admin' && selectedRes ? { resId: selectedRes } : {} }),
+        api.get('/api/power/monthly-peaks', { params })
+      ]);
+      const rows = (ov.data || []).filter(r => r.ratioPct != null && r.ratioPct >= 100).sort((a, b) => (b.ratioPct || 0) - (a.ratioPct || 0));
+      setOverloadRows(rows);
+      setMonthly(mp.data || { months: [], rows: [] });
+    } catch (e) {
+      console.error('PowerAnalysis load error:', e);
+      setOverloadRows([]);
+      setMonthly({ months: [], rows: [] });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [preset, from, to, selectedRes]);
+
+  const exportMatrix = () => {
+    const { months, rows } = monthly;
+    if (!rows.length) { alert('Нет данных для экспорта'); return; }
+    const data = rows.map(r => {
+      const base = {
+        'РЭС': r.resName || '', 'ТП': r.tpName || '', 'СШ': `СШ-${toRoman(r.sectionNumber)}`,
+        'Sном, кВА': r.tnKva != null ? r.tnKva : '—', 'Лимит, кВт': r.limitKw != null ? r.limitKw : '—'
+      };
+      months.forEach(m => {
+        const p = r.peaks[m];
+        base[monLabel(m)] = p ? p.peakKw : '';
+      });
+      return base;
+    });
+    // Цвет ячеек месяцев — по % загрузки соответствующего пика.
+    const monthColor = (ri, colName) => {
+      const m = months.find(mm => monLabel(mm) === colName);
+      if (!m) return null;
+      const p = monthly.rows[ri]?.peaks?.[m];
+      if (!p || p.ratioPct == null) return null;
+      return p.ratioPct > 100 ? XLS_COLORS.red : p.ratioPct >= 85 ? XLS_COLORS.amber : XLS_COLORS.green;
+    };
+    const ws = XLSXStyle.utils.json_to_sheet(data);
+    ws['!cols'] = [{ wch: 18 }, { wch: 15 }, { wch: 8 }, { wch: 10 }, { wch: 11 }, ...months.map(() => ({ wch: 10 }))];
+    styleExportSheet(ws, {}, monthColor);
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, ws, 'Помесячные пики');
+    XLSXStyle.writeFile(wb, `Помесячные_пики_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
+  };
+
+  return (
+    <div className="analytics">
+      <h2><span className="svg-frame"><IconZap size={24} /></span> Анализ мощности</h2>
+
+      {/* Перенесено из «Аналитики»: ТП с перегрузом (последний пик ≥ лимита). */}
+      <h2 style={{ marginTop: '8px', fontSize: 20 }}>ТП с перегрузом</h2>
       <p className="info-hint" style={{ marginBottom: '12px' }}>
         <IconInfo className="ico" style={{ color: 'var(--blue)' }} /> Секции шин, где последний пик мощности достиг или превысил лимит Sном·cosφ
       </p>
@@ -7164,6 +7243,65 @@ function Analytics() {
           </table>
         )}
       </div>
+
+      {/* Матрица помесячных пиков: строки — секции, колонки — месяцы периода. */}
+      <h2 style={{ marginTop: '32px', fontSize: 20 }}>Помесячные пики мощности</h2>
+      <div className="pm-controls">
+        <div className="pm-presets">
+          <button className={`pm-preset ${preset === '6' ? 'active' : ''}`} onClick={() => setPreset('6')}>6 мес</button>
+          <button className={`pm-preset ${preset === '12' ? 'active' : ''}`} onClick={() => setPreset('12')}>12 мес</button>
+          <button className={`pm-preset ${preset === 'custom' ? 'active' : ''}`} onClick={() => setPreset('custom')}>Период</button>
+        </div>
+        {preset === 'custom' && (
+          <div className="pm-custom">
+            <input type="month" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <span>—</span>
+            <input type="month" value={to} onChange={(e) => setTo(e.target.value)} />
+          </div>
+        )}
+        <div className="pm-actions">
+          <button className="refresh-btn" onClick={load} disabled={loading}>{loading ? 'Обновление...' : 'Обновить'}</button>
+          <button className="upload-submit" onClick={exportMatrix}><IconDownload className="ico" /> Выгрузка в Excel</button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="loading"><RossetiLoader /></div>
+      ) : monthly.rows.length === 0 ? (
+        <div className="no-data" style={{ padding: '16px' }}>Нет секций для отображения</div>
+      ) : (
+        <div className="pm-table-wrap">
+          <table className="pm-matrix">
+            <thead>
+              <tr>
+                <th className="pm-sticky">ТП · СШ</th>
+                {user.role === 'admin' && <th>РЭС</th>}
+                <th>Лимит, кВт</th>
+                {monthly.months.map(m => <th key={m}>{monLabel(m)}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {monthly.rows.map(r => (
+                <tr key={r.sectionId}>
+                  <td className="pm-sticky"><strong>{r.tpName}</strong> · СШ-{toRoman(r.sectionNumber)}</td>
+                  {user.role === 'admin' && <td>{r.resName}</td>}
+                  <td>{r.limitKw != null ? fmt1(r.limitKw) : '—'}</td>
+                  {monthly.months.map(m => {
+                    const p = r.peaks[m];
+                    if (!p) return <td key={m} className="pm-empty">нет данных</td>;
+                    return (
+                      <td key={m} className={loadCls(p.ratioPct)}>
+                        <span className="pm-kw">{fmt1(p.peakKw)}</span>
+                        {p.ratioPct != null && <span className="pm-pct"> · {p.ratioPct}%</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -7948,6 +8086,8 @@ const renderContent = () => {
       return <ProblemVL selectedRes={selectedRes} />;
     case 'power_overload':
       return <PowerOverload selectedRes={selectedRes} />;
+    case 'power_analysis':
+      return <PowerAnalysis selectedRes={selectedRes} />;
     case 'documents':
       return <UploadedDocuments />;
     case 'reports':
