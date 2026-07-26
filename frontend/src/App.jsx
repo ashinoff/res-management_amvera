@@ -7,8 +7,9 @@
 import React, { useState, useEffect, createContext, useContext, useCallback, useMemo, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
-import * as XLSX from 'xlsx';
-import * as XLSXStyle from 'xlsx-js-style';
+// xlsx-js-style — drop-in форк SheetJS (тот же API, включая utils/read), плюс стили
+// ячеек. Один импорт вместо двух ('xlsx' удалён из зависимостей — был дубль).
+import * as XLSX from 'xlsx-js-style';
 import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo, IconMeter, IconUpload, IconSettings } from './icons.jsx';
 import RossetiLoader from './RossetiLoader.jsx';
 
@@ -76,16 +77,16 @@ const xlsLoadColor = (val) => {
 // Плюс автофильтр и высота шапки.
 const styleExportSheet = (ws, colorFns = {}, cellColor = null) => {
   if (!ws['!ref']) return;
-  const range = XLSXStyle.utils.decode_range(ws['!ref']);
+  const range = XLSX.utils.decode_range(ws['!ref']);
   const headerName = {};
   for (let c = range.s.c; c <= range.e.c; c++) {
-    const cell = ws[XLSXStyle.utils.encode_cell({ r: range.s.r, c })];
+    const cell = ws[XLSX.utils.encode_cell({ r: range.s.r, c })];
     if (cell) { cell.s = XLS_HEADER_STYLE; headerName[c] = String(cell.v); }
   }
   for (let r = range.s.r + 1; r <= range.e.r; r++) {
     const zebra = (r - range.s.r) % 2 === 0;
     for (let c = range.s.c; c <= range.e.c; c++) {
-      const cell = ws[XLSXStyle.utils.encode_cell({ r, c })];
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
       if (!cell) continue;
       const st = {
         font: { sz: 10.5, color: { rgb: '1F2937' } },
@@ -951,8 +952,8 @@ const executeClearHistory = async () => {
     });
 
     // Создаем Excel файл (xlsx-js-style — со стилями ячеек)
-    const wb = XLSXStyle.utils.book_new();
-    const ws = XLSXStyle.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(exportData);
 
     // Устанавливаем ширину колонок
     ws['!cols'] = [
@@ -977,7 +978,7 @@ const executeClearHistory = async () => {
       'Статус середины': xlsStatusColor,
       'Статус конца': xlsStatusColor
     });
-    XLSXStyle.utils.book_append_sheet(wb, ws, 'Структура');
+    XLSX.utils.book_append_sheet(wb, ws, 'Структура');
 
     // Второй лист «Секции (техучёт)» — по секциям: привязка + техучёт + перегруз.
     const vlCountBySection = filteredData.reduce((acc, i) => {
@@ -1005,17 +1006,17 @@ const executeClearHistory = async () => {
         };
       });
     if (sectionsData.length > 0) {
-      const wsSec = XLSXStyle.utils.json_to_sheet(sectionsData);
+      const wsSec = XLSX.utils.json_to_sheet(sectionsData);
       wsSec['!cols'] = [
         { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 18 }, { wch: 12 },
         { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }
       ];
       styleExportSheet(wsSec, { 'Статус': xlsStatusColor, 'Загрузка, %': xlsLoadColor });
-      XLSXStyle.utils.book_append_sheet(wb, wsSec, 'Секции (техучёт)');
+      XLSX.utils.book_append_sheet(wb, wsSec, 'Секции (техучёт)');
     }
 
     const fileName = `Структура_сети_${selectedRes ? `РЭС_${selectedRes}_` : ''}${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`;
-    XLSXStyle.writeFile(wb, fileName);
+    XLSX.writeFile(wb, fileName);
 
     alert(` экспортирована в файл: ${fileName}`);
   };
@@ -7532,12 +7533,12 @@ function PowerAnalysis({ selectedRes }) {
       if (!p || p.ratioPct == null) return null;
       return p.ratioPct > 100 ? XLS_COLORS.red : p.ratioPct >= 85 ? XLS_COLORS.amber : XLS_COLORS.green;
     };
-    const ws = XLSXStyle.utils.json_to_sheet(data);
+    const ws = XLSX.utils.json_to_sheet(data);
     ws['!cols'] = [{ wch: 18 }, { wch: 15 }, { wch: 8 }, { wch: 10 }, { wch: 11 }, ...months.map(() => ({ wch: 10 }))];
     styleExportSheet(ws, {}, monthColor);
-    const wb = XLSXStyle.utils.book_new();
-    XLSXStyle.utils.book_append_sheet(wb, ws, 'Помесячные пики');
-    XLSXStyle.writeFile(wb, `Помесячные_пики_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Помесячные пики');
+    XLSX.writeFile(wb, `Помесячные_пики_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
   };
 
   return (
