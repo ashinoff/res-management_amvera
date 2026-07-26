@@ -349,6 +349,17 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-27** — «Карта опроса», развитие (коммит 2/4): приём расширенного среза
+  + хранение ТП (ОБРАТНО СОВМЕСТИМО, Опрос задеплоят позже). Элемент `meters`
+  интеграции теперь массив из 3 ИЛИ 5 полей `[serial, spodes01, collected01, tp,
+  tu_path]`; валидация `bad_payload` = «длина >= 3» (уже была `< 3`), поля 4-5
+  читаются при наличии/непустоте, иначе null. `PolledMeter` += `tp` (STRING),
+  `tpNorm` (STRING, индекс `idx_polledmeter_tpnorm`), `tuPath` (TEXT) — через явные
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` в `initializeDatabase()` (`sequelize.sync`
+  колонки не добавляет). Общая `normTpName()` (верхний регистр, без пробелов/дефисов/
+  подчёркиваний, срез ведущего `ТП`/`TP`) — применяется одинаково к именам ТП
+  структуры и к `tp` из среза. `sync` пишет новые поля (null при старом формате;
+  при дубле serialNorm дозаполняет пустые tp/tuPath). Только backend. node --check — ОК.
 - **2026-07-27** — «Карта опроса», развитие (коммит 1/4): тех.учёты секций в карте.
   Backend `GET /api/poll-map`: третьим `findAll` тянется `TpSection` (тот же
   `where` по resId, `include ResUnit`); `sectionRows` = {id, resId, resName, tpName,

@@ -463,7 +463,12 @@ const PolledMeter = sequelize.define('PolledMeter', {
   serialNorm: { type: DataTypes.STRING, allowNull: false },  // индекс — в initializeDatabase
   isSpodes: { type: DataTypes.BOOLEAN, defaultValue: false },
   isCollected: { type: DataTypes.BOOLEAN, defaultValue: false },
-  snapshotAt: { type: DataTypes.DATE, allowNull: true }
+  snapshotAt: { type: DataTypes.DATE, allowNull: true },
+  // Расширенный срез (Опрос отдаёт после апдейта): ТП и точка учёта ПУ.
+  // Старый 3-польный формат оставляет их null. Колонки/индекс — в initializeDatabase.
+  tp: { type: DataTypes.STRING, allowNull: true },
+  tpNorm: { type: DataTypes.STRING, allowNull: true },   // нормализованное имя ТП, индекс
+  tuPath: { type: DataTypes.TEXT, allowNull: true }
 });
 
 // 3c. Случай перегрузки секции (workflow мероприятий по превышению Pном, этап 3).
@@ -1341,6 +1346,10 @@ app.get('/api/network/structure/:resId?', authenticateToken, async (req, res) =>
 // ===== КАРТА ОПРОСА СТРУКТУРЫ (интеграция с «Опрос ПУ»/Пирамида) =====
 // Нормализация серийника: trim, без пробелов, без ведущих нулей.
 const normSerial = (v) => String(v == null ? '' : v).trim().replace(/\s+/g, '').replace(/^0+/, '');
+// Нормализация имени ТП для сверки структуры со срезом Пирамиды: верхний регистр,
+// без пробелов/дефисов/подчёркиваний, срезаем ведущий префикс ТП/TP. Применять
+// ОДИНАКОВО к именам ТП структуры и к полю tp из среза.
+const normTpName = (v) => String(v == null ? '' : v).toUpperCase().replace(/[\s\-_]/g, '').replace(/^(ТП|TP)/, '');
 
 // Синхронизация среза реестра «Опрос ПУ» (полностью замещает PolledMeter).
 // Ответ на ошибку — структурированный { error, code, hint, detail }, чтобы фронт
@@ -1486,13 +1495,19 @@ app.post('/api/poll-map/sync', authenticateToken, checkRole(['admin', 'uec_respo
     const serial = row[0];
     const spodes = row[1] == 1 || row[1] === true;
     const collected = row[2] == 1 || row[2] === true;
+    // Поля 4-5 расширенного формата (при наличии): ТП и точка учёта. Старый
+    // 3-польный формат → null (обратная совместимость).
+    const tp = row.length > 3 && row[3] != null && row[3] !== '' ? String(row[3]) : null;
+    const tuPath = row.length > 4 && row[4] != null && row[4] !== '' ? String(row[4]) : null;
     const norm = normSerial(serial);
     if (!norm) continue;
     const prev = byNorm.get(norm);
-    if (!prev) byNorm.set(norm, { serialRaw: String(serial), serialNorm: norm, isSpodes: spodes, isCollected: collected, snapshotAt });
+    if (!prev) byNorm.set(norm, { serialRaw: String(serial), serialNorm: norm, isSpodes: spodes, isCollected: collected, tp, tpNorm: tp ? normTpName(tp) : null, tuPath, snapshotAt });
     else {
       if (collected) prev.isCollected = true;
       if (spodes) prev.isSpodes = true;
+      if (!prev.tp && tp) { prev.tp = tp; prev.tpNorm = normTpName(tp); }
+      if (!prev.tuPath && tuPath) prev.tuPath = tuPath;
     }
   }
   const rowsToInsert = [...byNorm.values()];
@@ -6130,6 +6145,11 @@ async function initializeDatabase() {
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_smp_unique ON "SectionMonthlyPeaks" ("sectionId", "year", "month")`,
       // Карта опроса: матчинг по нормализованному серийнику.
       `CREATE INDEX IF NOT EXISTS idx_polledmeter_norm ON "PolledMeters" ("serialNorm")`,
+      // Расширенный срез (ТП/точка учёта) — sequelize.sync колонки не добавляет.
+      `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "tp" VARCHAR(255)`,
+      `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "tpNorm" VARCHAR(255)`,
+      `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "tuPath" TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_polledmeter_tpnorm ON "PolledMeters" ("tpNorm")`,
       // Источник ряда и дата обновления профиля на секции (для модалки техучёта)
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileSource" VARCHAR(10)`,
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileAt" TIMESTAMP WITH TIME ZONE`
