@@ -1343,33 +1343,142 @@ app.get('/api/network/structure/:resId?', authenticateToken, async (req, res) =>
 const normSerial = (v) => String(v == null ? '' : v).trim().replace(/\s+/g, '').replace(/^0+/, '');
 
 // Синхронизация среза реестра «Опрос ПУ» (полностью замещает PolledMeter).
+// Ответ на ошибку — структурированный { error, code, hint, detail }, чтобы фронт
+// показал человеку понятную подсказку, а «программисту» — code/detail.
+// Ключ OPROS_API_KEY НИКОГДА не попадает в ответ/лог (даже частично); OPROS_URL — можно.
 app.post('/api/poll-map/sync', authenticateToken, checkRole(['admin', 'uec_responsible']), async (req, res) => {
-  if (!process.env.OPROS_URL || !process.env.OPROS_API_KEY) {
-    return res.status(503).json({ error: 'Интеграция с «Опрос ПУ» не настроена (нет OPROS_URL/OPROS_API_KEY)' });
+  const url = process.env.OPROS_URL;
+  const key = process.env.OPROS_API_KEY;
+
+  // 1) not_configured — нет URL и/или ключа.
+  if (!url || !key) {
+    const missing = [!url && 'OPROS_URL', !key && 'OPROS_API_KEY'].filter(Boolean).join(' и ');
+    console.warn(`[poll-map/sync] not_configured — не заданы: ${missing}`);
+    return res.status(503).json({
+      error: 'Интеграция с «Опрос ПУ» не настроена',
+      code: 'not_configured',
+      hint: `Не заданы переменные: ${missing}. Добавьте их в env Мониторинга на Amvera и нажмите «Пересобрать».`,
+      detail: `отсутствует env: ${missing}`
+    });
   }
-  let payload;
+  const base = url.replace(/\/$/, '');
+
+  // Сетевая стадия: fetch до получения ответа.
+  let resp;
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 60000);
-    let resp;
     try {
-      resp = await fetch(`${process.env.OPROS_URL.replace(/\/$/, '')}/api/integration/meters`, {
-        headers: { 'X-Api-Key': process.env.OPROS_API_KEY },
+      resp = await fetch(`${base}/api/integration/meters`, {
+        headers: { 'X-Api-Key': key },
         signal: ctrl.signal
       });
     } finally { clearTimeout(timer); }
-    if (!resp.ok) {
-      const txt = resp.status === 401 ? 'неверный ключ (401)' : `код ${resp.status}`;
-      return res.status(502).json({ error: `«Опрос ПУ» вернул ошибку: ${txt}` });
-    }
-    payload = await resp.json();
   } catch (e) {
-    const msg = e.name === 'AbortError' ? 'таймаут (60с)' : e.message;
-    return res.status(502).json({ error: `Не удалось получить срез из «Опрос ПУ»: ${msg}` });
+    // 2) dns_or_network — не дошли до ответа (ENOTFOUND/ECONNREFUSED/таймаут…).
+    const nodeCode = e.name === 'AbortError' ? 'ETIMEDOUT/abort'
+      : (e.cause && e.cause.code) || e.code || e.name || 'NETWORK_ERROR';
+    console.warn(`[poll-map/sync] dns_or_network — ${nodeCode}`);
+    return res.status(502).json({
+      error: '«Опрос ПУ» недоступен',
+      code: 'dns_or_network',
+      hint: `Опрос ПУ недоступен: проверьте OPROS_URL (сейчас: ${base}) и что приложение «Опрос ПУ» запущено.`,
+      detail: e.name === 'AbortError' ? 'таймаут 60с (abort)' : `код ошибки Node: ${nodeCode}`
+    });
   }
 
-  const meters = Array.isArray(payload && payload.meters) ? payload.meters : [];
-  const snapshotAt = payload && payload.snapshot_at ? new Date(payload.snapshot_at) : new Date();
+  // Стадии по статусу апстрима.
+  if (resp.status === 401) {
+    console.warn('[poll-map/sync] upstream_401 — ключ не принят');
+    return res.status(502).json({
+      error: '«Опрос ПУ» отклонил ключ (401)',
+      code: 'upstream_401',
+      hint: 'Ключи не совпадают: OPROS_API_KEY в Мониторинге должен быть равен INTEGRATION_API_KEY в «Опросе ПУ». После правки env — «Пересобрать» то приложение, где меняли ключ.',
+      detail: 'integration-endpoint вернул HTTP 401'
+    });
+  }
+  if (resp.status === 503) {
+    console.warn('[poll-map/sync] upstream_503 — в Опросе не настроена интеграция');
+    return res.status(502).json({
+      error: 'В «Опросе ПУ» не настроена интеграция (503)',
+      code: 'upstream_503',
+      hint: 'В «Опросе ПУ» не задан INTEGRATION_API_KEY — добавьте его и пересоберите «Опрос ПУ».',
+      detail: 'integration-endpoint вернул HTTP 503'
+    });
+  }
+  if (resp.status === 404) {
+    console.warn('[poll-map/sync] upstream_404 — старая версия Опроса');
+    return res.status(502).json({
+      error: 'Endpoint интеграции не найден (404)',
+      code: 'upstream_404',
+      hint: '«Опрос ПУ» работает, но это старая версия без integration-endpoint — нажмите «Пересобрать» у «Опроса ПУ».',
+      detail: 'integration-endpoint вернул HTTP 404'
+    });
+  }
+  if (!resp.ok) {
+    // 6) upstream_other — иной статус: в detail статус + первые 200 символов тела.
+    let body = '';
+    try { body = (await resp.text()).slice(0, 200); } catch { /* тело недоступно */ }
+    console.warn(`[poll-map/sync] upstream_other — HTTP ${resp.status}`);
+    return res.status(502).json({
+      error: `«Опрос ПУ» вернул неожиданный ответ (${resp.status})`,
+      code: 'upstream_other',
+      hint: 'Неожиданный ответ «Опроса ПУ». Проверьте состояние приложения «Опрос ПУ» и повторите позже.',
+      detail: `HTTP ${resp.status}; тело: ${body}`
+    });
+  }
+
+  // 7) bad_payload — 200, но JSON не распарсился / нет meters / элементы не тройки.
+  let payload;
+  try {
+    payload = await resp.json();
+  } catch {
+    console.warn('[poll-map/sync] bad_payload — JSON не распарсился');
+    return res.status(502).json({
+      error: 'Некорректный ответ «Опроса ПУ»',
+      code: 'bad_payload',
+      hint: '«Опрос ПУ» ответил, но тело не является JSON. Возможно, между системами прокси или заглушка. Проверьте OPROS_URL.',
+      detail: 'ответ 200, но JSON не распарсился'
+    });
+  }
+  const meters = payload && payload.meters;
+  if (!Array.isArray(meters)) {
+    console.warn('[poll-map/sync] bad_payload — нет массива meters');
+    return res.status(502).json({
+      error: 'Некорректный ответ «Опроса ПУ»',
+      code: 'bad_payload',
+      hint: 'В ответе «Опроса ПУ» нет поля meters (массива). Обновите «Опрос ПУ» до актуальной версии.',
+      detail: 'поле meters отсутствует или не является массивом'
+    });
+  }
+  const badRow = meters.find(r => !Array.isArray(r) || r.length < 3);
+  if (badRow !== undefined) {
+    console.warn('[poll-map/sync] bad_payload — элемент meters не тройка');
+    return res.status(502).json({
+      error: 'Некорректный ответ «Опроса ПУ»',
+      code: 'bad_payload',
+      hint: 'Формат элементов meters не [serial, spodes, collected]. Обновите «Опрос ПУ».',
+      detail: `элемент meters не является тройкой: ${JSON.stringify(badRow).slice(0, 120)}`
+    });
+  }
+
+  // 8) empty_snapshot — валидно, но пусто. Не ошибка: существующий срез НЕ затираем.
+  if (meters.length === 0) {
+    const existing = await PolledMeter.count();
+    console.warn(`[poll-map/sync] empty_snapshot — срез пуст (сохранён прежний: ${existing})`);
+    return res.status(200).json({
+      warning: true,
+      code: 'empty_snapshot',
+      hint: existing > 0
+        ? 'В «Опросе ПУ» нет успешных загрузок — срез пуст. Прежний срез сохранён, карта не обнулена. Загрузите выгрузку Пирамиды в «Опрос ПУ».'
+        : 'В «Опросе ПУ» нет успешных загрузок — срез пуст. Загрузите выгрузку Пирамиды в «Опрос ПУ», затем синхронизируйте снова.',
+      total: 0, collected: 0, spodes: 0,
+      snapshotAt: (payload && payload.snapshot_at) || null,
+      keptExisting: existing
+    });
+  }
+
+  const snapshotAt = payload.snapshot_at ? new Date(payload.snapshot_at) : new Date();
 
   // Дедуп по serialNorm: collected=1 побеждает, затем spodes=1.
   const byNorm = new Map();
@@ -1398,13 +1507,19 @@ app.post('/api/poll-map/sync', authenticateToken, checkRole(['admin', 'uec_respo
     await transaction.commit();
   } catch (e) {
     await transaction.rollback();
-    console.error('poll-map sync db error:', e.message);
-    return res.status(500).json({ error: 'Ошибка записи среза в БД: ' + e.message });
+    console.error('[poll-map/sync] db_error —', e.message);
+    return res.status(500).json({
+      error: 'Ошибка записи среза в БД',
+      code: 'db_error',
+      hint: 'Срез получен, но не записался в базу Мониторинга. Прежний срез сохранён. Повторите синхронизацию; если повторяется — сообщите программисту.',
+      detail: e.message
+    });
   }
 
   const collected = rowsToInsert.filter(r => r.isCollected).length;
   const spodes = rowsToInsert.filter(r => r.isSpodes).length;
-  res.json({ total: rowsToInsert.length, collected, spodes, snapshotAt });
+  console.log(`[poll-map/sync] ok — total ${rowsToInsert.length}, collected ${collected}, spodes ${spodes}`);
+  res.json({ code: 'ok', total: rowsToInsert.length, collected, spodes, snapshotAt });
 });
 
 // Карта опроса: структура × срез «Опрос ПУ». Всё двумя findAll, без циклов-запросов.

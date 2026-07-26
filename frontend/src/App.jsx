@@ -8540,10 +8540,18 @@ function PollMap({ selectedRes }) {
     setSyncing(true); setNotice(null);
     try {
       const { data } = await api.post('/api/poll-map/sync');
-      setNotice({ type: 'ok', text: `Срез обновлён: ПУ ${data.total}, собирается ${data.collected}, СПОДЭС ${data.spodes}` });
-      await load();
+      if (data.warning || data.code === 'empty_snapshot') {
+        // Пустой срез — не ошибка, но и не успех: жёлтый баннер, прежние данные сохранены.
+        setNotice({ type: 'warn', text: data.hint, code: data.code });
+        await load();
+      } else {
+        const dt = data.snapshotAt ? new Date(data.snapshotAt).toLocaleString('ru-RU') : '—';
+        setNotice({ type: 'ok', text: `Синхронизировано: ${data.total} ПУ, из них собирается ${data.collected}, СПОДЭС ${data.spodes}, срез от ${dt}` });
+        await load();
+      }
     } catch (e) {
-      setNotice({ type: 'err', text: e.response?.data?.error || 'Ошибка синхронизации' });
+      const d = e.response?.data || {};
+      setNotice({ type: 'err', text: d.hint || d.error || 'Ошибка синхронизации', code: d.code, detail: d.detail });
     } finally { setSyncing(false); }
   };
 
@@ -8651,7 +8659,14 @@ function PollMap({ selectedRes }) {
 
       {notice && (
         <div className={`poll-notice ${notice.type}`}>
-          {notice.type === 'ok' ? <IconCheck className="ico" /> : <IconAlertTriangle className="ico" />} {notice.text}
+          <div className="poll-notice-main">
+            {notice.type === 'ok' ? <IconCheck className="ico" /> : <IconAlertTriangle className="ico" />} {notice.text}
+          </div>
+          {(notice.code || notice.detail) && (
+            <div className="poll-notice-tech">
+              {notice.code && <code>{notice.code}</code>}{notice.detail ? ` · ${notice.detail}` : ''}
+            </div>
+          )}
         </div>
       )}
 

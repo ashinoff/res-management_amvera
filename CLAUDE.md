@@ -349,6 +349,29 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-27** — «Карта опроса», диагностика ошибок sync (коммит 1). Backend
+  `POST /api/poll-map/sync` вместо общих 502/503 отдаёт структурированный
+  `{ error, code, hint, detail }`, различая стадии: `not_configured` (нет
+  OPROS_URL/OPROS_API_KEY — hint перечисляет какой именно, 503),
+  `dns_or_network` (fetch упал до ответа — ENOTFOUND/ECONNREFUSED/таймаут-abort
+  60с; hint c текущим OPROS_URL, detail=код Node, 502), `upstream_401`
+  (ключи не совпадают — подсказка про равенство OPROS_API_KEY↔INTEGRATION_API_KEY
+  и пересборку), `upstream_503` (в Опросе не задан INTEGRATION_API_KEY),
+  `upstream_404` (старая версия Опроса без endpoint), `upstream_other` (detail =
+  статус + первые 200 симв. тела), `bad_payload` (200, но JSON не распарсился/нет
+  массива meters/элемент не тройка), `empty_snapshot` (**200 c warning**, НЕ
+  ошибка: существующий непустой PolledMeter НЕ затирается — `count()` до записи,
+  ранний выход без destroy; hint зависит от наличия прежнего среза). Ключ
+  OPROS_API_KEY нигде не светится (ответ/лог); OPROS_URL — можно. В лог сервера —
+  стадия+статус одной строкой (`[poll-map/sync] <code> …`). Успех теперь
+  `{ code:'ok', total, collected, spodes, snapshotAt }`, db-ошибка → `code:'db_error'`
+  (прежний срез сохранён транзакцией). Frontend `PollMap.sync`: успех — баннер
+  «Синхронизировано: N ПУ, из них собирается M, СПОДЭС K, срез от <дата>»;
+  `empty_snapshot` → жёлтый баннер (`.poll-notice.warn`); ошибка — hint человеку +
+  мелким `code · detail` (`.poll-notice-tech`) для передачи программисту. Баннер
+  стал колоночным (`.poll-notice-main`/`-tech`). node --check / npm run build — ОК.
+  ⚠️ Полная эмуляция стадий на живом сервере не гонялась локально (нет Postgres) —
+  ветвление проверено ревью + сборкой; прогнать на Amvera после деплоя.
 - **2026-07-26** — «Карта опроса», коммит 2 (frontend). Пункт меню «Карта опроса»
   (`IconMapPin`, роли admin/res_responsible/uec_responsible), роут `poll_map`,
   компонент `PollMap`: PageHeader (неоновая иконка, без внешней рамки). Верхняя
