@@ -349,6 +349,21 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — «Карта опроса», коммит 1 (backend). Env `OPROS_URL`/`OPROS_API_KEY`
+  (без них `/api/poll-map/sync` → 503, остальное работает). Модель `PolledMeter`
+  (serialRaw, serialNorm[индекс `idx_polledmeter_norm`], isSpodes, isCollected,
+  snapshotAt) — таблица через `sync()`. `normSerial` = trim/без пробелов/без ведущих
+  нулей. `POST /api/poll-map/sync` (admin+uec_responsible): fetch
+  `${OPROS_URL}/api/integration/meters` (X-Api-Key, таймаут 60с), формат
+  `{snapshot_at,count,meters:[[serial,spodes01,collected01],…]}`; дедуп по serialNorm
+  (collected>spodes), в транзакции очистка+`bulkCreate` батчами 1000 (ошибка апстрима
+  502 понятным текстом, старый срез не затирается); ответ `{total,collected,spodes,
+  snapshotAt}`. `GET /api/poll-map` (auth; res_responsible — свой resId): структура
+  (`NetworkStructure`+ResUnit) × срез одним findAll в Map по serialNorm → per-ПУ
+  `status` collected/not_collected/absent/no_pu + spodes; сводка по РЭС и итого
+  (totalPu/collected/notCollected/absent/spodes/noPu/coveragePct); `orphans` (серийники
+  среза не в структуре); `snapshotAt`, `noData`. Без запросов в циклах. Роль
+  `uec_responsible` в enum нет — в checkRole указана на будущее. node --check — ОК.
 - **2026-07-26** — «Уведомления» (Ожидающие мероприятий/проверки): в строку
   «Выбрать все» (`.notif-toolbar`, теперь рендерится всегда — чекбокс только у
   админа) добавлены: счётчик «Показано: N [из M]», фильтр по периоду (месяц

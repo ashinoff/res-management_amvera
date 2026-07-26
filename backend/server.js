@@ -454,6 +454,18 @@ const SectionMonthlyPeak = sequelize.define('SectionMonthlyPeak', {
   source: { type: DataTypes.STRING, allowNull: true }     // '30' | '60'
 });
 
+// 3d. Срез реестра «Опрос ПУ» (Пирамида) — для «Карты опроса структуры сети».
+// Полностью замещается при каждой синхронизации. serialNorm — нормализованный
+// серийник (trim/без пробелов/без ведущих нулей) для матчинга со структурой.
+const PolledMeter = sequelize.define('PolledMeter', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  serialRaw: { type: DataTypes.STRING, allowNull: true },
+  serialNorm: { type: DataTypes.STRING, allowNull: false },  // индекс — в initializeDatabase
+  isSpodes: { type: DataTypes.BOOLEAN, defaultValue: false },
+  isCollected: { type: DataTypes.BOOLEAN, defaultValue: false },
+  snapshotAt: { type: DataTypes.DATE, allowNull: true }
+});
+
 // 3c. Случай перегрузки секции (workflow мероприятий по превышению Pном, этап 3).
 // Живёт на секции (sectionId), не на ВЛ. Стадии: askue_limit → res_work →
 // awaiting_recheck → completed. cycles растёт при повторном перегрузе.
@@ -1322,6 +1334,148 @@ app.get('/api/network/structure/:resId?', authenticateToken, async (req, res) =>
 
     res.json(structures);
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== КАРТА ОПРОСА СТРУКТУРЫ (интеграция с «Опрос ПУ»/Пирамида) =====
+// Нормализация серийника: trim, без пробелов, без ведущих нулей.
+const normSerial = (v) => String(v == null ? '' : v).trim().replace(/\s+/g, '').replace(/^0+/, '');
+
+// Синхронизация среза реестра «Опрос ПУ» (полностью замещает PolledMeter).
+app.post('/api/poll-map/sync', authenticateToken, checkRole(['admin', 'uec_responsible']), async (req, res) => {
+  if (!process.env.OPROS_URL || !process.env.OPROS_API_KEY) {
+    return res.status(503).json({ error: 'Интеграция с «Опрос ПУ» не настроена (нет OPROS_URL/OPROS_API_KEY)' });
+  }
+  let payload;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60000);
+    let resp;
+    try {
+      resp = await fetch(`${process.env.OPROS_URL.replace(/\/$/, '')}/api/integration/meters`, {
+        headers: { 'X-Api-Key': process.env.OPROS_API_KEY },
+        signal: ctrl.signal
+      });
+    } finally { clearTimeout(timer); }
+    if (!resp.ok) {
+      const txt = resp.status === 401 ? 'неверный ключ (401)' : `код ${resp.status}`;
+      return res.status(502).json({ error: `«Опрос ПУ» вернул ошибку: ${txt}` });
+    }
+    payload = await resp.json();
+  } catch (e) {
+    const msg = e.name === 'AbortError' ? 'таймаут (60с)' : e.message;
+    return res.status(502).json({ error: `Не удалось получить срез из «Опрос ПУ»: ${msg}` });
+  }
+
+  const meters = Array.isArray(payload && payload.meters) ? payload.meters : [];
+  const snapshotAt = payload && payload.snapshot_at ? new Date(payload.snapshot_at) : new Date();
+
+  // Дедуп по serialNorm: collected=1 побеждает, затем spodes=1.
+  const byNorm = new Map();
+  for (const row of meters) {
+    const serial = row[0];
+    const spodes = row[1] == 1 || row[1] === true;
+    const collected = row[2] == 1 || row[2] === true;
+    const norm = normSerial(serial);
+    if (!norm) continue;
+    const prev = byNorm.get(norm);
+    if (!prev) byNorm.set(norm, { serialRaw: String(serial), serialNorm: norm, isSpodes: spodes, isCollected: collected, snapshotAt });
+    else {
+      if (collected) prev.isCollected = true;
+      if (spodes) prev.isSpodes = true;
+    }
+  }
+  const rowsToInsert = [...byNorm.values()];
+
+  // Транзакция: старый срез при ошибке НЕ затираем.
+  const transaction = await sequelize.transaction();
+  try {
+    await PolledMeter.destroy({ where: {}, transaction });
+    for (let i = 0; i < rowsToInsert.length; i += 1000) {
+      await PolledMeter.bulkCreate(rowsToInsert.slice(i, i + 1000), { transaction });
+    }
+    await transaction.commit();
+  } catch (e) {
+    await transaction.rollback();
+    console.error('poll-map sync db error:', e.message);
+    return res.status(500).json({ error: 'Ошибка записи среза в БД: ' + e.message });
+  }
+
+  const collected = rowsToInsert.filter(r => r.isCollected).length;
+  const spodes = rowsToInsert.filter(r => r.isSpodes).length;
+  res.json({ total: rowsToInsert.length, collected, spodes, snapshotAt });
+});
+
+// Карта опроса: структура × срез «Опрос ПУ». Всё двумя findAll, без циклов-запросов.
+app.get('/api/poll-map', authenticateToken, async (req, res) => {
+  try {
+    let resId = req.query.resId;
+    if (req.user.role !== 'admin') resId = req.user.resId;  // res_responsible — только свой
+    const where = {};
+    if (resId) where.resId = resId;
+
+    const [structures, meters] = await Promise.all([
+      NetworkStructure.findAll({ where, include: [ResUnit], order: [['tpName', 'ASC'], ['vlName', 'ASC']] }),
+      PolledMeter.findAll()
+    ]);
+
+    const map = new Map();
+    let snapshotAt = null;
+    for (const m of meters) {
+      map.set(m.serialNorm, { isSpodes: m.isSpodes, isCollected: m.isCollected });
+      if (!snapshotAt && m.snapshotAt) snapshotAt = m.snapshotAt;
+    }
+    const noData = meters.length === 0;
+
+    const statusOf = (pu) => {
+      if (!pu) return { status: 'no_pu', spodes: false };
+      const m = map.get(normSerial(pu));
+      if (!m) return { status: 'absent', spodes: false };
+      return { status: m.isCollected ? 'collected' : 'not_collected', spodes: !!m.isSpodes };
+    };
+
+    const structSerials = new Set();
+    const rows = structures.map(s => {
+      [s.startPu, s.middlePu, s.endPu].forEach(p => { if (p) structSerials.add(normSerial(p)); });
+      return {
+        id: s.id, resId: s.resId, resName: s.ResUnit?.name || '',
+        tpName: s.tpName, vlName: s.vlName, sectionId: s.sectionId,
+        startPu: s.startPu, middlePu: s.middlePu, endPu: s.endPu,
+        poll: { start: statusOf(s.startPu), middle: statusOf(s.middlePu), end: statusOf(s.endPu) }
+      };
+    });
+
+    const blank = () => ({ totalPu: 0, collected: 0, notCollected: 0, absent: 0, spodes: 0, noPu: 0 });
+    const acc = (agg, cell) => {
+      if (cell.status === 'no_pu') { agg.noPu++; return; }
+      agg.totalPu++;
+      if (cell.status === 'collected') agg.collected++;
+      else if (cell.status === 'not_collected') agg.notCollected++;
+      else if (cell.status === 'absent') agg.absent++;
+      if (cell.spodes) agg.spodes++;
+    };
+    const byResMap = new Map();
+    const total = blank();
+    for (const r of rows) {
+      if (!byResMap.has(r.resId)) byResMap.set(r.resId, { resId: r.resId, resName: r.resName, ...blank() });
+      const agg = byResMap.get(r.resId);
+      [r.poll.start, r.poll.middle, r.poll.end].forEach(c => { acc(agg, c); acc(total, c); });
+    }
+    const pct = (a) => a.totalPu > 0 ? Math.round((a.collected / a.totalPu) * 100) : 0;
+    const byRes = [...byResMap.values()].map(a => ({ ...a, coveragePct: pct(a) }))
+      .sort((x, y) => (x.resName || '').localeCompare(y.resName || '', 'ru'));
+    const summary = { byRes, total: { ...total, coveragePct: pct(total) } };
+
+    const orphanList = [];
+    for (const m of meters) {
+      if (!structSerials.has(m.serialNorm)) orphanList.push({ serial: m.serialRaw || m.serialNorm, isSpodes: m.isSpodes, isCollected: m.isCollected });
+    }
+    const orphans = { count: orphanList.length, list: orphanList };
+
+    res.json({ snapshotAt, noData, rows, summary, orphans });
+  } catch (error) {
+    console.error('poll-map error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -5832,6 +5986,8 @@ async function initializeDatabase() {
       // Помесячные пики секции: уникальность (sectionId, year, month) — нужна и для
       // ON CONFLICT «максимум побеждает» в пайплайне профиля/бэкфилле.
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_smp_unique ON "SectionMonthlyPeaks" ("sectionId", "year", "month")`,
+      // Карта опроса: матчинг по нормализованному серийнику.
+      `CREATE INDEX IF NOT EXISTS idx_polledmeter_norm ON "PolledMeters" ("serialNorm")`,
       // Источник ряда и дата обновления профиля на секции (для модалки техучёта)
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileSource" VARCHAR(10)`,
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileAt" TIMESTAMP WITH TIME ZONE`
