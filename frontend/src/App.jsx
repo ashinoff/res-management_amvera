@@ -1586,12 +1586,8 @@ const executeClearHistory = async () => {
 
 {/* Модальное окно очистки истории */}
 {showClearHistoryModal && (
-  <div className="modal-backdrop" onClick={() => setShowClearHistoryModal(false)}>
-    <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-      <div className="modal-header">
-        <h3>Подтверждение очистки истории</h3>
-        <button className="close-btn" onClick={() => setShowClearHistoryModal(false)}><IconX className="ico" /></button>
-      </div>
+  <ModalShell variant="confirm" title="Подтверждение очистки истории" className="delete-modal"
+    onClose={() => setShowClearHistoryModal(false)}>
       <div className="modal-body">
         <p>
           {clearHistoryType === 'pu' && `Вы собираетесь очистить всю историю для ПУ ${clearHistoryPu}`}
@@ -1622,8 +1618,7 @@ const executeClearHistory = async () => {
           Очистить историю
         </button>
       </div>
-    </div>
-  </div>
+  </ModalShell>
 )}
 
 {/* Плавающие кнопки действий структуры (этап 3, блок В) */}
@@ -1722,13 +1717,8 @@ const getPhaseErrors = () => {
   const phaseErrors = getPhaseErrors();
   
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-content error-details-modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>Детали проверки ПУ #{details?.puNumber}</h3>
-          <button className="close-btn" onClick={onClose}><IconX className="ico" /></button>
-        </div>
-        
+    <ModalShell title={`Детали проверки ПУ #${details?.puNumber}`} className="error-details-modal"
+      icon={<IconClipboard size={16} />} onClose={onClose}>
         <div className="modal-body">
           <div className="modal-info">
             <p><strong>ТП:</strong> {tpName}</p>
@@ -1751,8 +1741,7 @@ const getPhaseErrors = () => {
         <div className="modal-footer">
           <button className="action-btn" onClick={onClose}>Закрыть</button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -2776,13 +2765,8 @@ const loadNotifications = useCallback(async () => {
 
       {/* Модальное окно деталей */}
       {showDetailsModal && detailsNotification && (
-        <div className="modal-backdrop" onClick={() => setShowDetailsModal(false)}>
-          <div className="modal-content details-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Подробная информация</h3>
-              <button className="close-btn" onClick={() => setShowDetailsModal(false)}><IconX className="ico" /></button>
-            </div>
-            
+        <ModalShell title="Подробная информация" className="details-modal"
+          icon={<IconFileText size={16} />} onClose={() => setShowDetailsModal(false)}>
             <div className="modal-body">
               {detailsNotification.type === 'error' && (
                 <>
@@ -2897,19 +2881,13 @@ const loadNotifications = useCallback(async () => {
                 Закрыть
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* Модальное окно для выполнения мероприятий */}
       {showCompleteModal && selectedNotification && (
-        <div className="modal-backdrop" onClick={() => setShowCompleteModal(false)}>
-          <div className="modal-content complete-work-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Отметить выполнение мероприятий</h3>
-              <button className="close-btn" onClick={() => setShowCompleteModal(false)}><IconX className="ico" /></button>
-            </div>
-            
+        <ModalShell title="Отметить выполнение мероприятий" className="complete-work-modal"
+          icon={<IconWrench size={16} />} onClose={() => setShowCompleteModal(false)}>
             <div className="modal-body">
               <div className="work-info">
                 <p><strong>ТП:</strong> {selectedNotification.data.tpName}</p>
@@ -2990,18 +2968,13 @@ const loadNotifications = useCallback(async () => {
                 {submitting ? 'Отправка...' : 'Подтвердить выполнение'}
                 </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
-      
+
       {/* Модальное окно для удаления */}
       {showDeleteModal && (
-        <div className="modal-backdrop" onClick={() => {setShowDeleteModal(false); setDeletePassword('');}}>
-          <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Подтверждение удаления</h3>
-              <button className="close-btn" onClick={() => {setShowDeleteModal(false); setDeletePassword('');}}><IconX className="ico" /></button>
-            </div>
+        <ModalShell variant="confirm" title="Подтверждение удаления" className="delete-modal"
+          onClose={() => {setShowDeleteModal(false); setDeletePassword('');}}>
             <div className="modal-body">
               <p>Вы собираетесь удалить это уведомление.</p>
               <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
@@ -3030,18 +3003,13 @@ const loadNotifications = useCallback(async () => {
                 Удалить
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* ДОБАВЬТЕ ЭТО МОДАЛЬНОЕ ОКНО: */}
       {showBulkDeleteModal && (
-        <div className="modal-backdrop" onClick={() => {setShowBulkDeleteModal(false); setBulkDeletePassword('');}}>
-          <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Подтверждение удаления</h3>
-              <button className="close-btn" onClick={() => {setShowBulkDeleteModal(false); setBulkDeletePassword('');}}><IconX className="ico" /></button>
-            </div>
+        <ModalShell variant="confirm" title="Подтверждение удаления" className="delete-modal"
+          onClose={() => {setShowBulkDeleteModal(false); setBulkDeletePassword('');}}>
             <div className="modal-body">
               <p>Вы собираетесь удалить {selectedNotificationIds.length} уведомлений.</p>
               <p className="warning"><IconAlertTriangle className="ico" style={{color:'var(--amber)'}} /> Это действие нельзя отменить!</p>
@@ -3070,10 +3038,9 @@ const loadNotifications = useCallback(async () => {
                 Удалить выбранные
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
-      
+
       {/* ДОБАВЬТЕ КНОПКУ ПРОКРУТКИ: */}
       {showScrollTop && (
         <button 
@@ -3643,13 +3610,8 @@ function Reports() {
     
       {/* Модальное окно для комментария */}
       {showCommentModal && selectedComment && (
-        <div className="modal-backdrop" onClick={() => setShowCommentModal(false)}>
-          <div className="modal-content comment-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Комментарий РЭС</h3>
-              <button className="close-btn" onClick={() => setShowCommentModal(false)}><IconX className="ico" /></button>
-            </div>
-            
+        <ModalShell title="Комментарий РЭС" className="comment-modal"
+          icon={<IconMessage size={16} />} onClose={() => setShowCommentModal(false)}>
             <div className="modal-body">
               <div className="comment-info">
                 <p><strong>ТП:</strong> {selectedComment.tpName}</p>
@@ -3673,8 +3635,7 @@ function Reports() {
                 Закрыть
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );
@@ -3849,15 +3810,13 @@ function PowerOverload({ selectedRes }) {
           ? { t: 'Ожидает перепроверки', cls: 'status-pending' }
           : { t: 'Перегруз', cls: 'status-error' };
         return (
-          <div className="modal-backdrop" onClick={() => setDetailsCase(null)}>
-            <div className="modal-content po-details-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h3>{s.tpName} · СШ-{toRoman(s.sectionNumber)}</h3>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span className={`tech-pill ${status.cls}`}>{status.t}</span>
-                  <button className="close-btn" onClick={() => setDetailsCase(null)}><IconX className="ico" /></button>
-                </div>
-              </div>
+          <ModalShell
+            title={<>{s.tpName} · СШ-{toRoman(s.sectionNumber)}</>}
+            dockTitle={`Перегруз: ${s.tpName} СШ-${toRoman(s.sectionNumber)}`}
+            titleExtra={<span className={`tech-pill ${status.cls}`}>{status.t}</span>}
+            className="po-details-modal" icon={<IconZap size={16} />}
+            onClose={() => setDetailsCase(null)}
+          >
               <div className="modal-body">
                 <div className="tech-pmax">
                   <div className="tech-pmax-value">Пик {f1(c.peakKw)} кВт
@@ -3919,8 +3878,7 @@ function PowerOverload({ selectedRes }) {
                 )}
                 <button className="action-btn" onClick={() => setDetailsCase(null)}>Закрыть</button>
               </div>
-            </div>
-          </div>
+          </ModalShell>
         );
       })()}
 
@@ -3929,12 +3887,10 @@ function PowerOverload({ selectedRes }) {
         const s = actionModal.c.section || {};
         const isRes = actionModal.mode === 'res';
         return (
-          <div className="modal-backdrop" onClick={() => setActionModal(null)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h3>{isRes ? 'Мероприятия РЭС выполнены' : 'Ограничение по АСКУЭ выполнено'}</h3>
-                <button className="close-btn" onClick={() => setActionModal(null)}><IconX className="ico" /></button>
-              </div>
+          <ModalShell
+            title={isRes ? 'Мероприятия РЭС выполнены' : 'Ограничение по АСКУЭ выполнено'}
+            icon={<IconWrench size={16} />} onClose={() => setActionModal(null)}
+          >
               <div className="modal-body">
                 <div className="modal-info">
                   <p><strong>ТП:</strong> {s.tpName} · СШ-{toRoman(s.sectionNumber)}</p>
@@ -3966,8 +3922,7 @@ function PowerOverload({ selectedRes }) {
                   {submitting ? 'Отправка...' : 'Подтвердить'}
                 </button>
               </div>
-            </div>
-          </div>
+          </ModalShell>
         );
       })()}
 
@@ -4106,12 +4061,8 @@ const handleSendEmail = async () => {
       
       {/* Модальное окно подтверждения отклонения */}
       {showDeleteModal && (
-        <div className="modal-backdrop" onClick={() => setShowDeleteModal(false)}>
-          <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Рассмотреть без объяснительной</h3>
-              <button className="close-btn" onClick={() => setShowDeleteModal(false)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell variant="confirm" title="Рассмотреть без объяснительной" className="delete-modal"
+          onClose={() => setShowDeleteModal(false)}>
             <div className="modal-body">
               <p>Вы уверены, что хотите закрыть эту проблему без объяснительной записки?</p>
               <div className="problem-summary">
@@ -4142,18 +4093,13 @@ const handleSendEmail = async () => {
                 Закрыть без объяснительной
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
-      
+
       {/* Модальное окно с подробностями */}
       {showDetailsModal && detailsProblem && (
-        <div className="modal-backdrop" onClick={() => setShowDetailsModal(false)}>
-          <div className="modal-content details-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Подробная информация о проблемной ВЛ</h3>
-              <button className="close-btn" onClick={() => setShowDetailsModal(false)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell title="Подробная информация о проблемной ВЛ" className="details-modal"
+          icon={<IconAlertTriangle size={16} />} onClose={() => setShowDetailsModal(false)}>
             <div className="modal-body">
               <h4>{detailsProblem.tpName} - {detailsProblem.vlName}</h4>
               
@@ -4203,19 +4149,13 @@ const handleSendEmail = async () => {
                 Закрыть
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
-      
     {/* НОВОЕ: Модальное окно отправки письма */}
       {showEmailModal && emailProblem && (
-        <div className="modal-backdrop" onClick={() => setShowEmailModal(false)}>
-          <div className="modal-content email-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Направить письмо исполнителю</h3>
-              <button className="close-btn" onClick={() => setShowEmailModal(false)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell title="Направить письмо исполнителю" className="email-modal"
+          icon={<IconMail size={16} />} onClose={() => setShowEmailModal(false)}>
             <div className="modal-body">
               <p>Будет отправлено уведомление ответственному РЭС с требованием предоставить объяснительную записку.</p>
               <div className="problem-summary">
@@ -4237,8 +4177,7 @@ const handleSendEmail = async () => {
                 <IconMail className="ico" /> Отправить уведомление
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );
@@ -4682,12 +4621,9 @@ function FileManagement() {
 
       {/* Массовое удаление выбранных файлов */}
       {showBulkModal && (
-        <div className="modal-backdrop" onClick={() => !bulkDeleting && setShowBulkModal(false)}>
-          <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Удаление выбранных файлов</h3>
-              <button className="close-btn" onClick={() => setShowBulkModal(false)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell variant="confirm" title="Удаление выбранных файлов" className="delete-modal"
+          onClose={() => setShowBulkModal(false)}
+          onBackdrop={() => !bulkDeleting && setShowBulkModal(false)}>
             <div className="modal-body">
               <p>Будет удалено файлов: <strong>{checkedIds.size}</strong>. Файлы удаляются из хранилища и отвязываются от историй проверок. Действие необратимо.</p>
               <input type="password" placeholder="Пароль удаления" value={bulkPassword}
@@ -4700,18 +4636,13 @@ function FileManagement() {
                 {bulkDeleting ? 'Удаление...' : 'Удалить'}
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* Модальное окно удаления */}
       {showDeleteModal && (
-        <div className="modal-backdrop" onClick={() => setShowDeleteModal(false)}>
-          <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Подтверждение удаления файла</h3>
-              <button className="close-btn" onClick={() => setShowDeleteModal(false)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell variant="confirm" title="Подтверждение удаления файла" className="delete-modal"
+          onClose={() => setShowDeleteModal(false)}>
             <div className="modal-body">
               <p>Вы собираетесь удалить файл:</p>
               <p><strong>{selectedFile?.original_name}</strong></p>
@@ -4739,10 +4670,9 @@ function FileManagement() {
                 Удалить
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
-      
+
       {/* Просмотрщик файлов */}
       {showFileViewer && (
         <FileViewer 
@@ -6505,12 +6435,8 @@ function UploadedDocuments() {
       
       {/* Модальное окно удаления файла */}
       {showDeleteModal && (
-        <div className="modal-backdrop" onClick={() => setShowDeleteModal(false)}>
-          <div className="modal-content delete-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Подтверждение удаления файла</h3>
-              <button className="close-btn" onClick={() => setShowDeleteModal(false)}><IconX className="ico" /></button>
-            </div>
+        <ModalShell variant="confirm" title="Подтверждение удаления файла" className="delete-modal"
+          onClose={() => setShowDeleteModal(false)}>
             <div className="modal-body">
               <p>Вы собираетесь удалить файл:</p>
               <p><strong>{selectedFile?.original_name}</strong></p>
@@ -6538,10 +6464,9 @@ function UploadedDocuments() {
                 Удалить
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
-      
+
       {/* Просмотрщик файлов */}
       {showFileViewer && (
         <FileViewer 
