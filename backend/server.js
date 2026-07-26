@@ -5274,6 +5274,32 @@ function resolvePublicId(raw) {
   return raw;
 }
 
+// Токен /api/f → { publicId, name, inline }. Порядок разбора:
+//  1) base64url(JSON {p,n,i}) — новый формат без query-строки;
+//  2) base64url(строка res-management/…) — прежний формат, name/inline из query;
+//  3) сырой public_id (старые ссылки /api/f/res-management%2F… и /api/download).
+function parseFileToken(raw, query) {
+  const q = query || {};
+  const name = q.name || 'file';
+  const inline = q.inline === '1';
+  if (!raw) return { publicId: null, name, inline };
+  try {
+    const decoded = Buffer.from(String(raw), 'base64url').toString('utf8');
+    if (decoded && decoded[0] === '{') {
+      try {
+        const obj = JSON.parse(decoded);
+        if (obj && typeof obj.p === 'string' && obj.p.startsWith('res-management/')) {
+          return { publicId: obj.p, name: obj.n || name, inline: obj.i === 1 || obj.i === '1' };
+        }
+      } catch (e) {}
+    }
+    if (decoded && decoded.startsWith('res-management/')) {
+      return { publicId: decoded, name, inline };
+    }
+  } catch (e) {}
+  return { publicId: raw, name, inline };
+}
+
 // Кэш РАБОЧЕГО delivery-URL: publicId -> url (без TTL), чтобы не делать по 4-6
 // запросов к Cloudinary на каждое открытие файла.
 const fileVariantCache = new Map();
@@ -5281,13 +5307,14 @@ const fileVariantCache = new Map();
 async function handleFileProxy(req, res) {
   try {
     // Express УЖЕ декодировал параметр — второй decodeURIComponent падал на литеральном '%'.
-    const publicId = resolvePublicId(req.params.public_id);
+    const parsed = parseFileToken(req.params.public_id, req.query);
+    const publicId = parsed.publicId;
     // Защита от открытого прокси: отдаём только файлы нашего аккаунта.
     if (!publicId || !publicId.startsWith('res-management/')) {
       return res.status(403).json({ error: 'Недопустимый идентификатор файла' });
     }
-    const originalName = req.query.name || 'file';
-    const inline = req.query.inline === '1';
+    const originalName = parsed.name || 'file';
+    const inline = parsed.inline;
 
     const isPdf = publicId.toLowerCase().endsWith('.pdf');
     const primary = isPdf ? 'raw' : 'image';

@@ -349,6 +349,13 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — Файловый токен без query-строки, коммит 2. Backend `parseFileToken`
+  (в `handleFileProxy`): (1) base64url(JSON `{p,n,i}`) — новый формат без query;
+  (2) base64url(строка `res-management/…`) — прежний, name/inline из query;
+  (3) сырой public_id (старые ссылки/`/api/download`). Все форматы живы (проверено
+  юнит-парсером). Frontend `fileProxyUrl` собирает `toBase64Url(JSON.stringify(
+  {p:public_id,n:name,i:0|1}))` без query. Diag не затронут (шлёт base64url строки,
+  разбирается `resolvePublicId`). node --check / npm run build — ОК.
 - **2026-07-26** — Просмотр вложений БЕЗ навигации (Яндекс Protect режет
   навигацию на `/api/f/...&inline=1`, фоновые XHR — нет), коммит 1. `FileViewer`
   переписан: файл тянется `api.get(fileProxyUrl(f,true),{responseType:'blob'})`,

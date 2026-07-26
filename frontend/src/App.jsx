@@ -29,13 +29,14 @@ const toBase64Url = (str) => {
 
 // Все файлы (фото/PDF из Cloudinary) показываем и скачиваем ТОЛЬКО через свой
 // бэкенд (/api/f) — прямые ссылки на res.cloudinary.com блокируются браузерами,
-// а слова download/attachment_ в пути режут блокировщики (ERR_BLOCKED_BY_CLIENT),
-// поэтому public_id прячем в base64url. inline=true — открыть в браузере.
+// а слова download/attachment_ и query-строка в пути режут блокировщики
+// (ERR_BLOCKED_BY_CLIENT). Поэтому public_id+name+inline прячем в ОДИН base64url
+// JSON-токен {p,n,i} — без query-строки. inline=true — открыть в браузере.
 const fileProxyUrl = (file, inline = false) => {
   if (!file) return '';
   if (!file.public_id) return file.url; // старые записи без public_id — как было
-  const q = `name=${encodeURIComponent(file.original_name || 'file')}${inline ? '&inline=1' : ''}`;
-  return `${API_URL}/api/f/${toBase64Url(file.public_id)}?${q}`;
+  const token = toBase64Url(JSON.stringify({ p: file.public_id, n: file.original_name || 'file', i: inline ? 1 : 0 }));
+  return `${API_URL}/api/f/${token}`;
 };
 // ── Оформление Excel-выгрузок (xlsx-js-style) ────────────────────────────────
 // Аккуратно, «как в качественном ПО»: тёмно-синяя шапка с белым жирным текстом,
