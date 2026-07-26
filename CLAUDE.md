@@ -349,6 +349,17 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-26** — Файловый прокси, «доставка», коммит 1: diag читает причину
+  отказа доставки. `cloudinaryProbe` для НАЙДЕННОЙ через `api.resource` комбинации
+  дополнительно fetch'ит 4 delivery-URL и возвращает `deliveryTests[{label,status,
+  xCldError}]`: (a) текущий прокси-URL `cloudinary.url(...sign_url:true)`, (b) он же
+  + `version` из ответа resource, (c) `resource.secure_url` как есть, (d) без
+  `sign_url`. Читается заголовок **`x-cld-error`** (официальная причина отказа
+  Cloudinary). Фронт «Управление файлами» → модалка диагностики: таблица
+  «вариант/HTTP/x-cld-error» + примечание, что CDN кеширует 40x-ошибки до ~24 ч
+  (asset может существовать, а старый delivery-URL ещё отдавать закешированный
+  отказ). node --check / npm run build — ОК. **TODO:** прогнать diag по
+  `res-management/attachment_1784876684686__824_*.pdf`, записать статусы/x-cld-error.
 - **2026-07-26** — «Настройки → Управление файлами»: чекбоксы + удаление выбранных
   (только фронт, App.jsx/App.css). Отдельное состояние `checkedIds` (не путать с
   `selectedFiles` просмотрщика), чекбокс на карточке (`.file-check`, выделение

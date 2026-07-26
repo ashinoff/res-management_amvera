@@ -4514,6 +4514,27 @@ function FileManagement() {
                       ))}
                     </tbody>
                   </table>
+
+                  {diag.data.deliveryTests && diag.data.deliveryTests.length > 0 && (
+                    <>
+                      <p style={{ margin: '14px 0 6px', fontWeight: 600 }}>Доставка (delivery-URL) найденной комбинации:</p>
+                      <table className="diag-table">
+                        <thead><tr><th>Вариант URL</th><th>HTTP</th><th>x-cld-error</th></tr></thead>
+                        <tbody>
+                          {diag.data.deliveryTests.map((t, i) => (
+                            <tr key={i}>
+                              <td style={{ textAlign: 'left' }}>{t.label}</td>
+                              <td>{t.status == null ? '—' : <span style={{ color: t.status >= 200 && t.status < 300 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{t.status}</span>}</td>
+                              <td style={{ textAlign: 'left', color: t.xCldError ? 'var(--red)' : 'var(--text-muted)' }}>{t.xCldError || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                        <IconInfo className="ico" style={{ color: 'var(--blue)' }} /> Cloudinary CDN кеширует ошибки доставки (40x) до ~24 ч (экспоненциально): если комбинация в первой таблице найдена (asset существует), но delivery-URL всё ещё отдаёт ошибку — это может быть закешированный отказ, который сам истечёт. Рабочий URL из `resource.secure_url` при этом уже отдаёт файл.
+                      </p>
+                    </>
+                  )}
                 </>
               ) : null}
             </div>

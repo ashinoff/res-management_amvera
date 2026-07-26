@@ -5366,23 +5366,50 @@ async function cloudinaryProbe(publicId) {
   const idVariants = [{ label: 'as-is', id: publicId }];
   if (withoutExt !== publicId) idVariants.push({ label: 'no-ext', id: withoutExt });
   const results = [];
-  let found = null;
+  let found = null, foundResource = null;
   for (const rtype of ['image', 'raw']) {
     for (const type of ['upload', 'authenticated']) {
       for (const v of idVariants) {
         const combo = { resource_type: rtype, type, idVariant: v.label, publicId: v.id };
         try {
           const r = await cloudinary.api.resource(v.id, { resource_type: rtype, type });
-          const ok = { ...combo, ok: true, bytes: r.bytes, format: r.format, created_at: r.created_at };
+          const ok = { ...combo, ok: true, bytes: r.bytes, format: r.format, created_at: r.created_at, version: r.version };
           results.push(ok);
-          if (!found) found = ok;
+          if (!found) { found = ok; foundResource = r; }
         } catch (e) {
           results.push({ ...combo, ok: false, http: (e && (e.error?.http_code || e.http_code)) || null });
         }
       }
     }
   }
-  return { publicId, ext, found, results };
+
+  // Для НАЙДЕННОЙ комбинации проверяем реальную ДОСТАВКУ по нескольким delivery-URL
+  // и читаем заголовок x-cld-error (официальная причина отказа Cloudinary).
+  let deliveryTests = null;
+  if (found && foundResource) {
+    const rt = found.resource_type, type = found.type, id = found.publicId, r = foundResource;
+    const variants = [
+      { label: 'proxy (как сейчас, signed)', url: cloudinary.url(id, { resource_type: rt, type, secure: true, sign_url: true }) },
+      { label: 'signed + version', url: cloudinary.url(id, { resource_type: rt, type, secure: true, sign_url: true, version: r.version }) },
+      { label: 'resource.secure_url', url: r.secure_url },
+      { label: 'unsigned', url: cloudinary.url(id, { resource_type: rt, type, secure: true }) },
+    ];
+    deliveryTests = [];
+    for (const v of variants) {
+      const t = { label: v.label };
+      try {
+        const resp = await fetch(v.url);
+        t.status = resp.status;
+        t.xCldError = resp.headers.get('x-cld-error') || null;
+        try { resp.body && resp.body.cancel && resp.body.cancel(); } catch (e) {}
+      } catch (e) {
+        t.status = null; t.xCldError = e.message;
+      }
+      deliveryTests.push(t);
+    }
+  }
+
+  return { publicId, ext, found, results, deliveryTests };
 }
 
 app.get('/api/admin/files/diag/:token', authenticateToken, checkRole(['admin']), async (req, res) => {
