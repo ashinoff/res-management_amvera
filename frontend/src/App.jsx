@@ -8511,6 +8511,23 @@ function DatabaseMaintenance() {
   );
 }
 
+// Выводы по точке мониторинга (модалка рекомендаций «Карты опроса»). Тексты — в
+// одном месте; правило — первое совпавшее. В футере replace+planReplace = «К замене».
+const POLL_VERDICTS = {
+  replace:     { priority: 1, color: 'red',   bucket: 'toReplace', text: 'Не опрашивается — точка бесполезна для мониторинга. Заменить на СПОДЭС / включить в опрос' },
+  planReplace: { priority: 2, color: 'amber', bucket: 'toReplace', text: 'Не СПОДЭС — журнал напряжений недоступен. Плановая замена на СПОДЭС' },
+  restore:     { priority: 3, color: 'amber', bucket: 'toRestore', text: 'СПОДЭС, но сбор не идёт — восстановить опрос (связь/маршрут), замена не требуется' },
+  fill:        { priority: 4, color: 'gray',  bucket: 'toFill',    text: 'ПУ не задан — заполнить в структуре' },
+  ok:          { priority: 5, color: 'green', bucket: 'ok',        text: 'В порядке' },
+};
+const pollVerdict = (cell) => {
+  if (cell.status === 'no_pu') return POLL_VERDICTS.fill;
+  if (cell.status === 'absent') return POLL_VERDICTS.replace;
+  if (!cell.spodes) return POLL_VERDICTS.planReplace;           // найден, не СПОДЭС (любой сбор)
+  if (cell.status === 'not_collected') return POLL_VERDICTS.restore;  // СПОДЭС + не собирается
+  return POLL_VERDICTS.ok;                                       // СПОДЭС + собирается
+};
+
 // ═══ Раздел «Карта опроса структуры сети»: сверка ПУ структуры со срезом «Опрос ПУ» ═══
 function PollMap({ selectedRes }) {
   const { user } = useContext(AuthContext);
@@ -8523,6 +8540,9 @@ function PollMap({ selectedRes }) {
   const [statusFilter, setStatusFilter] = useState(null); // collected|not_collected|absent|no_pu
   const [legendCollapsed, setLegendCollapsed] = useState(false);
   const [showOrphans, setShowOrphans] = useState(false);
+  const [recModal, setRecModal] = useState(null); // { title, dockTitle, resName, tpName, items:[{position,pu,cell}] }
+  const [showCandidates, setShowCandidates] = useState(false);
+  const [copiedSerial, setCopiedSerial] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -8608,6 +8628,45 @@ function PollMap({ selectedRes }) {
       <span className="pu-num-line">{pu || ''}</span>
     </div>
   );
+
+  // Лукап кандидатов/совпадения ТП по «resName||tpName».
+  const tpInfo = {};
+  (data?.tps || []).forEach(t => { tpInfo[t.resName + '||' + t.tpName] = t; });
+  const tpDataAvailable = !!data?.tpDataAvailable;
+
+  // Мини-сводка ВЛ: Y — ПУ с заданными номерами, X — собирается, K — СПОДЭС.
+  const vlMini = (r) => {
+    const assigned = [r.startPu, r.middlePu, r.endPu];
+    const cells = [r.poll.start, r.poll.middle, r.poll.end];
+    const idx = assigned.map((p, i) => (p ? i : -1)).filter(i => i >= 0);
+    const Y = idx.length;
+    const X = idx.filter(i => cells[i].status === 'collected').length;
+    const K = idx.filter(i => cells[i].spodes).length;
+    if (Y === 0) return <span className="poll-vl-mini muted">ПУ не заданы</span>;
+    const cls = X === Y ? 'green' : X === 0 ? 'red' : 'amber';
+    return <span className="poll-vl-mini">опрос: <b className={`mini-${cls}`}>{X}/{Y}</b> · СПОДЭС: {K} из {Y}</span>;
+  };
+
+  // Открыть модалку рекомендаций по ВЛ / по секции (тех.учёту).
+  const openVlRec = (r) => setRecModal({
+    resName: r.resName, tpName: r.tpName,
+    title: `${r.tpName} — ${r.vlName} · рекомендации`,
+    dockTitle: `${r.tpName} — ${r.vlName}`,
+    items: [
+      { position: 'Начало', pu: r.startPu, cell: r.poll.start },
+      { position: 'Середина', pu: r.middlePu, cell: r.poll.middle },
+      { position: 'Конец', pu: r.endPu, cell: r.poll.end },
+    ],
+  });
+  const openSecRec = (sec) => setRecModal({
+    resName: sec.resName, tpName: sec.tpName,
+    title: `${sec.tpName} — СШ-${toRoman(sec.sectionNumber)} · рекомендации`,
+    dockTitle: `${sec.tpName} — СШ-${toRoman(sec.sectionNumber)}`,
+    items: [{ position: 'Ввод (тех.учёт)', pu: sec.techPuNumber, cell: sec.poll }],
+  });
+  const copySerial = (s) => {
+    try { navigator.clipboard?.writeText(s); setCopiedSerial(s); setTimeout(() => setCopiedSerial(null), 1200); } catch { /* noop */ }
+  };
 
   const exportExcel = () => {
     if (!data || (!rows.length && !sections.length)) { alert('Нет данных для экспорта'); return; }
@@ -8753,9 +8812,9 @@ function PollMap({ selectedRes }) {
                       <span className="poll-vl-name muted">{tpName}</span>
                       <span className="pu-col-label">Начало</span><span className="pu-col-label">Середина</span><span className="pu-col-label">Конец</span>
                     </div>
-                    {/* Секции шин (тех.учёт на вводе) */}
+                    {/* Секции шин (тех.учёт на вводе) — клик открывает рекомендации */}
                     {byRes[resName][tpName].secs.map(sec => (
-                      <div key={'s' + sec.id} className="poll-grid poll-section-line">
+                      <div key={'s' + sec.id} className="poll-grid poll-section-line poll-row-click" onClick={() => openSecRec(sec)} title="Рекомендации по тех.учёту">
                         <span className="poll-vl-name section-line-name">
                           СШ-{toRoman(sec.sectionNumber)}{sec.tnKva != null ? ` · ${sec.tnKva} кВА` : ''}{sec.techPuNumber ? ` · тех.учёт № ${sec.techPuNumber}` : ''}
                         </span>
@@ -8764,8 +8823,11 @@ function PollMap({ selectedRes }) {
                       </div>
                     ))}
                     {byRes[resName][tpName].vls.map(r => (
-                      <div key={r.id} className="poll-grid">
-                        <span className="poll-vl-name">{r.vlName}</span>
+                      <div key={r.id} className="poll-grid poll-row-click" onClick={() => openVlRec(r)} title="Рекомендации по ВЛ">
+                        <span className="poll-vl-name poll-vl-name--stack">
+                          <span className="poll-vl-title">{r.vlName}</span>
+                          {!data.noData && vlMini(r)}
+                        </span>
                         {puCell(r.startPu, r.poll.start)}
                         {puCell(r.middlePu, r.poll.middle)}
                         {puCell(r.endPu, r.poll.end)}
@@ -8798,6 +8860,85 @@ function PollMap({ selectedRes }) {
             </div>
           )}
         </>
+      )}
+
+      {/* Модалка рекомендаций по ВЛ / тех.учёту */}
+      {recModal && (
+        <ModalShell
+          title={recModal.title}
+          dockTitle={recModal.dockTitle}
+          icon={<IconMapPin size={16} />}
+          className="poll-rec-modal"
+          onClose={() => { setRecModal(null); setShowCandidates(false); }}
+        >
+          {(() => {
+            const nd = !!data?.noData;
+            const enriched = recModal.items.map((it, i) => ({ ...it, order: i, verdict: nd ? null : pollVerdict(it.cell) }));
+            const sorted = nd ? enriched : [...enriched].sort((a, b) => (a.verdict.priority - b.verdict.priority) || (a.order - b.order));
+            const buckets = { toReplace: 0, toRestore: 0, toFill: 0, ok: 0 };
+            if (!nd) enriched.forEach(e => { buckets[e.verdict.bucket]++; });
+            const tp = tpInfo[recModal.resName + '||' + recModal.tpName];
+            const cands = tp?.candidates || [];
+            const stLabel = (st) => st === 'collected' ? 'Собирается' : st === 'not_collected' ? 'Не собирается' : st === 'absent' ? 'Отсутствует' : st === 'no_pu' ? 'ПУ не задан' : 'Нет данных';
+            return (
+              <div className="poll-rec">
+                {nd && (
+                  <div className="poll-notice warn" style={{ marginBottom: 12 }}>
+                    <div className="poll-notice-main"><IconAlertTriangle className="ico" /> Срез не синхронизирован — показан только состав. Выполните синхронизацию для рекомендаций.</div>
+                  </div>
+                )}
+                <table className="poll-rec-table">
+                  <thead><tr><th>Позиция</th><th>№ ПУ</th><th>Статус</th><th>Вывод</th></tr></thead>
+                  <tbody>
+                    {sorted.map((it, i) => (
+                      <tr key={i}>
+                        <td>{it.position}</td>
+                        <td>{it.pu || '—'}{it.cell.spodes && <span className="spodes-badge-inline">СПОДЭС</span>}</td>
+                        <td><span className={`rec-status rec-st-${it.cell.status}`}>{stLabel(it.cell.status)}</span></td>
+                        <td>{it.verdict ? <span className={`rec-verdict rec-v-${it.verdict.color}`}>{it.verdict.text}</span> : <span className="muted">—</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!nd && (
+                  <div className="poll-rec-footer">
+                    К замене: <b>{buckets.toReplace}</b> · Восстановить опрос: <b>{buckets.toRestore}</b> · Заполнить: <b>{buckets.toFill}</b> · В порядке: <b>{buckets.ok}</b>
+                  </div>
+                )}
+                {tpDataAvailable && (
+                  <div className="poll-cand">
+                    <button className="poll-orphans-toggle" onClick={() => setShowCandidates(v => !v)}>
+                      {showCandidates ? <IconArrowDown className="ico" /> : <IconArrowRight className="ico" />} Кандидаты СПОДЭС на этой ТП ({cands.length})
+                    </button>
+                    {showCandidates && (
+                      <div className="poll-cand-body">
+                        {cands.length === 0 ? (
+                          <div className="muted" style={{ padding: '6px 0' }}>
+                            {tp?.tpMatched ? 'Свободных СПОДЭС на этой ТП нет.' : 'ТП не найдена в срезе Пирамиды по имени (сверьте написание).'}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="poll-cand-hint muted">Эти ПУ уже опрашиваются по СПОДЭС на этой ТП — можно рассмотреть как контрольные точки взамен проблемных.</div>
+                            {cands.map((c, i) => (
+                              <div key={i} className="poll-cand-item">
+                                <button className="poll-cand-serial" title="Скопировать серийник" onClick={() => copySerial(c.serial)}>
+                                  {c.serial}{copiedSerial === c.serial && <span className="poll-copied">скопировано</span>}
+                                </button>
+                                {c.tuPath && <span className="poll-cand-addr muted">{c.tuPath}</span>}
+                                <span className="spodes-badge-inline">СПОДЭС</span>
+                                {c.isCollected && <span className="mini-badge green">собирается</span>}
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </ModalShell>
       )}
     </div>
   );

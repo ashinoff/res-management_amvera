@@ -7477,3 +7477,41 @@ tr.selected:hover,
 .mini-badge.green { background: var(--green); }
 .poll-total-row td { font-weight: 700; background: var(--surface-2); }
 .legend-dot.status-empty.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--gray); }
+
+/* Кликабельная строка ВЛ/секции в дереве карты опроса */
+.poll-row-click { cursor: pointer; border-radius: 6px; transition: background .12s, box-shadow .12s; }
+.poll-row-click:hover { background: var(--surface-2); box-shadow: var(--shadow-sm); }
+/* Имя ВЛ в две строки: название + мини-сводка */
+.poll-vl-name--stack { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; white-space: normal; }
+.poll-vl-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.poll-vl-mini { font-size: 11px; color: var(--text-muted); }
+.poll-vl-mini .mini-green { color: var(--green); }
+.poll-vl-mini .mini-amber { color: var(--amber); }
+.poll-vl-mini .mini-red { color: var(--red); }
+
+/* Модалка рекомендаций */
+.poll-rec-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.poll-rec-table th, .poll-rec-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.poll-rec-table th { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.rec-status { font-weight: 600; }
+.rec-st-collected { color: var(--green); }
+.rec-st-not_collected { color: var(--amber); }
+.rec-st-absent { color: var(--red); }
+.rec-st-no_pu, .rec-st-no_data { color: var(--text-faint); }
+.rec-verdict { display: inline-block; font-size: 12.5px; }
+.rec-v-red { color: var(--red); font-weight: 600; }
+.rec-v-amber { color: var(--amber); font-weight: 600; }
+.rec-v-gray { color: var(--text-faint); }
+.rec-v-green { color: var(--green); }
+.poll-rec-footer { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text); }
+.spodes-badge-inline { display: inline-block; margin-left: 6px; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: var(--navy); color: #fff; vertical-align: middle; }
+
+/* Кандидаты СПОДЭС в модалке */
+.poll-cand { margin-top: 16px; }
+.poll-cand-body { margin-top: 8px; }
+.poll-cand-hint { font-size: 12px; margin-bottom: 8px; }
+.poll-cand-item { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 5px 0; border-bottom: 1px dashed var(--border); }
+.poll-cand-serial { background: none; border: none; padding: 0; cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--navy); font-weight: 600; position: relative; }
+.poll-cand-serial:hover { text-decoration: underline; }
+.poll-cand-addr { font-size: 12px; }
+.poll-copied { margin-left: 8px; font-size: 10px; color: var(--green); font-weight: 700; }

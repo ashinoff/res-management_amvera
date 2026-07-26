@@ -1630,7 +1630,31 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
     }
     const orphans = { count: orphanList.length, list: orphanList };
 
-    res.json({ snapshotAt, noData, rows, sections: sectionRows, summary, orphans });
+    // Кандидаты СПОДЭС по каждой ТП структуры: ПУ среза с tpNorm этой ТП, СПОДЭС,
+    // которых НЕТ в номерах структуры. Один проход: Map tpNorm → список.
+    const tpDataAvailable = meters.some(m => m.tpNorm);   // Опрос отдал поле tp?
+    const metersByTp = new Map();
+    for (const m of meters) {
+      if (!m.tpNorm) continue;
+      if (!metersByTp.has(m.tpNorm)) metersByTp.set(m.tpNorm, []);
+      metersByTp.get(m.tpNorm).push(m);
+    }
+    const tpMap = new Map();   // ключ resId||tpName — уникальные ТП структуры (ВЛ + секции)
+    const addTp = (resId, resName, tpName) => {
+      const k = resId + '||' + tpName;
+      if (!tpMap.has(k)) tpMap.set(k, { resId, resName, tpName });
+    };
+    structures.forEach(s => addTp(s.resId, s.ResUnit?.name || '', s.tpName));
+    sections.forEach(s => addTp(s.resId, s.ResUnit?.name || '', s.tpName));
+    const tps = [...tpMap.values()].map(t => {
+      const list = metersByTp.get(normTpName(t.tpName)) || [];
+      const candidates = list
+        .filter(m => m.isSpodes && !structSerials.has(m.serialNorm))
+        .map(m => ({ serial: m.serialRaw || m.serialNorm, tuPath: m.tuPath || null, isCollected: m.isCollected }));
+      return { resId: t.resId, resName: t.resName, tpName: t.tpName, tpMatched: list.length > 0, candidates };
+    });
+
+    res.json({ snapshotAt, noData, rows, sections: sectionRows, summary, orphans, tps, tpDataAvailable });
   } catch (error) {
     console.error('poll-map error:', error);
     res.status(500).json({ error: error.message });
