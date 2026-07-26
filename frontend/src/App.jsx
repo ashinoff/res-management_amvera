@@ -363,6 +363,17 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
   );
 }
 
+// Единая шапка страницы: SVG-иконка в квадратной плашке (статичная неоново-синяя
+// подсветка, БЕЗ анимаций — инвариант) + заголовок. Одинаковые отступы на всех страницах.
+function PageHeader({ icon, title }) {
+  return (
+    <div className="page-header">
+      <span className="page-header-icon">{icon}</span>
+      <h2 className="page-header-title">{title}</h2>
+    </div>
+  );
+}
+
 // =====================================================
 // КОМПОНЕНТ СТРУКТУРЫ СЕТИ
 // =====================================================
@@ -996,7 +1007,7 @@ const executeClearHistory = async () => {
   
   return (
     <div className="network-structure">
-      <h2><span className="svg-frame"><IconLayers size={24} /></span> Структура сети</h2>
+      <PageHeader icon={<IconLayers size={24} />} title="Структура сети" />
       {user.role === 'admin' && (
   <p className="edit-hint">
     <span className="svg-frame svg-frame--sm" style={{marginRight: 8}}><IconEdit size={20} /></span>
@@ -1833,7 +1844,7 @@ for (let i = 0; i < files.length; i++) {
 
   return (
     <div className="file-upload-container">
-      <h2><span className="svg-frame"><IconUpload size={24} /></span> Загрузка файлов для анализа</h2>
+      <PageHeader icon={<IconUpload size={24} />} title="Загрузка файлов для анализа" />
       <p className="upload-note">Имя файла должно совпадать с номером ПУ</p>
       <p className="upload-subtitle">Загружайте Excel файлы с данными счётчиков для автоматической проверки</p>
 
@@ -2337,10 +2348,16 @@ const loadNotifications = useCallback(async () => {
     }
   });
 
+  const headerIcon = filterType === 'error'
+    ? <IconWrench size={24} />
+    : filterType === 'pending_askue'
+    ? <IconClipboard size={24} />
+    : <IconBell size={24} />;
+
   return (
     <div className="notifications">
-  <h2>{title}</h2>
-  
+  <PageHeader icon={headerIcon} title={title} />
+
   <div className="notifications-controls">
     <div className="search-box">
       <input
@@ -3234,7 +3251,7 @@ function Reports() {
 
   return (
     <div className="reports">
-      <h2><span className="svg-frame"><IconFileText size={24} /></span> Отчеты по проверкам</h2>
+      <PageHeader icon={<IconFileText size={24} />} title="Отчеты по проверкам" />
 
       {user.role !== 'admin' && (
         <div className="res-indicator">
@@ -3634,7 +3651,7 @@ function PowerOverload({ selectedRes }) {
   return (
     <div className="power-overload-page">
       <div className="section-header">
-        <h2><span className="svg-frame"><IconZap size={24} /></span> Превышение Pном</h2>
+        <PageHeader icon={<IconZap size={24} />} title="Превышение Pном" />
       </div>
 
       <div className="po-tabs">
@@ -3884,7 +3901,7 @@ const handleSendEmail = async () => {
   if (loading) return <LoadingSpinner type="pulse" message="Загрузка проблемных ВЛ..." submessage="Анализируем критические проблемы" />;
   return (
     <div className="problem-vl-container">
-      <h2><span className="svg-frame"><IconAlertTriangle size={24} /></span> Проблемные ВЛ</h2>
+      <PageHeader icon={<IconAlertTriangle size={24} />} title="Проблемные ВЛ" />
       
       <div className="problem-info-row">
         <div className="problem-info-text">
@@ -4090,7 +4107,7 @@ function Settings() {
   
   return (
     <div className="settings-container">
-      <h2><span className="svg-frame"><IconSettings size={24} /></span> Настройки системы</h2>
+      <PageHeader icon={<IconSettings size={24} />} title="Настройки системы" />
       
       <div className="settings-tabs">
         <button 
@@ -5829,7 +5846,7 @@ function UploadedDocuments() {
   
   return (
     <div className="uploaded-documents">
-      <h2><span className="svg-frame"><IconFolder size={24} /></span> Загруженные документы</h2>
+      <PageHeader icon={<IconFolder size={24} />} title="Загруженные документы" />
       
       <div className="documents-controls">
         <div className="documents-info">
@@ -6500,7 +6517,7 @@ function SystemHistory() {
   
   return (
     <div className="system-history">
-      <h2><span className="svg-frame"><IconClock size={24} /></span> История системы</h2>
+      <PageHeader icon={<IconClock size={24} />} title="История системы" />
 
       {user.role !== 'admin' && (
     <div className="res-indicator">
@@ -6952,7 +6969,7 @@ function Analytics() {
   
   return (
     <div className="analytics-container">
-      <h2><span className="svg-frame svg-frame--red"><IconChart size={24} /></span> Анализ напряжения</h2>
+      <PageHeader icon={<IconChart size={24} />} title="Анализ напряжения" />
       
       {/* НОВОЕ: Индикатор для не-админов */}
       {user.role !== 'admin' && (
@@ -7204,7 +7221,7 @@ function PowerAnalysis({ selectedRes }) {
 
   return (
     <div className="analytics">
-      <h2><span className="svg-frame svg-frame--red"><IconZap size={24} /></span> Анализ мощности</h2>
+      <PageHeader icon={<IconChart size={24} />} title="Анализ мощности" />
 
       {/* Перенесено из «Аналитики»: ТП с перегрузом (последний пик ≥ лимита). */}
       <h2 style={{ marginTop: '8px', fontSize: 20 }}>ТП с перегрузом</h2>

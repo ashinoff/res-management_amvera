@@ -48,6 +48,25 @@
   color: var(--red);
   box-shadow: 0 0 0 3px rgba(185,28,28,.08);
 }
+
+/* ===== Единая шапка страницы (PageHeader) — одинаково на всех страницах ===== */
+.page-header { display: flex; align-items: center; gap: 14px; margin: 0 0 24px; flex-wrap: wrap; }
+.page-header-title { margin: 0; font-size: 24px; font-weight: 650; color: var(--text); letter-spacing: -0.01em; }
+/* Плашка иконки со статичной неоново-синей подсветкой (2 слоя свечения), без анимаций. */
+.page-header-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; flex: 0 0 auto;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: #2563eb;
+  border: 1px solid rgba(59,130,246,.45);
+  box-shadow: 0 0 8px rgba(59,130,246,.55), 0 0 20px rgba(59,130,246,.30);
+  transition: box-shadow .12s ease;
+}
+.page-header-icon svg { color: #2563eb; }
+.page-header:hover .page-header-icon {
+  box-shadow: 0 0 11px rgba(59,130,246,.72), 0 0 26px rgba(59,130,246,.42);
+}
 /* Иконки пунктов левого меню */
 .menu-ico { display: inline-flex; align-items: center; margin-right: 10px; flex: 0 0 auto; }
 @keyframes electric-bulb {
@@ -7210,3 +7229,20 @@ tr.selected:hover,
 .fu-submit-btn:disabled { opacity: .55; cursor: not-allowed; }
 
 @media (max-width: 900px) { .file-types-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* ===== Унификация шаблона: снять внешнюю «форму» вокруг всего контента страницы =====
+   Блоки контента лежат на фоне страницы (как на эталоне «Структура сети»). Внутренние
+   карточки самих элементов НЕ трогаем; боковые/верхние отступы даёт .content + PageHeader.
+   Правило В КОНЦЕ файла — чтобы перебить исходные определения этих классов. */
+.file-upload-container,
+.problem-vl-container,
+.settings-container,
+.uploaded-documents,
+.analytics-container,
+.system-history {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+  overflow: visible;
+}
