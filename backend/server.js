@@ -329,6 +329,19 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING(64),
     allowNull: true,
     unique: true
+  },
+  // Суперадмин (учётка login='admin'): видит и может всё, правами не ограничивается.
+  isSuper: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  // Гранулярные права обычного админа: { <ключ каталога PERMISSIONS>: true }.
+  // Источник истины — БД (+кеш); в JWT НЕ вшивается (смена прав без перелогина).
+  permissions: {
+    type: DataTypes.JSONB,
+    allowNull: false,
+    defaultValue: {}
   }
 });
 
@@ -1028,6 +1041,73 @@ const checkRole = (roles) => {
   };
 };
 
+// =====================================================
+// СИСТЕМА ПРАВ (суперадмин + гранулярные права админов)
+// =====================================================
+// Каталог прав — ЕДИНЫЙ источник (ключ → русское название для UI и 403). Новое
+// опасное право добавляется ЗДЕСЬ, затем requirePerm(ключ) на роут и скрытие в UI.
+const PERMISSIONS = {
+  structure_upload:     'Загрузка/обновление структуры сети',
+  structure_edit:       'Редактирование структуры (ПУ, ВЛ, секции, тех.учёты, добавление/удаление)',
+  checks_delete:        'Удаление карточек проверок и истории',
+  notifications_delete: 'Удаление уведомлений',
+  files_manage:         'Управление файлами (удаление, диагностика)',
+  history_purge:        'Очистка истории до даты',
+  pollmap_sync:         'Синхронизация карты опроса',
+  users_manage:         'Управление пользователями',
+  db_tools:             'Сервисные операции с базой (diagnose, восстановление и пр.)',
+};
+
+// Лёгкий кеш доступа: userId → { isSuper, permissions, ts }. TTL 60с; сбрасывается
+// при сохранении прав / изменении пользователя. Права в JWT не вшиваем — здесь истина.
+const ACCESS_TTL_MS = 60 * 1000;
+const accessCache = new Map();
+const invalidateAccess = (userId) => { accessCache.delete(Number(userId)); };
+async function getUserAccess(userId) {
+  const key = Number(userId);
+  const hit = accessCache.get(key);
+  if (hit && (Date.now() - hit.ts) < ACCESS_TTL_MS) return hit;
+  const u = await User.findByPk(key, { attributes: ['id', 'role', 'isSuper', 'permissions'] });
+  const info = {
+    isSuper: !!(u && u.isSuper),
+    role: u ? u.role : null,
+    permissions: (u && u.permissions && typeof u.permissions === 'object') ? u.permissions : {},
+    ts: Date.now(),
+  };
+  accessCache.set(key, info);
+  return info;
+}
+
+// Право на ОПАСНОЕ действие. Суперадмин — всегда; админ — если permissions[key];
+// не-админ проходит насквозь (его доступ уже проверен предыдущим checkRole —
+// роли res_responsible/uploader/uec этим механизмом НЕ ограничиваются).
+const requirePerm = (key) => async (req, res, next) => {
+  try {
+    const info = await getUserAccess(req.user.id);
+    if (info.isSuper) return next();
+    if (req.user.role === 'admin') {
+      if (info.permissions && info.permissions[key]) return next();
+      return res.status(403).json({ error: 'Недостаточно прав', permission: key, title: PERMISSIONS[key] || key });
+    }
+    return next();
+  } catch (e) {
+    console.error('requirePerm error:', e.message);
+    return res.status(500).json({ error: 'Ошибка проверки прав' });
+  }
+};
+
+// Только суперадмин (управление правами).
+const requireSuper = async (req, res, next) => {
+  try {
+    const info = await getUserAccess(req.user.id);
+    if (info.isSuper) return next();
+    return res.status(403).json({ error: 'Доступно только суперадмину' });
+  } catch (e) {
+    console.error('requireSuper error:', e.message);
+    return res.status(500).json({ error: 'Ошибка проверки прав' });
+  }
+};
+
 // Файловый скоуп-токен — отдельный от сессионного, кладётся в URL (?t=) для
 // скачивания вложений обычными <a>-ссылками. В URL не светим полноценный
 // сессионный JWT (URL попадают в историю/логи). Живёт 24ч, как и сессия.
@@ -1150,7 +1230,9 @@ app.post('/api/auth/login', async (req, res) => {
         fio: user.fio,
         role: user.role,
         resId: user.resId,
-        resName: user.ResUnit?.name
+        resName: user.ResUnit?.name,
+        isSuper: !!user.isSuper,
+        permissions: user.permissions || {}
       }
     });
   } catch (error) {
@@ -1217,7 +1299,9 @@ app.post('/api/auth/platform', async (req, res) => {
         fio: user.fio,
         role: user.role,
         resId: user.resId,
-        resName: user.ResUnit?.name
+        resName: user.ResUnit?.name,
+        isSuper: !!user.isSuper,
+        permissions: user.permissions || {}
       }
     });
   } catch (error) {
@@ -1268,14 +1352,14 @@ app.get('/api/platform/badge', async (req, res) => {
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id, {
-      attributes: ['id', 'fio', 'login', 'role', 'resId', 'email'],
+      attributes: ['id', 'fio', 'login', 'role', 'resId', 'email', 'isSuper', 'permissions'],
       include: [ResUnit]
     });
-    
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     res.json({
       fileToken: makeFileToken(user),
       user: {
@@ -1283,7 +1367,9 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
         fio: user.fio,
         role: user.role,
         resId: user.resId,
-        resName: user.ResUnit?.name
+        resName: user.ResUnit?.name,
+        isSuper: !!user.isSuper,
+        permissions: user.permissions || {}
       }
     });
   } catch (error) {
@@ -1355,7 +1441,7 @@ const normTpName = (v) => String(v == null ? '' : v).toUpperCase().replace(/[\s\
 // Ответ на ошибку — структурированный { error, code, hint, detail }, чтобы фронт
 // показал человеку понятную подсказку, а «программисту» — code/detail.
 // Ключ OPROS_API_KEY НИКОГДА не попадает в ответ/лог (даже частично); OPROS_URL — можно.
-app.post('/api/poll-map/sync', authenticateToken, checkRole(['admin', 'uec_responsible']), async (req, res) => {
+app.post('/api/poll-map/sync', authenticateToken, checkRole(['admin', 'uec_responsible']), requirePerm('pollmap_sync'), async (req, res) => {
   const url = process.env.OPROS_URL;
   const key = process.env.OPROS_API_KEY;
 
@@ -1665,6 +1751,7 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
 app.put('/api/network/structure/:id',
   authenticateToken,
   checkRole(['admin']),
+  requirePerm('structure_edit'),
   async (req, res) => {
     try {
       const { startPu, middlePu, endPu } = req.body;
@@ -1749,6 +1836,7 @@ app.get('/api/network/sections', authenticateToken, async (req, res) => {
 app.post('/api/network/sections',
   authenticateToken,
   checkRole(['admin']),
+  requirePerm('structure_edit'),
   async (req, res) => {
     try {
       const { resId, tpName, sectionNumber, tnKva, cosPhi, techPuNumber } = req.body;
@@ -1782,6 +1870,7 @@ app.post('/api/network/sections',
 app.put('/api/network/sections/:id',
   authenticateToken,
   checkRole(['admin']),
+  requirePerm('structure_edit'),
   async (req, res) => {
     try {
       const section = await TpSection.findByPk(req.params.id);
@@ -1825,6 +1914,7 @@ app.put('/api/network/sections/:id',
 app.delete('/api/network/sections/:id',
   authenticateToken,
   checkRole(['admin']),
+  requirePerm('structure_edit'),
   async (req, res) => {
     try {
       const section = await TpSection.findByPk(req.params.id);
@@ -2301,10 +2391,11 @@ app.post('/api/upload/analyze',
 });
 
 // 6. ЗАГРУЗКА ПОЛНОЙ СТРУКТУРЫ СЕТИ
-app.post('/api/network/upload-full-structure', 
-  authenticateToken, 
-  checkRole(['admin']), 
-  uploadExcel.single('file'), 
+app.post('/api/network/upload-full-structure',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('structure_upload'),
+  uploadExcel.single('file'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
     
@@ -2658,9 +2749,10 @@ app.post('/api/notifications/:id/complete-work',
 });
 
 // 9. ОЧИСТКА ВСЕХ ДАННЫХ
-app.delete('/api/network/clear-all', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.delete('/api/network/clear-all',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('structure_edit'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
     
@@ -2798,9 +2890,10 @@ app.delete('/api/network/clear-all',
 });
 
 // 10. УДАЛЕНИЕ ВЫБРАННЫХ СТРУКТУР
-app.post('/api/network/delete-selected', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.post('/api/network/delete-selected',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('structure_edit'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
     
@@ -3119,9 +3212,10 @@ app.get('/api/reports/detailed', authenticateToken, async (req, res) => {
 });
 
 // 12. УДАЛЕНИЕ УВЕДОМЛЕНИЙ
-app.delete('/api/notifications/:id', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.delete('/api/notifications/:id',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('notifications_delete'),
   async (req, res) => {
     try {
       const { password } = req.body;
@@ -3149,9 +3243,10 @@ app.delete('/api/notifications/:id',
     }
 });
 // API для массового удаления уведомлений
-app.post('/api/notifications/delete-bulk', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.post('/api/notifications/delete-bulk',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('notifications_delete'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
     
@@ -3330,13 +3425,20 @@ app.get('/api/users/list', authenticateToken, checkRole(['admin']), async (req, 
 });
 
 // 14. СОЗДАНИЕ ПОЛЬЗОВАТЕЛЯ
-app.post('/api/users/create', authenticateToken, checkRole(['admin']), async (req, res) => {
+app.post('/api/users/create', authenticateToken, checkRole(['admin']), requirePerm('users_manage'), async (req, res) => {
   try {
     const { fio, login, password, email, role, resId } = req.body;
-    
+
     // Валидация
     if (!fio || !login || !password || !email || !role) {
       return res.status(400).json({ error: 'Все поля обязательны' });
+    }
+
+    // Только суперадмин может создавать админов (иначе выдача прав обходится
+    // созданием нового админа с нужными правами).
+    if (role === 'admin') {
+      const me = await getUserAccess(req.user.id);
+      if (!me.isSuper) return res.status(403).json({ error: 'Создавать администраторов может только суперадмин' });
     }
     
     if (password.length < 6) {
@@ -3381,7 +3483,7 @@ app.post('/api/users/create', authenticateToken, checkRole(['admin']), async (re
 });
 
 // 15. ОБНОВЛЕНИЕ ПОЛЬЗОВАТЕЛЯ
-app.put('/api/users/:id', authenticateToken, checkRole(['admin']), async (req, res) => {
+app.put('/api/users/:id', authenticateToken, checkRole(['admin']), requirePerm('users_manage'), async (req, res) => {
   try {
     const userId = req.params.id;
     const { fio, login, password, email, role, resId } = req.body;
@@ -3389,6 +3491,21 @@ app.put('/api/users/:id', authenticateToken, checkRole(['admin']), async (req, r
     const user = await User.findByPk(userId);
     if (!user) {
       return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    const me = await getUserAccess(req.user.id);
+    // Суперадмина (login='admin') нельзя понижать/переименовывать никому: защита
+    // от выстрела в ногу. Смена его пароля/ФИО/email — можно (см. ниже).
+    if (user.isSuper) {
+      if (role && role !== 'admin') return res.status(403).json({ error: 'Нельзя изменить роль суперадмина' });
+      if (login && login !== user.login) return res.status(403).json({ error: 'Нельзя переименовать логин суперадмина' });
+    }
+    // Роль admin может назначать/снимать только суперадмин (обход выдачи прав).
+    if (!me.isSuper && role === 'admin' && user.role !== 'admin') {
+      return res.status(403).json({ error: 'Назначать роль администратора может только суперадмин' });
+    }
+    if (!me.isSuper && user.role === 'admin' && !user.isSuper && role && role !== 'admin') {
+      return res.status(403).json({ error: 'Менять роль администратора может только суперадмин' });
     }
 
     // Обновляем только переданные поля
@@ -3419,7 +3536,8 @@ app.put('/api/users/:id', authenticateToken, checkRole(['admin']), async (req, r
     }
     
     await user.update(updateData);
-    
+    invalidateAccess(userId);   // роль/учётка могли измениться — сбросить кеш доступа
+
     const updatedUser = await User.findByPk(userId, {
       attributes: ['id', 'fio', 'login', 'role', 'resId', 'email'],
       include: [ResUnit]
@@ -3438,16 +3556,16 @@ app.put('/api/users/:id', authenticateToken, checkRole(['admin']), async (req, r
 });
 
 // 16. УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ
-app.delete('/api/users/:id', authenticateToken, checkRole(['admin']), async (req, res) => {
+app.delete('/api/users/:id', authenticateToken, checkRole(['admin']), requirePerm('users_manage'), async (req, res) => {
   try {
     const userId = req.params.id;
     const { password } = req.body;
-    
+
     // Проверка пароля
     if (password !== DELETE_PASSWORD) {
       return res.status(403).json({ error: 'Неверный пароль' });
     }
-    
+
     // Нельзя удалить себя
     if (userId == req.user.id) {
       return res.status(400).json({ error: 'Нельзя удалить свой аккаунт' });
@@ -3457,7 +3575,12 @@ app.delete('/api/users/:id', authenticateToken, checkRole(['admin']), async (req
     if (!user) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
-    
+
+    // Суперадмина (login='admin') удалить нельзя никому.
+    if (user.isSuper) {
+      return res.status(403).json({ error: 'Нельзя удалить суперадмина' });
+    }
+
     // Проверяем, не последний ли это админ
     if (user.role === 'admin') {
       const adminCount = await User.count({ where: { role: 'admin' } });
@@ -3482,6 +3605,7 @@ app.delete('/api/users/:id', authenticateToken, checkRole(['admin']), async (req
       await PuUploadHistory.update({ uploadedBy: null }, { where: { uploadedBy: userId }, transaction: t });
       await user.destroy({ transaction: t });
     });
+    invalidateAccess(userId);
 
     res.json({
       success: true,
@@ -3490,6 +3614,55 @@ app.delete('/api/users/:id', authenticateToken, checkRole(['admin']), async (req
 
   } catch (error) {
     console.error('Delete user error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// =====================================================
+// УПРАВЛЕНИЕ ПРАВАМИ (только суперадмин)
+// =====================================================
+// Список обычных админов (без суперадмина) + их права + каталог для UI.
+app.get('/api/admin/permissions', authenticateToken, requireSuper, async (req, res) => {
+  try {
+    const admins = await User.findAll({
+      where: { role: 'admin', isSuper: false },
+      attributes: ['id', 'fio', 'login', 'email', 'permissions'],
+      order: [['fio', 'ASC']]
+    });
+    res.json({
+      catalog: PERMISSIONS,
+      admins: admins.map(u => ({
+        id: u.id, fio: u.fio, login: u.login, email: u.email,
+        permissions: (u.permissions && typeof u.permissions === 'object') ? u.permissions : {}
+      }))
+    });
+  } catch (error) {
+    console.error('Get permissions error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Сохранить права обычного админа. Валидация ключей по каталогу; суперадмина не трогаем.
+app.put('/api/admin/permissions/:userId', authenticateToken, requireSuper, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const user = await User.findByPk(userId);
+    if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+    if (user.isSuper) return res.status(403).json({ error: 'Права суперадмина не редактируются' });
+    if (user.role !== 'admin') return res.status(400).json({ error: 'Права назначаются только администраторам' });
+
+    const incoming = (req.body && typeof req.body.permissions === 'object' && req.body.permissions) || {};
+    // Оставляем только известные ключи каталога со значением true.
+    const clean = {};
+    for (const key of Object.keys(PERMISSIONS)) {
+      if (incoming[key]) clean[key] = true;
+    }
+    await user.update({ permissions: clean });
+    invalidateAccess(userId);   // применяется без перелогина (кеш сброшен)
+
+    res.json({ success: true, permissions: clean });
+  } catch (error) {
+    console.error('Save permissions error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -3984,9 +4157,10 @@ app.put('/api/notifications/mark-read', authenticateToken, async (req, res) => {
 });
 
 // API для массового удаления записей
-app.post('/api/documents/delete-bulk', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.post('/api/documents/delete-bulk',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('files_manage'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
     
@@ -5340,9 +5514,10 @@ try {
 });
 
 // Очистка определенного типа проблем
-app.post('/api/admin/database-cleanup', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.post('/api/admin/database-cleanup',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('db_tools'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
     
@@ -5853,7 +6028,7 @@ async function cloudinaryProbe(publicId) {
   return { publicId, ext, found, results, deliveryTests };
 }
 
-app.get('/api/admin/files/diag/:token', authenticateToken, checkRole(['admin']), async (req, res) => {
+app.get('/api/admin/files/diag/:token', authenticateToken, checkRole(['admin']), requirePerm('files_manage'), async (req, res) => {
   try {
     const publicId = resolvePublicId(req.params.token);
     if (!publicId || !publicId.startsWith('res-management/')) {
@@ -5914,7 +6089,7 @@ app.post('/api/admin/purge-preview', authenticateToken, checkRole(['admin']), as
 });
 
 // Удаление. Транзакция БД, затем (после commit) — файлы Cloudinary батчами.
-app.post('/api/admin/purge', authenticateToken, checkRole(['admin']), async (req, res) => {
+app.post('/api/admin/purge', authenticateToken, checkRole(['admin']), requirePerm('history_purge'), async (req, res) => {
   const { before, password } = req.body;
   if (password !== DELETE_PASSWORD) return res.status(403).json({ error: 'Неверный пароль' });
   const beforeDate = parseBeforeDate(before);
@@ -5976,7 +6151,7 @@ const BACKUP_TABLES = [
 
 // Полный JSON-дамп всех таблиц. Пароли выгружаются как есть (bcrypt-хэши),
 // ссылки Cloudinary едут внутри JSON — сами файлы переносить не нужно.
-app.get('/api/admin/backup', authenticateToken, checkRole(['admin']), async (req, res) => {
+app.get('/api/admin/backup', authenticateToken, checkRole(['admin']), requirePerm('db_tools'), async (req, res) => {
   try {
     const tables = {};
     for (const t of BACKUP_TABLES) {
@@ -6010,7 +6185,7 @@ app.get('/api/admin/backup', authenticateToken, checkRole(['admin']), async (req
 // правильный порядок вставки, без отключения триггеров.
 const backupUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
-app.post('/api/admin/restore', authenticateToken, checkRole(['admin']), backupUpload.single('file'), async (req, res) => {
+app.post('/api/admin/restore', authenticateToken, checkRole(['admin']), requirePerm('db_tools'), backupUpload.single('file'), async (req, res) => {
   try {
     if (req.body.confirm !== 'true') {
       return res.status(400).json({ error: 'Требуется подтверждение: восстановление заменит ВСЕ данные в базе.' });
@@ -6155,6 +6330,11 @@ async function initializeDatabase() {
       // уникальный индекс допускает много NULL).
       `ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "keycloakId" VARCHAR(64)`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_keycloak ON "Users" ("keycloakId")`,
+      // Суперадмин + гранулярные права (sequelize.sync колонки не добавляет).
+      `ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "isSuper" BOOLEAN NOT NULL DEFAULT false`,
+      `ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "permissions" JSONB NOT NULL DEFAULT '{}'::jsonb`,
+      // Идемпотентный сид: учётка login='admin' — суперадмин.
+      `UPDATE "Users" SET "isSuper"=true WHERE "login"='admin'`,
       // Секции шин ТП: привязка ВЛ к секции + индексы. ADD COLUMN IF NOT EXISTS
       // доезжает без DB_ALTER (Postgres-safe). Старые ВЛ остаются с NULL.
       `ALTER TABLE "NetworkStructures" ADD COLUMN IF NOT EXISTS "sectionId" INTEGER`,
@@ -6433,9 +6613,10 @@ app.get('/api/admin/files',
   });
 
 // API для удаления файла из документа
-app.delete('/api/documents/record/:recordId', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.delete('/api/documents/record/:recordId',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('files_manage'),
   async (req, res) => {
     try {
       const { password } = req.body;
@@ -6478,9 +6659,10 @@ app.delete('/api/documents/record/:recordId',
 
 // ИСПРАВЛЕННЫЙ эндпоинт для управления файлами в настройках
  
-app.delete('/api/admin/files/:public_id', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.delete('/api/admin/files/:public_id',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('files_manage'),
   async (req, res) => {
     try {
       const { password } = req.body;
@@ -6953,9 +7135,10 @@ app.get('/api/history/checks',
     }
 });
 // Очистка истории по конкретному ПУ
-app.delete('/api/history/clear-pu/:puNumber', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.delete('/api/history/clear-pu/:puNumber',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('checks_delete'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
     
@@ -7010,9 +7193,10 @@ app.delete('/api/history/clear-pu/:puNumber',
 });
 
 // Очистка истории по ТП
-app.post('/api/history/clear-tp', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.post('/api/history/clear-tp',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('checks_delete'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
     
@@ -7089,9 +7273,10 @@ app.post('/api/history/clear-tp',
 });
 
 // Очистка всей истории
-app.delete('/api/history/clear-all', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.delete('/api/history/clear-all',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('checks_delete'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
     
@@ -7297,9 +7482,10 @@ app.get('/api/analytics/detailed',
 // =====================================================
 
 // Получить полную диагностику по РЭС
-app.get('/api/admin/diagnose/:resId', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.get('/api/admin/diagnose/:resId',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('db_tools'),
   async (req, res) => {
     try {
       const resId = parseInt(req.params.resId);
@@ -7471,9 +7657,10 @@ app.get('/api/admin/diagnose/:resId',
 });
 
 // Исправить конкретное уведомление
-app.put('/api/admin/fix-notification/:id', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.put('/api/admin/fix-notification/:id',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('db_tools'),
   async (req, res) => {
     try {
       const { newResId, password } = req.body;
@@ -7518,9 +7705,10 @@ app.put('/api/admin/fix-notification/:id',
 });
 
 // Автоисправление по структуре (для одного уведомления)
-app.post('/api/admin/auto-fix-notification/:id', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.post('/api/admin/auto-fix-notification/:id',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('db_tools'),
   async (req, res) => {
     try {
       const { password } = req.body;
@@ -7584,9 +7772,10 @@ app.post('/api/admin/auto-fix-notification/:id',
 });
 
 // Массовое автоисправление ВСЕХ несоответствий для РЭС
-app.post('/api/admin/auto-fix-all/:resId', 
-  authenticateToken, 
-  checkRole(['admin']), 
+app.post('/api/admin/auto-fix-all/:resId',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('db_tools'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
     

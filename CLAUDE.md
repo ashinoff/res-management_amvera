@@ -349,6 +349,43 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-27** — Права доступа, коммит 1/3 (backend): суперадмин + гранулярные
+  права админов. `User` += `isSuper` (BOOLEAN default false), `permissions` (JSONB
+  default `{}`) через `ALTER TABLE ADD COLUMN IF NOT EXISTS` в `initializeDatabase()`
+  + идемпотентный сид `UPDATE Users SET isSuper=true WHERE login='admin'`. Каталог
+  `PERMISSIONS` (ключ→рус. название) в одном месте: structure_upload, structure_edit,
+  checks_delete, notifications_delete, files_manage, history_purge, pollmap_sync,
+  users_manage, db_tools. Middleware `requirePerm(key)`: кеш `accessCache`
+  (userId→{isSuper,role,permissions,ts}, TTL 60с, `invalidateAccess` при
+  сохранении/изменении); суперадмин→пропуск, admin+permissions[key]→пропуск, admin
+  без права→403 `{error,permission,title}`, НЕ-админ→насквозь (роли res/uploader/uec
+  не ограничиваются — requirePerm стоит ПОСЛЕ checkRole). `requireSuper` — только
+  суперадмин. login/platform/me += `{isSuper, permissions}` (в JWT права НЕ вшиты).
+  Новые роуты (только isSuper): `GET /api/admin/permissions` (список обычных админов
+  + права + каталог), `PUT /api/admin/permissions/:userId` (валидация ключей по
+  каталогу, сброс кеша; суперадмина не трогать). users_manage-самозащита: суперадмина
+  нельзя удалить/понизить/переименовать; создавать/назначать роль admin может только
+  суперадмин. **Инвентаризация роут→право** (опасные/сервисные закрыты, просмотровые
+  открыты):
+  structure_edit — PUT /network/structure/:id, POST|PUT|DELETE /network/sections[/:id],
+  DELETE /network/clear-all, POST /network/delete-selected;
+  structure_upload — POST /network/upload-full-structure;
+  notifications_delete — DELETE /notifications/:id, POST /notifications/delete-bulk;
+  checks_delete — DELETE /history/clear-pu/:pu, POST /history/clear-tp, DELETE
+  /history/clear-all; history_purge — POST /admin/purge;
+  files_manage — POST /documents/delete-bulk, DELETE /documents/record/:id, DELETE
+  /admin/files/:public_id, GET /admin/files/diag/:token;
+  pollmap_sync — POST /poll-map/sync (uec_responsible проходит насквозь);
+  users_manage — POST /users/create, PUT|DELETE /users/:id;
+  db_tools — POST /admin/database-cleanup, GET /admin/backup, POST /admin/restore,
+  GET /admin/diagnose/:resId, PUT /admin/fix-notification/:id, POST
+  /admin/auto-fix-notification/:id, POST /admin/auto-fix-all/:resId.
+  Оставлены ОТКРЫТЫМИ (просмотр/операционные, не в каталоге): GET /users/list,
+  /admin/files, /admin/database-health, POST /admin/purge-preview, problem-vl
+  list/dismiss/send-email, overload askue/res-complete, notifications mark-read,
+  reports/analytics/history GET, upload/analyze (shared с uploader). DELETE_PASSWORD
+  сохранён как второй фактор поверх права. Новых ключей каталога не потребовалось.
+  node --check — ОК.
 - **2026-07-27** — «Уведомления» (Ожидающие мероприятий / Ожидающие АСКУЭ): кнопка
   выгрузки в Excel в строке тулбара (`.notif-toolbar`, справа `margin-left:auto`,
   стиль `.pm-btn--excel`). `exportNotificationsExcel` выгружает именно
