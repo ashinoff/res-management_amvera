@@ -3494,8 +3494,13 @@ app.put('/api/users/:id', authenticateToken, checkRole(['admin']), requirePerm('
     }
 
     const me = await getUserAccess(req.user.id);
-    // Суперадмина (login='admin') нельзя понижать/переименовывать никому: защита
-    // от выстрела в ногу. Смена его пароля/ФИО/email — можно (см. ниже).
+    // Учётку суперадмина может править ТОЛЬКО суперадмин (иначе не-супер с
+    // users_manage сбросил бы пароль суперадмина = эскалация).
+    if (user.isSuper && !me.isSuper) {
+      return res.status(403).json({ error: 'Учётную запись суперадмина может изменять только суперадмин' });
+    }
+    // Суперадмина (login='admin') нельзя понижать/переименовывать НИКОМУ, включая его
+    // самого (защита от выстрела в ногу). Смена его пароля/ФИО/email — можно.
     if (user.isSuper) {
       if (role && role !== 'admin') return res.status(403).json({ error: 'Нельзя изменить роль суперадмина' });
       if (login && login !== user.login) return res.status(403).json({ error: 'Нельзя переименовать логин суперадмина' });
