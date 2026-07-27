@@ -8623,7 +8623,6 @@ function PollMap({ selectedRes }) {
   const [legendCollapsed, setLegendCollapsed] = useState(false);
   const [showOrphans, setShowOrphans] = useState(false);
   const [recModal, setRecModal] = useState(null); // { title, dockTitle, resName, tpName, items:[{position,pu,cell}] }
-  const [showCandidates, setShowCandidates] = useState(false);
   const [copiedSerial, setCopiedSerial] = useState(null);
 
   const load = async () => {
@@ -8955,7 +8954,7 @@ function PollMap({ selectedRes }) {
           dockTitle={recModal.dockTitle}
           icon={<IconMapPin size={16} />}
           className="poll-rec-modal"
-          onClose={() => { setRecModal(null); setShowCandidates(false); }}
+          onClose={() => setRecModal(null)}
         >
           {(() => {
             const nd = !!data?.noData;
@@ -8998,31 +8997,38 @@ function PollMap({ selectedRes }) {
                 )}
                 {tpDataAvailable && (
                   <div className="poll-cand">
-                    <button className="poll-orphans-toggle" onClick={() => setShowCandidates(v => !v)}>
-                      {showCandidates ? <IconArrowDown className="ico" /> : <IconArrowRight className="ico" />} Кандидаты СПОДЭС на этой ТП ({cands.length})
-                    </button>
-                    {showCandidates && (
-                      <div className="poll-cand-body">
-                        {cands.length === 0 ? (
-                          <div className="muted" style={{ padding: '6px 0' }}>
-                            {tp?.tpMatched ? 'Свободных СПОДЭС на этой ТП нет.' : 'ТП не найдена в срезе Пирамиды по имени (сверьте написание).'}
-                          </div>
-                        ) : (
-                          <>
-                            <div className="poll-cand-hint muted">Эти ПУ уже опрашиваются по СПОДЭС на этой ТП — можно рассмотреть как контрольные точки взамен проблемных.</div>
-                            {cands.map((c, i) => (
-                              <div key={i} className="poll-cand-item">
-                                <button className="poll-cand-serial" title="Скопировать серийник" onClick={() => copySerial(c.serial)}>
-                                  {c.serial}{copiedSerial === c.serial && <span className="poll-copied">скопировано</span>}
-                                </button>
-                                {c.tuPath && <span className="poll-cand-addr muted">{c.tuPath}</span>}
-                                <SpodesBadge />
-                                {c.isCollected && <span className="mini-badge green">собирается</span>}
-                              </div>
-                            ))}
-                          </>
-                        )}
+                    <div className="poll-cand-head">Кандидаты СПОДЭС на этой ТП ({cands.length})</div>
+                    {cands.length === 0 ? (
+                      <div className="muted" style={{ padding: '6px 0' }}>
+                        {tp?.tpMatched ? 'Свободных СПОДЭС на этой ТП нет.' : 'ТП не найдена в срезе Пирамиды по имени (сверьте написание).'}
                       </div>
+                    ) : (
+                      <>
+                        <div className="poll-cand-hint muted">Эти ПУ уже опрашиваются по СПОДЭС на этой ТП — можно рассмотреть как контрольные точки взамен проблемных. Клик по номеру копирует серийник.</div>
+                        <div className="poll-cand-tablewrap">
+                          <table className="poll-cand-table">
+                            <thead><tr><th>№ ПУ</th><th>Адрес (точка учёта)</th><th>Опрос</th></tr></thead>
+                            <tbody>
+                              {cands.map((c, i) => (
+                                <tr key={i}>
+                                  <td>
+                                    <button className="poll-cand-serial" title="Скопировать серийник" onClick={() => copySerial(c.serial)}>
+                                      {c.serial}{copiedSerial === c.serial && <span className="poll-copied">скопировано</span>}
+                                    </button>
+                                  </td>
+                                  <td className="poll-cand-addr">{c.tuPath || '—'}</td>
+                                  <td className="poll-cand-poll">
+                                    <SpodesBadge />
+                                    {c.isCollected
+                                      ? <span className="mini-badge green">собирается</span>
+                                      : <span className="mini-badge">не собирается</span>}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
                     )}
                   </div>
                 )}

@@ -7497,8 +7497,8 @@ tr.selected:hover,
 .poll-vl-mini .mini-red { color: var(--red); }
 
 /* Модалка рекомендаций — просторная, «дышащая» (как остальные модалки) */
-.modal-shell.poll-rec-modal { max-width: 760px; width: min(760px, 96vw); }
-.poll-rec { padding: 20px 22px 22px; }
+.modal-shell.poll-rec-modal { max-width: 980px; width: min(980px, 96vw); }
+.poll-rec { padding: 22px 26px 26px; }
 .poll-rec-tablewrap { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow-sm); }
 .poll-rec-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
 .poll-rec-table th, .poll-rec-table td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -7518,9 +7518,10 @@ tr.selected:hover,
 .rec-v-amber { color: var(--amber); font-weight: 600; }
 .rec-v-gray { color: var(--text-faint); }
 .rec-v-green { color: var(--green); }
-.poll-rec-footer { margin-top: 16px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); font-size: 13px; color: var(--text); display: flex; flex-wrap: wrap; gap: 6px 20px; }
-.poll-rec-foot-item { display: inline-flex; align-items: center; }
-.rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: currentColor; vertical-align: middle; }
+.poll-rec-footer { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); font-size: 13px; color: var(--text); display: flex; flex-wrap: wrap; gap: 10px 14px; }
+.poll-rec-foot-item { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; padding: 6px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; }
+.poll-rec-foot-item b { font-weight: 800; }
+.rec-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: currentColor; vertical-align: middle; flex-shrink: 0; }
 .spodes-badge-inline { display: inline-block; margin-left: 6px; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: var(--navy); color: #fff; vertical-align: middle; }
 
 /* Явный бейдж СПОДЭС: насыщенный синий + двухслойное СТАТИЧНОЕ неоновое свечение
@@ -7547,14 +7548,24 @@ tr.selected:hover,
   .spodes-neon .sb-short { display: inline; }
 }
 
-/* Кандидаты СПОДЭС в модалке */
-.poll-cand { margin-top: 16px; }
+/* Кандидаты СПОДЭС в модалке — всегда открыты, структурированная таблица */
+.poll-cand { margin-top: 22px; }
+.poll-cand-head { font-size: 15px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
 .poll-cand-body { margin-top: 8px; }
-.poll-cand-hint { font-size: 12px; margin-bottom: 8px; }
+.poll-cand-hint { font-size: 12.5px; margin-bottom: 10px; line-height: 1.5; }
 .poll-cand-item { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 5px 0; border-bottom: 1px dashed var(--border); }
-.poll-cand-serial { background: none; border: none; padding: 0; cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--navy); font-weight: 600; position: relative; }
+.poll-cand-tablewrap { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow-sm); }
+.poll-cand-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
+.poll-cand-table th, .poll-cand-table td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.poll-cand-table thead th { background: var(--surface-2); font-size: 11.5px; letter-spacing: .4px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
+.poll-cand-table tbody tr { transition: background .12s; }
+.poll-cand-table tbody tr:hover { background: var(--surface-2); }
+.poll-cand-table tbody tr:last-child td { border-bottom: none; }
+.poll-cand-table td:first-child { white-space: nowrap; }
+.poll-cand-poll { white-space: nowrap; }
+.poll-cand-serial { background: none; border: none; padding: 0; cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; color: var(--navy); font-weight: 700; position: relative; }
 .poll-cand-serial:hover { text-decoration: underline; }
-.poll-cand-addr { font-size: 12px; }
+.poll-cand-addr { font-size: 12.5px; color: var(--text); }
 .poll-copied { margin-left: 8px; font-size: 10px; color: var(--green); font-weight: 700; }
 
 /* ===== Тост (403 «нет права» и т.п.) ===== */
