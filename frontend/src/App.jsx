@@ -135,6 +135,22 @@ api.interceptors.request.use(config => {
   return config;
 });
 
+// Право на действие в UI: суперадмин видит всё; обычный админ — по permissions;
+// прочие роли — только их обычные возможности (правами не расширяются).
+const hasPerm = (user, key) => !!(user && (user.isSuper || (user.role === 'admin' && user.permissions && user.permissions[key])));
+
+// Человеческий тост (для 403 «нет права» и т.п.) без внешних зависимостей.
+function showToast(msg, kind = 'error') {
+  try {
+    const el = document.createElement('div');
+    el.className = `app-toast app-toast--${kind}`;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => { el.classList.add('app-toast--out'); }, 2600);
+    setTimeout(() => { el.remove(); }, 3050);
+  } catch { /* noop */ }
+}
+
 // Обработка ошибок авторизации
 api.interceptors.response.use(
   response => response,
@@ -144,6 +160,10 @@ api.interceptors.response.use(
       localStorage.removeItem('fileToken');
       // В iframe платформы не редиректим на логин (иначе перезагрузка окна на 401).
       if (!EMBEDDED) window.location.href = '/';
+    }
+    // 403 из-за отсутствия права — человеческий тост с названием права.
+    if (error.response?.status === 403 && error.response.data?.permission) {
+      showToast('Недостаточно прав: ' + (error.response.data.title || error.response.data.permission));
     }
     return Promise.reject(error);
   }
@@ -267,7 +287,7 @@ const RESM_LOGO = (
   </svg>
 );
 
-function MainMenu({ activeSection, onSectionChange, userRole }) {
+function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
   const [notificationCounts, setNotificationCounts] = useState({
     tech_pending: 0,
     askue_pending: 0,
@@ -332,10 +352,11 @@ function MainMenu({ activeSection, onSectionChange, userRole }) {
     { id: 'documents', label: 'Загруженные документы', icon: <IconFolder size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
     { id: 'history', label: 'История системы', icon: <IconClock size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
     { id: 'reports', label: 'Отчеты', icon: <IconFileText size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'settings', label: 'Настройки', icon: <IconSettings size={18} />, roles: ['admin'] }
+    { id: 'settings', label: 'Настройки', icon: <IconSettings size={18} />, roles: ['admin'] },
+    { id: 'permissions', label: 'Права доступа', icon: <IconLock size={18} />, roles: ['admin'], superOnly: true }
   ];
 
-  const visibleItems = menuItems.filter(item => item.roles.includes(userRole));
+  const visibleItems = menuItems.filter(item => item.roles.includes(userRole) && (!item.superOnly || isSuper));
 
   return (
     <nav className="main-menu">
@@ -523,6 +544,8 @@ function NetworkStructure({ onSectionChange } = {}) {
   const [loading, setLoading] = useState(true);
   const [searchTp, setSearchTp] = useState('');
   const { user, selectedRes } = useContext(AuthContext);
+  const canEditStructure = hasPerm(user, 'structure_edit');   // ПУ/ВЛ/секции/тех.учёты
+  const canClearChecks = hasPerm(user, 'checks_delete');      // очистка истории по ТП
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedDetails, setSelectedDetails] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -957,8 +980,8 @@ const executeClearHistory = async () => {
     return (
       <div
         className="pu-cell"
-        onDoubleClick={() => startEdit(item, position)}
-        title={user.role === 'admin' ? 'Двойной клик для редактирования' : ''}
+        onDoubleClick={() => { if (canEditStructure) startEdit(item, position); }}
+        title={canEditStructure ? 'Двойной клик для редактирования' : ''}
       >
         {puNumber ? (
           <div
@@ -1137,7 +1160,7 @@ const executeClearHistory = async () => {
   return (
     <div className="network-structure">
       <PageHeader icon={<IconLayers size={24} />} title="Структура сети" />
-      {user.role === 'admin' && (
+      {canEditStructure && (
   <p className="edit-hint">
     <span className="svg-frame svg-frame--sm" style={{marginRight: 8}}><IconEdit size={20} /></span>
       Двойной клик по номеру счетчика для редактирования
@@ -1157,21 +1180,25 @@ const executeClearHistory = async () => {
   </div>
   
   <div className="action-buttons-group">
-    {user.role === 'admin' && selectedIds.length > 0 && (
+    {selectedIds.length > 0 && (
   <>
-    <button 
-      className="clear-history-btn"
-      onClick={handleClearTpHistory}
-    >
-      Очистить историю ({selectedIds.length})
-    </button>
-    
-    <button 
-      className="delete-selected-btn"
-      onClick={() => setShowDeleteModal(true)}
-    >
-      Удалить выбранные ({selectedIds.length})
-    </button>
+    {canClearChecks && (
+      <button
+        className="clear-history-btn"
+        onClick={handleClearTpHistory}
+      >
+        Очистить историю ({selectedIds.length})
+      </button>
+    )}
+
+    {canEditStructure && (
+      <button
+        className="delete-selected-btn"
+        onClick={() => setShowDeleteModal(true)}
+      >
+        Удалить выбранные ({selectedIds.length})
+      </button>
+    )}
   </>
 )}
     
@@ -1254,7 +1281,7 @@ const executeClearHistory = async () => {
             return (
               <div key={item.id} className={`net-grid vl-row ${selectedIds.includes(item.id) ? 'selected' : ''}`}>
                 <div className="col-check">
-                  {user.role === 'admin' && (
+                  {(canEditStructure || canClearChecks) && (
                     <input
                       type="checkbox"
                       className="vl-check"
@@ -1268,7 +1295,7 @@ const executeClearHistory = async () => {
                 {renderPuCell(item, 'middle')}
                 {renderPuCell(item, 'end')}
                 <div className="col-section">
-                  {user.role === 'admin' && (
+                  {canEditStructure && (
                     <select
                       className="vl-section-select"
                       value={item.sectionId ?? ''}
@@ -1314,7 +1341,7 @@ const executeClearHistory = async () => {
               <div key={tp} className="tp-card">
                 <div className="tp-card-head">
                   <span className="tp-card-title">{tpItems[0]?.ResUnit?.name} · ТП {tp}</span>
-                  {user.role === 'admin' && (
+                  {canEditStructure && (
                     <button className="section-add-btn" onClick={() => openSectionModal(tp, resId)}>
                       <IconLayers className="ico" /> Добавить секцию
                     </button>
@@ -1359,7 +1386,7 @@ const executeClearHistory = async () => {
                       )}
                     </span>
                   );
-                  const sectionActions = user.role === 'admin' ? (
+                  const sectionActions = canEditStructure ? (
                     <>
                       <button className="link-btn" title="Редактировать секцию" onClick={() => openSectionModal(tp, resId, section)}>
                         <IconEdit className="ico ico-glow-blue" />
@@ -1671,16 +1698,20 @@ const executeClearHistory = async () => {
       {/* Все плавающие кнопки появляются вместе с кнопкой «наверх» (при прокрутке). */}
       {showScrollTop && (
         <div className="structure-fab-stack">
-          {user.role === 'admin' && selectedIds.length > 0 && (
+          {selectedIds.length > 0 && (
             <>
-              <button className="fab-btn fab-danger" title="Удалить выбранные" onClick={() => setShowDeleteModal(true)}>
-                <IconTrash className="ico" />
-                <span className="fab-badge">{selectedIds.length}</span>
-              </button>
-              <button className="fab-btn fab-warn" title="Очистить историю выбранных" onClick={handleClearTpHistory}>
-                <IconBroom className="ico" />
-                <span className="fab-badge">{selectedIds.length}</span>
-              </button>
+              {canEditStructure && (
+                <button className="fab-btn fab-danger" title="Удалить выбранные" onClick={() => setShowDeleteModal(true)}>
+                  <IconTrash className="ico" />
+                  <span className="fab-badge">{selectedIds.length}</span>
+                </button>
+              )}
+              {canClearChecks && (
+                <button className="fab-btn fab-warn" title="Очистить историю выбранных" onClick={handleClearTpHistory}>
+                  <IconBroom className="ico" />
+                  <span className="fab-badge">{selectedIds.length}</span>
+                </button>
+              )}
             </>
           )}
           <button className="fab-btn fab-blue" title="Обновить структуру" disabled={loading}
@@ -2164,6 +2195,7 @@ function Notifications({ filterType, onSectionChange, selectedRes }) {
   const [searchTp, setSearchTp] = useState('');
   const [periodFilter, setPeriodFilter] = useState(''); // фильтр по месяцу появления уведомления
   const { user } = useContext(AuthContext);
+  const canDeleteNotifs = hasPerm(user, 'notifications_delete');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteNotificationId, setDeleteNotificationId] = useState(null);
   const [deletePassword, setDeletePassword] = useState('');
@@ -2595,8 +2627,8 @@ const loadNotifications = useCallback(async () => {
       />
     </div>
     
-    {user.role === 'admin' && selectedNotificationIds.length > 0 && (
-      <button 
+    {canDeleteNotifs && selectedNotificationIds.length > 0 && (
+      <button
         className="delete-selected-btn"
         onClick={() => setShowBulkDeleteModal(true)}
       >
@@ -2606,7 +2638,7 @@ const loadNotifications = useCallback(async () => {
   </div>
   
   <div className="select-all-wrapper notif-toolbar">
-    {user.role === 'admin' && (
+    {canDeleteNotifs && (
       <label className="notif-selectall">
         <input
           type="checkbox"
@@ -2669,8 +2701,8 @@ const loadNotifications = useCallback(async () => {
       title={notif.type === 'error' || notif.type === 'pending_askue' || notif.type === 'power_overload' ? 'Открыть подробности' : notif.type === 'problem_vl' ? 'Перейти к проблемным ВЛ' : undefined}
     >
       {/* ЧЕКБОКС ТЕПЕРЬ СНАРУЖИ И СЛЕВА */}
-      {user.role === 'admin' && (
-        <input 
+      {canDeleteNotifs && (
+        <input
           type="checkbox"
           className="notification-checkbox-left"
           checked={selectedNotificationIds.includes(notif.id)}
@@ -4318,52 +4350,31 @@ const handleSendEmail = async () => {
 // =====================================================
 
 function Settings() {
-  const [activeTab, setActiveTab] = useState('structure');
-  
+  const { user } = useContext(AuthContext);
+  // Вкладки с опасными действиями видны только при соответствующем праве
+  // (суперадмин видит все). «Пользователи» — список read-only, действия гейтятся внутри.
+  const tabs = [
+    { id: 'structure', label: 'Структура сети', show: hasPerm(user, 'structure_upload') || hasPerm(user, 'structure_edit') },
+    { id: 'users', label: 'Пользователи', show: true },
+    { id: 'diagnose', label: <><IconSearch className="ico" /> Диагностика данных</>, show: hasPerm(user, 'db_tools') },
+    { id: 'maintenance', label: 'Обслуживание', show: hasPerm(user, 'structure_edit') },
+    { id: 'files', label: 'Управление файлами', show: hasPerm(user, 'files_manage') },
+    { id: 'database', label: 'База данных', show: hasPerm(user, 'db_tools') || hasPerm(user, 'history_purge') },
+  ].filter(t => t.show);
+  const [activeTab, setActiveTab] = useState(tabs[0]?.id || 'users');
+
   return (
     <div className="settings-container">
       <PageHeader icon={<IconSettings size={24} />} title="Настройки системы" />
-      
+
       <div className="settings-tabs">
-        <button 
-          className={activeTab === 'structure' ? 'active' : ''}
-          onClick={() => setActiveTab('structure')}
-        >
-          Структура сети
-        </button>
-        <button 
-          className={activeTab === 'users' ? 'active' : ''}
-          onClick={() => setActiveTab('users')}
-        >
-          Пользователи
-        </button>
-        {/* ДОБАВЬ ЭТУ ВКЛАДКУ */}
-        <button 
-          className={activeTab === 'diagnose' ? 'active' : ''}
-          onClick={() => setActiveTab('diagnose')}
-        >
-          <IconSearch className="ico" /> Диагностика данных
-        </button>
-        <button 
-          className={activeTab === 'maintenance' ? 'active' : ''}
-          onClick={() => setActiveTab('maintenance')}
-        >
-          Обслуживание
-        </button>
-        <button 
-          className={activeTab === 'files' ? 'active' : ''}
-          onClick={() => setActiveTab('files')}
-        >
-          Управление файлами
-        </button>
-        <button 
-          className={activeTab === 'database' ? 'active' : ''}
-          onClick={() => setActiveTab('database')}
-        >
-          База данных
-        </button>
+        {tabs.map(t => (
+          <button key={t.id} className={activeTab === t.id ? 'active' : ''} onClick={() => setActiveTab(t.id)}>
+            {t.label}
+          </button>
+        ))}
       </div>
-      
+
       <div className="settings-content">
         {activeTab === 'structure' && <StructureSettings />}
         {activeTab === 'users' && <UserSettings />}
@@ -5541,6 +5552,9 @@ function StructureSettings() {
 
 // Подкомпонент управления пользователями
 function UserSettings() {
+  const { user: authUser } = useContext(AuthContext);
+  const canManageUsers = hasPerm(authUser, 'users_manage');
+  const amSuper = !!authUser?.isSuper;   // роль admin может назначать только суперадмин
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -5649,9 +5663,11 @@ function UserSettings() {
       <div className="section-header">
         <h3>Управление пользователями</h3>
         <div className="header-actions">
-          <button onClick={() => setShowCreateModal(true)} className="primary-btn">
-            Новый пользователь
-          </button>
+          {canManageUsers && (
+            <button onClick={() => setShowCreateModal(true)} className="primary-btn">
+              Новый пользователь
+            </button>
+          )}
         </div>
       </div>
       
@@ -5686,20 +5702,26 @@ function UserSettings() {
                   <td>{user.email}</td>
                   <td>
                     <div className="action-buttons">
-                      <button 
-                        onClick={() => startEdit(user)}
-                        className="btn-icon"
-                        title="Редактировать"
-                      >
-                        <IconEdit className="ico" />
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteUser(user.id)}
-                        className="btn-icon danger"
-                        title="Удалить"
-                      >
-                        <IconTrash className="ico" />
-                      </button>
+                      {canManageUsers ? (
+                        <>
+                          <button
+                            onClick={() => startEdit(user)}
+                            className="btn-icon"
+                            title="Редактировать"
+                          >
+                            <IconEdit className="ico" />
+                          </button>
+                          {!user.isSuper && (
+                            <button
+                              onClick={() => handleDeleteUser(user.id)}
+                              className="btn-icon danger"
+                              title="Удалить"
+                            >
+                              <IconTrash className="ico" />
+                            </button>
+                          )}
+                        </>
+                      ) : <span className="muted">—</span>}
                     </div>
                   </td>
                 </tr>
@@ -5760,7 +5782,7 @@ function UserSettings() {
                   value={userForm.role}
                   onChange={(e) => setUserForm({...userForm, role: e.target.value})}
                 >
-                  <option value="admin">Администратор</option>
+                  {amSuper && <option value="admin">Администратор</option>}
                   <option value="uploader">Загрузчик АСКУЭ</option>
                   <option value="res_responsible">Ответственный РЭС</option>
                 </select>
@@ -5845,7 +5867,7 @@ function UserSettings() {
                   value={userForm.role}
                   onChange={(e) => setUserForm({...userForm, role: e.target.value})}
                 >
-                  <option value="admin">Администратор</option>
+                  {amSuper && <option value="admin">Администратор</option>}
                   <option value="uploader">Загрузчик АСКУЭ</option>
                   <option value="res_responsible">Ответственный РЭС</option>
                 </select>
@@ -6265,7 +6287,8 @@ function UploadedDocuments() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const { user, selectedRes } = useContext(AuthContext);
-  
+  const canManageFiles = hasPerm(user, 'files_manage');
+
   const [deleteRecordId, setDeleteRecordId] = useState(null);
   const [showDeleteRecordModal, setShowDeleteRecordModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -6385,8 +6408,8 @@ function UploadedDocuments() {
           <p>Всего документов: <strong>{documents.reduce((sum, doc) => sum + (doc.attachments?.length || 0), 0)}</strong></p>
         </div>
         
-        {user.role === 'admin' && selectedIds.length > 0 && (
-  <button 
+        {canManageFiles && selectedIds.length > 0 && (
+  <button
     className="delete-selected-btn"
     onClick={() => setShowBulkDeleteModal(true)}
   >
@@ -6399,9 +6422,9 @@ function UploadedDocuments() {
         <table>
           <thead>
             <tr>
-              {user.role === 'admin' && (
+              {canManageFiles && (
                 <th className="checkbox-column">
-                  <input 
+                  <input
                     type="checkbox"
                     checked={selectedIds.length === documents.length && documents.length > 0}
                     onChange={handleSelectAll}
@@ -6422,9 +6445,9 @@ function UploadedDocuments() {
           <tbody>
             {documents.map((doc) => (
               <tr key={doc.id} className={selectedIds.includes(doc.id) ? 'selected' : ''}>
-                {user.role === 'admin' && (
+                {canManageFiles && (
                   <td className="checkbox-column">
-                    <input 
+                    <input
                       type="checkbox"
                       checked={selectedIds.includes(doc.id)}
                       onChange={() => handleSelectRecord(doc.id)}
@@ -6456,7 +6479,7 @@ function UploadedDocuments() {
                         <IconEye className="ico ico-glow-blue" />
                       </button>
                     )}
-                      {user.role === 'admin' && (
+                      {canManageFiles && (
       <button
         className="btn-icon danger"
         onClick={() => {
@@ -6860,9 +6883,9 @@ function ExtendedPuModal({
         
         <div className="modal-footer">
           <button className="action-btn" onClick={onClose}>Закрыть</button>
-          {user.role === 'admin' && (
-            <button 
-              className="danger-btn" 
+          {hasPerm(user, 'checks_delete') && (
+            <button
+              className="danger-btn"
               onClick={() => {
                 onClose();
                 handleClearPuHistory(puData.puNumber);
@@ -7832,6 +7855,9 @@ function PowerAnalysis({ selectedRes }) {
 }
 
 function DatabaseMaintenance() {
+  const { user } = useContext(AuthContext);
+  const canDbTools = hasPerm(user, 'db_tools');       // проверка/бэкап/восстановление/очистка
+  const canPurge = hasPerm(user, 'history_purge');    // очистка истории до даты
   const [healthCheck, setHealthCheck] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showCleanupModal, setShowCleanupModal] = useState(false);
@@ -8053,7 +8079,8 @@ function DatabaseMaintenance() {
   
   return (
     <div className="database-maintenance">
-      {/* Красивый заголовок */}
+      {/* Проверка целостности (db_tools) */}
+      {canDbTools && (
       <div className="db-header">
         <div className="db-header-content">
           <div className="db-header-icon"><IconWrench className="ico" /></div>
@@ -8062,7 +8089,7 @@ function DatabaseMaintenance() {
             <p>Диагностика и устранение проблем в структуре данных</p>
           </div>
         </div>
-        <button 
+        <button
           className="btn-check-db"
           onClick={runHealthCheck}
           disabled={loading}
@@ -8079,8 +8106,10 @@ function DatabaseMaintenance() {
           )}
         </button>
       </div>
+      )}
 
-      {/* Резервная копия базы: скачать бэкап / восстановить из файла */}
+      {/* Резервная копия базы: скачать бэкап / восстановить из файла (db_tools) */}
+      {canDbTools && (
       <div className="db-header" style={{ marginTop: 12 }}>
         <div className="db-header-content">
           <div className="db-header-icon"><IconDatabase className="ico" /></div>
@@ -8099,8 +8128,10 @@ function DatabaseMaintenance() {
           </label>
         </div>
       </div>
+      )}
 
-      {/* Очистка истории до даты */}
+      {/* Очистка истории до даты (history_purge) */}
+      {canPurge && (
       <div className="db-header" style={{ marginTop: 12 }}>
         <div className="db-header-content">
           <div className="db-header-icon"><IconBroom className="ico" /></div>
@@ -8117,6 +8148,7 @@ function DatabaseMaintenance() {
           </button>
         </div>
       </div>
+      )}
 
       {purgePreview && (
         <div className="purge-preview">
@@ -8581,7 +8613,7 @@ const SpodesBadge = () => (
 // ═══ Раздел «Карта опроса структуры сети»: сверка ПУ структуры со срезом «Опрос ПУ» ═══
 function PollMap({ selectedRes }) {
   const { user } = useContext(AuthContext);
-  const canSync = user.role === 'admin' || user.role === 'uec_responsible';
+  const canSync = hasPerm(user, 'pollmap_sync') || user.role === 'uec_responsible';
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -9003,6 +9035,96 @@ function PollMap({ selectedRes }) {
   );
 }
 
+// ═══ Раздел «Права доступа» (только суперадмин): матрица админы × права ═══
+function PermissionsAdmin() {
+  const [catalog, setCatalog] = useState({});
+  const [admins, setAdmins] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState(null);
+  const [dirty, setDirty] = useState({}); // userId -> локально отредактированные права
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get('/api/admin/permissions');
+      setCatalog(data.catalog || {});
+      setAdmins(data.admins || []);
+      setDirty({});
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Ошибка загрузки прав', 'error');
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const permsOf = (a) => dirty[a.id] || a.permissions || {};
+  const isDirty = (a) => !!dirty[a.id];
+  const toggle = (a, key) => {
+    const cur = { ...permsOf(a) };
+    if (cur[key]) delete cur[key]; else cur[key] = true;
+    setDirty(d => ({ ...d, [a.id]: cur }));
+  };
+  const save = async (a) => {
+    setSavingId(a.id);
+    try {
+      const { data } = await api.put(`/api/admin/permissions/${a.id}`, { permissions: permsOf(a) });
+      setAdmins(list => list.map(x => x.id === a.id ? { ...x, permissions: data.permissions } : x));
+      setDirty(d => { const n = { ...d }; delete n[a.id]; return n; });
+      showToast('Права сохранены — вступят в силу в течение минуты', 'ok');
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Ошибка сохранения прав', 'error');
+    } finally { setSavingId(null); }
+  };
+
+  const catKeys = Object.keys(catalog);
+
+  return (
+    <div className="permissions-admin">
+      <PageHeader icon={<IconLock size={24} />} title="Права доступа" />
+      <p className="perm-hint muted">
+        Отметьте разрешённые опасные действия для каждого администратора. Изменения применяются
+        <strong> без перелогина</strong> и вступают в силу в течение минуты. Суперадмин может всё и в списке не показан.
+      </p>
+      {loading ? (
+        <div className="loading"><RossetiLoader /></div>
+      ) : admins.length === 0 ? (
+        <div className="no-data" style={{ padding: 16 }}>Обычных администраторов нет. Создайте их в «Настройках → Пользователи».</div>
+      ) : (
+        <div className="perm-table-wrap">
+          <table className="perm-table">
+            <thead>
+              <tr>
+                <th className="perm-sticky">Администратор</th>
+                {catKeys.map(k => <th key={k} title={catalog[k]}>{catalog[k]}</th>)}
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {admins.map(a => (
+                <tr key={a.id}>
+                  <td className="perm-sticky">
+                    <div className="perm-admin-name">{a.fio}</div>
+                    <div className="perm-admin-login muted">{a.login}{a.email ? ` · ${a.email}` : ''}</div>
+                  </td>
+                  {catKeys.map(k => (
+                    <td key={k} className="perm-check-cell">
+                      <input type="checkbox" checked={!!permsOf(a)[k]} onChange={() => toggle(a, k)} />
+                    </td>
+                  ))}
+                  <td>
+                    <button className="pm-btn pm-btn--refresh perm-save-btn" disabled={!isDirty(a) || savingId === a.id} onClick={() => save(a)}>
+                      {savingId === a.id ? 'Сохранение...' : 'Сохранить'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   // Пока в iframe ждём/меняем токен платформы — показываем лоадер, а не форму логина.
@@ -9211,6 +9333,8 @@ const renderContent = () => {
       return <Reports />;
     case 'settings':
       return <Settings />;
+    case 'permissions':
+      return <PermissionsAdmin />;
     case 'history':
       return <SystemHistory />;
     case 'analytics':  
@@ -9225,9 +9349,10 @@ const renderContent = () => {
       <ModalDockProvider>
       <div className="app">
         <MainMenu
-          activeSection={activeSection} 
+          activeSection={activeSection}
           onSectionChange={setActiveSection}
           userRole={user.role}
+          isSuper={user.isSuper}
         />
         
         <div className="main-content">

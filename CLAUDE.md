@@ -349,6 +349,25 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-27** — Права доступа, коммит 2/3 (frontend): раздел «Права доступа» +
+  скрытие кнопок. Модульный `hasPerm(user,key)` (isSuper→всё; admin→permissions[key];
+  прочие роли не расширяются). Тост `showToast` + интерцептор axios: 403 с полем
+  `permission` → жёлто-красный тост «Недостаточно прав: <title>». Пункт меню «Права
+  доступа» (`IconLock`, `superOnly`) — только суперадмину (`isSuper` проброшен в
+  `MainMenu`). Компонент `PermissionsAdmin`: матрица админы×права из каталога
+  (чекбоксы, «Сохранить» на строку, подсказка «без перелогина, в течение минуты»).
+  Скрытие кнопок по правам: NetworkStructure (structure_edit — правка ПУ/секций/
+  назначение секции/удаление выбранных/FAB; checks_delete — очистка истории ТП),
+  Notifications (notifications_delete — чекбоксы/«Удалить выбранные»), UploadedDocuments
+  (files_manage — чекбоксы/удаление), PollMap (pollmap_sync — кнопка синхронизации;
+  uec остаётся), ExtendedPuModal (checks_delete — «Очистить историю ПУ»). Настройки:
+  вкладки гейтятся по праву (structure→structure_upload|edit, diagnose→db_tools,
+  maintenance→structure_edit, files→files_manage, database→db_tools|history_purge;
+  «Пользователи» всегда — список read-only), default-вкладка = первая доступная;
+  UserSettings (users_manage — создать/редакт./удалить; удаление суперадмина скрыто;
+  роль «Администратор» в форме — только суперадмину); DatabaseMaintenance (db_tools —
+  проверка/бэкап/восстановление; history_purge — очистка до даты). Логика операций не
+  менялась; бэкенд остаётся источником истины (403 при прямом вызове). npm run build — ОК.
 - **2026-07-27** — Права доступа, коммит 1/3 (backend): суперадмин + гранулярные
   права админов. `User` += `isSuper` (BOOLEAN default false), `permissions` (JSONB
   default `{}`) через `ALTER TABLE ADD COLUMN IF NOT EXISTS` в `initializeDatabase()`
