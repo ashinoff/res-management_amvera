@@ -8591,7 +8591,7 @@ function DatabaseMaintenance() {
 // одном месте; правило — первое совпавшее. В футере replace+planReplace = «К замене».
 const POLL_VERDICTS = {
   replace:     { priority: 1, color: 'red',   bucket: 'toReplace', text: 'Не опрашивается — точка бесполезна для мониторинга. Заменить на СПОДЭС/РиМ / включить в опрос' },
-  planReplace: { priority: 2, color: 'amber', bucket: 'toReplace', text: 'Не СПОДЭС и не РиМ — журнал напряжений недоступен. Плановая замена на СПОДЭС/РиМ' },
+  planReplace: { priority: 2, color: 'amber', bucket: 'toReplace', text: 'Журнал напряжений недоступен — необходимо заменить ПУ в структуре сети' },
   restore:     { priority: 3, color: 'amber', bucket: 'toRestore', text: 'Журнал доступен (СПОДЭС/РиМ), но сбор не идёт — восстановить опрос (связь/маршрут), замена не требуется' },
   fill:        { priority: 4, color: 'gray',  bucket: 'toFill',    text: 'ПУ не задан — заполнить в структуре' },
   ok:          { priority: 5, color: 'green', bucket: 'ok',        text: 'В порядке' },
