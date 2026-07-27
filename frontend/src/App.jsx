@@ -2532,6 +2532,42 @@ const loadNotifications = useCallback(async () => {
     }
   });
 
+  // Экспорт в Excel того, что СЕЙЧАС на листе (учитывает РЭС/период/поиск).
+  const exportNotificationsExcel = () => {
+    if (!filteredNotifications.length) { alert('Нет данных для экспорта'); return; }
+    const fmtD = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('ru-RU'); };
+    const posRu = (p) => p === 'start' ? 'Начало' : p === 'middle' ? 'Середина' : p === 'end' ? 'Конец' : (p || '');
+    const isAskue = filterType === 'pending_askue';
+    const rowsOut = filteredNotifications.map(n => {
+      let d = {}; try { d = JSON.parse(n.message); } catch { d = {}; }
+      if (isAskue) {
+        return {
+          'РЭС': d.resName || '', 'ТП': d.tpName || '', 'ВЛ': d.vlName || '',
+          'Позиция': posRu(d.position), '№ ПУ': d.puNumber || '',
+          'Журнал с': fmtD(d.checkFromDate), 'Появилось': fmtD(n.createdAt),
+        };
+      }
+      const ph = getPhaseErrors(d.details || d.errorDetails) || {};
+      return {
+        'РЭС': d.resName || '', 'ТП': d.tpName || '', 'ВЛ': d.vlName || '',
+        'Позиция': posRu(d.position), '№ ПУ': d.puNumber || '',
+        'Фазы с ошибкой': ['A', 'B', 'C'].filter(k => ph[k]).join(', '),
+        'Появилось': fmtD(n.createdAt), 'Ошибка': d.errorDetails || d.details || '',
+      };
+    });
+    const sheetName = isAskue ? 'Ожидающие АСКУЭ' : filterType === 'error' ? 'Ожидающие мероприятий' : 'Уведомления';
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rowsOut);
+    ws['!cols'] = isAskue
+      ? [{ wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 14 }]
+      : [{ wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 44 }];
+    styleExportSheet(ws);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    const resTag = (user.role === 'admin' && selectedRes) ? `РЭС_${selectedRes}_` : '';
+    const perTag = periodFilter ? `${periodFilter}_` : '';
+    XLSX.writeFile(wb, `${sheetName}_${resTag}${perTag}${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
+  };
+
   const headerIcon = filterType === 'error'
     ? <IconWrench size={24} />
     : filterType === 'pending_askue'
@@ -2600,6 +2636,14 @@ const loadNotifications = useCallback(async () => {
         В наличии: {availablePeriods.map(p => `${p.label}·${p.count}`).join(', ')}
       </span>
     )}
+    <button
+      className="pm-btn pm-btn--excel notif-export-btn"
+      onClick={exportNotificationsExcel}
+      disabled={!filteredNotifications.length}
+      title="Выгрузить в Excel то, что отображается (с учётом РЭС/периода/поиска)"
+    >
+      <IconDownload className="ico" /> Excel
+    </button>
   </div>
       
       <div className="notifications-list">
