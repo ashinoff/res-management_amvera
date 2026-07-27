@@ -8590,18 +8590,19 @@ function DatabaseMaintenance() {
 // Выводы по точке мониторинга (модалка рекомендаций «Карты опроса»). Тексты — в
 // одном месте; правило — первое совпавшее. В футере replace+planReplace = «К замене».
 const POLL_VERDICTS = {
-  replace:     { priority: 1, color: 'red',   bucket: 'toReplace', text: 'Не опрашивается — точка бесполезна для мониторинга. Заменить на СПОДЭС / включить в опрос' },
-  planReplace: { priority: 2, color: 'amber', bucket: 'toReplace', text: 'Не СПОДЭС — журнал напряжений недоступен. Плановая замена на СПОДЭС' },
-  restore:     { priority: 3, color: 'amber', bucket: 'toRestore', text: 'СПОДЭС, но сбор не идёт — восстановить опрос (связь/маршрут), замена не требуется' },
+  replace:     { priority: 1, color: 'red',   bucket: 'toReplace', text: 'Не опрашивается — точка бесполезна для мониторинга. Заменить на СПОДЭС/РиМ / включить в опрос' },
+  planReplace: { priority: 2, color: 'amber', bucket: 'toReplace', text: 'Не СПОДЭС и не РиМ — журнал напряжений недоступен. Плановая замена на СПОДЭС/РиМ' },
+  restore:     { priority: 3, color: 'amber', bucket: 'toRestore', text: 'Журнал доступен (СПОДЭС/РиМ), но сбор не идёт — восстановить опрос (связь/маршрут), замена не требуется' },
   fill:        { priority: 4, color: 'gray',  bucket: 'toFill',    text: 'ПУ не задан — заполнить в структуре' },
   ok:          { priority: 5, color: 'green', bucket: 'ok',        text: 'В порядке' },
 };
 const pollVerdict = (cell) => {
   if (cell.status === 'no_pu') return POLL_VERDICTS.fill;
   if (cell.status === 'absent') return POLL_VERDICTS.replace;
-  if (!cell.spodes) return POLL_VERDICTS.planReplace;           // найден, не СПОДЭС (любой сбор)
-  if (cell.status === 'not_collected') return POLL_VERDICTS.restore;  // СПОДЭС + не собирается
-  return POLL_VERDICTS.ok;                                       // СПОДЭС + собирается
+  // Журнал напряжений доступен для СПОДЭС ИЛИ РиМ. Нет журнала → плановая замена.
+  if (!cell.journal) return POLL_VERDICTS.planReplace;          // найден, но не СПОДЭС и не РиМ
+  if (cell.status === 'not_collected') return POLL_VERDICTS.restore;  // журнал есть, но сбор не идёт
+  return POLL_VERDICTS.ok;                                       // журнал есть + собирается
 };
 
 // Явный бейдж СПОДЭС: полное слово, неоново-синее СТАТИЧНОЕ свечение (стиль иконок
@@ -8997,17 +8998,17 @@ function PollMap({ selectedRes }) {
                 )}
                 {tpDataAvailable && (
                   <div className="poll-cand">
-                    <div className="poll-cand-head">Кандидаты СПОДЭС на этой ТП ({cands.length})</div>
+                    <div className="poll-cand-head">Кандидаты для контроля (СПОДЭС/РиМ) на этой ТП ({cands.length})</div>
                     {cands.length === 0 ? (
                       <div className="muted" style={{ padding: '6px 0' }}>
-                        {tp?.tpMatched ? 'Свободных СПОДЭС на этой ТП нет.' : 'ТП не найдена в срезе Пирамиды по имени (сверьте написание).'}
+                        {tp?.tpMatched ? 'Свободных ПУ с журналом напряжений (СПОДЭС/РиМ) на этой ТП нет.' : 'ТП не найдена в срезе Пирамиды по имени (сверьте написание).'}
                       </div>
                     ) : (
                       <>
-                        <div className="poll-cand-hint muted">Эти ПУ уже опрашиваются по СПОДЭС на этой ТП — можно рассмотреть как контрольные точки взамен проблемных. Клик по номеру копирует серийник.</div>
+                        <div className="poll-cand-hint muted">Эти ПУ уже опрашиваются и имеют журнал напряжений (СПОДЭС или РиМ) на этой ТП — можно рассмотреть как контрольные точки взамен проблемных. Клик по номеру копирует серийник.</div>
                         <div className="poll-cand-tablewrap">
                           <table className="poll-cand-table">
-                            <thead><tr><th>№ ПУ</th><th>Адрес (точка учёта)</th><th>Опрос</th></tr></thead>
+                            <thead><tr><th>№ ПУ</th><th>Адрес (точка учёта)</th><th>Тип</th><th>Опрос</th></tr></thead>
                             <tbody>
                               {cands.map((c, i) => (
                                 <tr key={i}>
@@ -9018,7 +9019,9 @@ function PollMap({ selectedRes }) {
                                   </td>
                                   <td className="poll-cand-addr">{c.tuPath || '—'}</td>
                                   <td className="poll-cand-poll">
-                                    <SpodesBadge />
+                                    {c.isSpodes ? <SpodesBadge /> : <span className="mini-badge rim">РиМ</span>}
+                                  </td>
+                                  <td className="poll-cand-poll">
                                     {c.isCollected
                                       ? <span className="mini-badge green">собирается</span>
                                       : <span className="mini-badge">не собирается</span>}

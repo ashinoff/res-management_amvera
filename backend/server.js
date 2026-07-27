@@ -481,7 +481,10 @@ const PolledMeter = sequelize.define('PolledMeter', {
   // Старый 3-польный формат оставляет их null. Колонки/индекс — в initializeDatabase.
   tp: { type: DataTypes.STRING, allowNull: true },
   tpNorm: { type: DataTypes.STRING, allowNull: true },   // нормализованное имя ТП, индекс
-  tuPath: { type: DataTypes.TEXT, allowNull: true }
+  tuPath: { type: DataTypes.TEXT, allowNull: true },
+  // Тип ПУ (кол. «Тип ПУ» из Пирамиды). Нужен для анализа: журнал напряжений
+  // доступен для СПОДЭС И РиМ (любой РиМ, в т.ч. РиМ-СПОДЭС). Формат <6 полей → null.
+  puType: { type: DataTypes.STRING, allowNull: true }
 });
 
 // 3c. Случай перегрузки секции (workflow мероприятий по превышению Pном, этап 3).
@@ -1436,6 +1439,10 @@ const normSerial = (v) => String(v == null ? '' : v).trim().replace(/\s+/g, '').
 // без пробелов/дефисов/подчёркиваний, срезаем ведущий префикс ТП/TP. Применять
 // ОДИНАКОВО к именам ТП структуры и к полю tp из среза.
 const normTpName = (v) => String(v == null ? '' : v).toUpperCase().replace(/[\s\-_]/g, '').replace(/^(ТП|TP)/, '');
+// РиМ по типу ПУ (кириллица «РиМ» или латиница «RiM»). Журнал напряжений доступен
+// для СПОДЭС ИЛИ РиМ (любой РиМ, включая РиМ-СПОДЭС).
+const isRimType = (t) => /рим|rim/i.test(String(t == null ? '' : t));
+const hasVoltageJournal = (isSpodes, puType) => !!isSpodes || isRimType(puType);
 
 // Синхронизация среза реестра «Опрос ПУ» (полностью замещает PolledMeter).
 // Ответ на ошибку — структурированный { error, code, hint, detail }, чтобы фронт
@@ -1581,19 +1588,21 @@ app.post('/api/poll-map/sync', authenticateToken, checkRole(['admin', 'uec_respo
     const serial = row[0];
     const spodes = row[1] == 1 || row[1] === true;
     const collected = row[2] == 1 || row[2] === true;
-    // Поля 4-5 расширенного формата (при наличии): ТП и точка учёта. Старый
-    // 3-польный формат → null (обратная совместимость).
+    // Поля 4-6 расширенного формата (при наличии): ТП, точка учёта, тип ПУ.
+    // Старый 3-польный формат → null (обратная совместимость).
     const tp = row.length > 3 && row[3] != null && row[3] !== '' ? String(row[3]) : null;
     const tuPath = row.length > 4 && row[4] != null && row[4] !== '' ? String(row[4]) : null;
+    const puType = row.length > 5 && row[5] != null && row[5] !== '' ? String(row[5]) : null;
     const norm = normSerial(serial);
     if (!norm) continue;
     const prev = byNorm.get(norm);
-    if (!prev) byNorm.set(norm, { serialRaw: String(serial), serialNorm: norm, isSpodes: spodes, isCollected: collected, tp, tpNorm: tp ? normTpName(tp) : null, tuPath, snapshotAt });
+    if (!prev) byNorm.set(norm, { serialRaw: String(serial), serialNorm: norm, isSpodes: spodes, isCollected: collected, tp, tpNorm: tp ? normTpName(tp) : null, tuPath, puType, snapshotAt });
     else {
       if (collected) prev.isCollected = true;
       if (spodes) prev.isSpodes = true;
       if (!prev.tp && tp) { prev.tp = tp; prev.tpNorm = normTpName(tp); }
       if (!prev.tuPath && tuPath) prev.tuPath = tuPath;
+      if (!prev.puType && puType) prev.puType = puType;
     }
   }
   const rowsToInsert = [...byNorm.values()];
@@ -1640,19 +1649,24 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
     const map = new Map();
     let snapshotAt = null;
     for (const m of meters) {
-      map.set(m.serialNorm, { isSpodes: m.isSpodes, isCollected: m.isCollected });
+      map.set(m.serialNorm, { isSpodes: m.isSpodes, isCollected: m.isCollected, puType: m.puType });
       if (!snapshotAt && m.snapshotAt) snapshotAt = m.snapshotAt;
     }
     const noData = meters.length === 0;
 
+    // journal — доступен ли журнал напряжений: СПОДЭС ИЛИ РиМ (любой РиМ).
     const statusOf = (pu) => {
-      if (!pu) return { status: 'no_pu', spodes: false };
+      if (!pu) return { status: 'no_pu', spodes: false, journal: false };
       // Срез не синхронизирован — структура видна, но данных опроса нет:
       // нейтральный статус 'no_data' (не путать с 'absent' = есть срез, ПУ в нём нет).
-      if (noData) return { status: 'no_data', spodes: false };
+      if (noData) return { status: 'no_data', spodes: false, journal: false };
       const m = map.get(normSerial(pu));
-      if (!m) return { status: 'absent', spodes: false };
-      return { status: m.isCollected ? 'collected' : 'not_collected', spodes: !!m.isSpodes };
+      if (!m) return { status: 'absent', spodes: false, journal: false };
+      return {
+        status: m.isCollected ? 'collected' : 'not_collected',
+        spodes: !!m.isSpodes,
+        journal: hasVoltageJournal(m.isSpodes, m.puType)
+      };
     };
 
     const structSerials = new Set();
@@ -1734,9 +1748,15 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
     sections.forEach(s => addTp(s.resId, s.ResUnit?.name || '', s.tpName));
     const tps = [...tpMap.values()].map(t => {
       const list = metersByTp.get(normTpName(t.tpName)) || [];
+      // Кандидаты для контроля — ПУ с журналом напряжений (СПОДЭС ИЛИ РиМ), которых
+      // нет в номерах структуры.
       const candidates = list
-        .filter(m => m.isSpodes && !structSerials.has(m.serialNorm))
-        .map(m => ({ serial: m.serialRaw || m.serialNorm, tuPath: m.tuPath || null, isCollected: m.isCollected }));
+        .filter(m => hasVoltageJournal(m.isSpodes, m.puType) && !structSerials.has(m.serialNorm))
+        .map(m => ({
+          serial: m.serialRaw || m.serialNorm, tuPath: m.tuPath || null,
+          isCollected: m.isCollected, isSpodes: !!m.isSpodes,
+          isRim: isRimType(m.puType), puType: m.puType || null
+        }));
       return { resId: t.resId, resName: t.resName, tpName: t.tpName, tpMatched: list.length > 0, candidates };
     });
 
@@ -6354,10 +6374,11 @@ async function initializeDatabase() {
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_smp_unique ON "SectionMonthlyPeaks" ("sectionId", "year", "month")`,
       // Карта опроса: матчинг по нормализованному серийнику.
       `CREATE INDEX IF NOT EXISTS idx_polledmeter_norm ON "PolledMeters" ("serialNorm")`,
-      // Расширенный срез (ТП/точка учёта) — sequelize.sync колонки не добавляет.
+      // Расширенный срез (ТП/точка учёта/тип ПУ) — sequelize.sync колонки не добавляет.
       `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "tp" VARCHAR(255)`,
       `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "tpNorm" VARCHAR(255)`,
       `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "tuPath" TEXT`,
+      `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "puType" VARCHAR(255)`,
       `CREATE INDEX IF NOT EXISTS idx_polledmeter_tpnorm ON "PolledMeters" ("tpNorm")`,
       // Источник ряда и дата обновления профиля на секции (для модалки техучёта)
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileSource" VARCHAR(10)`,

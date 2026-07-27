@@ -7482,6 +7482,7 @@ tr.selected:hover,
 .poll-orphan-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; }
 .mini-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--navy); color: #fff; }
 .mini-badge.green { background: var(--green); }
+.mini-badge.rim { background: #0e7490; }   /* РиМ — журнал напряжений доступен */
 .poll-total-row td { font-weight: 700; background: var(--surface-2); }
 .legend-dot.status-empty.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--gray); }
 
