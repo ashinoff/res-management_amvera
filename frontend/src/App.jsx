@@ -544,8 +544,11 @@ function NetworkStructure({ onSectionChange } = {}) {
   const [loading, setLoading] = useState(true);
   const [searchTp, setSearchTp] = useState('');
   const { user, selectedRes } = useContext(AuthContext);
-  const canEditStructure = hasPerm(user, 'structure_edit');   // ПУ/ВЛ/секции/тех.учёты
+  const canEditStructure = hasPerm(user, 'structure_edit');   // секции/ВЛ/удаление/привязка
   const canClearChecks = hasPerm(user, 'checks_delete');      // очистка истории по ТП
+  // Правка номеров ПУ: админ с правом structure_edit ИЛИ любой загрузчик (АСКУЭ)
+  // по умолчанию — только в части ПУ своего РЭС (секции остаются за canEditStructure).
+  const canEditPu = canEditStructure || user.role === 'uploader';
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedDetails, setSelectedDetails] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -980,8 +983,8 @@ const executeClearHistory = async () => {
     return (
       <div
         className="pu-cell"
-        onDoubleClick={() => { if (canEditStructure) startEdit(item, position); }}
-        title={canEditStructure ? 'Двойной клик для редактирования' : ''}
+        onDoubleClick={() => { if (canEditPu) startEdit(item, position); }}
+        title={canEditPu ? 'Двойной клик для редактирования' : ''}
       >
         {puNumber ? (
           <div
@@ -1160,7 +1163,7 @@ const executeClearHistory = async () => {
   return (
     <div className="network-structure">
       <PageHeader icon={<IconLayers size={24} />} title="Структура сети" />
-      {canEditStructure && (
+      {canEditPu && (
   <p className="edit-hint">
     <span className="svg-frame svg-frame--sm" style={{marginRight: 8}}><IconEdit size={20} /></span>
       Двойной клик по номеру счетчика для редактирования

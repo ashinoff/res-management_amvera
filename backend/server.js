@@ -1770,10 +1770,11 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
   }
 });
 
-// 4. ОБНОВЛЕНИЕ структуры сети (только админ)
+// 4. ОБНОВЛЕНИЕ структуры сети. Админ (право structure_edit) — полностью, включая
+// привязку секций. Загрузчик (АСКУЭ) — ТОЛЬКО номера ПУ и ТОЛЬКО своего РЭС.
 app.put('/api/network/structure/:id',
   authenticateToken,
-  checkRole(['admin']),
+  checkRole(['admin', 'uploader']),
   requirePerm('structure_edit'),
   async (req, res) => {
     try {
@@ -1784,6 +1785,12 @@ app.put('/api/network/structure/:id',
         return res.status(404).json({ error: 'ВЛ не найдена' });
       }
 
+      // Загрузчик (АСКУЭ) правит только ПУ и только своего РЭС; секции — не его.
+      const puOnly = req.user.role !== 'admin';
+      if (puOnly && Number(structure.resId) !== Number(req.user.resId)) {
+        return res.status(403).json({ error: 'Редактировать ПУ можно только в своём РЭС' });
+      }
+
       const updates = {
         startPu: startPu || null,
         middlePu: middlePu || null,
@@ -1791,9 +1798,9 @@ app.put('/api/network/structure/:id',
         lastUpdate: new Date()
       };
 
-      // Привязка/перепривязка ВЛ к секции шин (sectionId). Секция должна быть
-      // того же РЭСа и той же ТП, что и ВЛ, иначе 400. null = снять привязку.
-      if ('sectionId' in req.body) {
+      // Привязка/перепривязка ВЛ к секции шин (sectionId) — только админ. Секция
+      // должна быть того же РЭСа и той же ТП, что и ВЛ, иначе 400. null = снять.
+      if (!puOnly && 'sectionId' in req.body) {
         const sectionId = req.body.sectionId;
         if (sectionId === null || sectionId === '') {
           updates.sectionId = null;
