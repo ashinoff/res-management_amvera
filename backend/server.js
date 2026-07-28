@@ -3514,10 +3514,11 @@ app.put('/api/users/:id', authenticateToken, checkRole(['admin']), requirePerm('
     }
 
     const me = await getUserAccess(req.user.id);
-    // Учётку суперадмина может править ТОЛЬКО суперадмин (иначе не-супер с
-    // users_manage сбросил бы пароль суперадмина = эскалация).
-    if (user.isSuper && !me.isSuper) {
-      return res.status(403).json({ error: 'Учётную запись суперадмина может изменять только суперадмин' });
+    // Учётки администраторов (в т.ч. суперадмина) может править ТОЛЬКО суперадмин:
+    // иначе не-супер с users_manage сбросил бы пароль/поменял поля чужого админа
+    // = эскалация. Своих res_responsible/uploader он редактирует свободно.
+    if (!me.isSuper && user.role === 'admin') {
+      return res.status(403).json({ error: 'Учётки администраторов может изменять только суперадмин' });
     }
     // Суперадмина (login='admin') нельзя понижать/переименовывать НИКОМУ, включая его
     // самого (защита от выстрела в ногу). Смена его пароля/ФИО/email — можно.
@@ -3525,12 +3526,9 @@ app.put('/api/users/:id', authenticateToken, checkRole(['admin']), requirePerm('
       if (role && role !== 'admin') return res.status(403).json({ error: 'Нельзя изменить роль суперадмина' });
       if (login && login !== user.login) return res.status(403).json({ error: 'Нельзя переименовать логин суперадмина' });
     }
-    // Роль admin может назначать/снимать только суперадмин (обход выдачи прав).
-    if (!me.isSuper && role === 'admin' && user.role !== 'admin') {
+    // Назначать роль admin (создавать нового админа сменой роли) может только суперадмин.
+    if (!me.isSuper && role === 'admin') {
       return res.status(403).json({ error: 'Назначать роль администратора может только суперадмин' });
-    }
-    if (!me.isSuper && user.role === 'admin' && !user.isSuper && role && role !== 'admin') {
-      return res.status(403).json({ error: 'Менять роль администратора может только суперадмин' });
     }
 
     // Обновляем только переданные поля
@@ -3604,6 +3602,13 @@ app.delete('/api/users/:id', authenticateToken, checkRole(['admin']), requirePer
     // Суперадмина (login='admin') удалить нельзя никому.
     if (user.isSuper) {
       return res.status(403).json({ error: 'Нельзя удалить суперадмина' });
+    }
+
+    // Учётки администраторов удаляет только суперадмин (иначе не-супер с users_manage
+    // мог бы вычистить остальных админов).
+    const meDel = await getUserAccess(req.user.id);
+    if (user.role === 'admin' && !meDel.isSuper) {
+      return res.status(403).json({ error: 'Учётки администраторов может изменять только суперадмин' });
     }
 
     // Проверяем, не последний ли это админ

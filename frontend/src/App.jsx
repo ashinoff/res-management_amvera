@@ -5601,7 +5601,7 @@ function UserSettings() {
   const handleCreateUser = async () => {
     try {
       await api.post('/api/users/create', userForm);
-      alert('Пользователь создан успешно');
+      showToast('Пользователь создан успешно', 'ok');
       setShowCreateModal(false);
       setUserForm({
         fio: '',
@@ -5613,19 +5613,19 @@ function UserSettings() {
       });
       loadUsers();
     } catch (error) {
-      alert('Ошибка создания пользователя: ' + (error.response?.data?.error || error.message));
+      showToast(error.response?.data?.error || ('Ошибка создания: ' + error.message));
     }
   };
   
   const handleUpdateUser = async () => {
     try {
       await api.put(`/api/users/${editingUser.id}`, userForm);
-      alert('Пользователь обновлен успешно');
+      showToast('Пользователь обновлён успешно', 'ok');
       setShowEditModal(false);
       setEditingUser(null);
       loadUsers();
     } catch (error) {
-      alert('Ошибка обновления пользователя: ' + (error.response?.data?.error || error.message));
+      showToast(error.response?.data?.error || ('Ошибка обновления: ' + error.message));
     }
   };
   
@@ -5637,14 +5637,19 @@ function UserSettings() {
     
     try {
       await api.delete(`/api/users/${userId}`, { data: { password } });
-      alert('Пользователь удален');
+      showToast('Пользователь удалён', 'ok');
       loadUsers();
     } catch (error) {
-      alert('Ошибка удаления: ' + (error.response?.data?.error || error.message));
+      showToast(error.response?.data?.error || ('Ошибка удаления: ' + error.message));
     }
   };
   
   const startEdit = (user) => {
+    // Учётки администраторов правит только суперадмин — не открываем «сломанную» форму.
+    if (user.role === 'admin' && !amSuper) {
+      showToast('Учётки администраторов может изменять только суперадмин');
+      return;
+    }
     setEditingUser(user);
     setUserForm({
       fio: user.fio,
@@ -5702,26 +5707,33 @@ function UserSettings() {
                   <td>{user.email}</td>
                   <td>
                     <div className="action-buttons">
-                      {canManageUsers ? (
-                        <>
-                          <button
-                            onClick={() => startEdit(user)}
-                            className="btn-icon"
-                            title="Редактировать"
-                          >
-                            <IconEdit className="ico" />
-                          </button>
-                          {!user.isSuper && (
+                      {canManageUsers ? (() => {
+                        // Учётки администраторов правит только суперадмин.
+                        const adminLock = user.role === 'admin' && !amSuper;
+                        const lockTitle = 'Учётки администраторов может изменять только суперадмин';
+                        return (
+                          <>
                             <button
-                              onClick={() => handleDeleteUser(user.id)}
-                              className="btn-icon danger"
-                              title="Удалить"
+                              onClick={() => startEdit(user)}
+                              className="btn-icon"
+                              disabled={adminLock}
+                              title={adminLock ? lockTitle : 'Редактировать'}
                             >
-                              <IconTrash className="ico" />
+                              <IconEdit className="ico" />
                             </button>
-                          )}
-                        </>
-                      ) : <span className="muted">—</span>}
+                            {!user.isSuper && (
+                              <button
+                                onClick={() => handleDeleteUser(user.id)}
+                                className="btn-icon danger"
+                                disabled={adminLock}
+                                title={adminLock ? lockTitle : 'Удалить'}
+                              >
+                                <IconTrash className="ico" />
+                              </button>
+                            )}
+                          </>
+                        );
+                      })() : <span className="muted">—</span>}
                     </div>
                   </td>
                 </tr>
