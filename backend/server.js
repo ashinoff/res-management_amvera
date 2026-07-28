@@ -1636,11 +1636,10 @@ app.post('/api/poll-map/sync', authenticateToken, checkRole(['admin', 'uec_respo
 app.get('/api/poll-map', authenticateToken, async (req, res) => {
   try {
     let resId = req.query.resId;
-    // Карта опроса доступна всем ролям. Только res_responsible принудительно видит
-    // свой РЭС; admin/uploader/uec_responsible — всю карту (admin может фильтровать
-    // через ?resId). Карта опроса — сетевой аналитический разрез, uploader (АСКУЭ)
-    // работает по всей сети, поэтому видит всё.
-    if (req.user.role === 'res_responsible') resId = req.user.resId;
+    // Карта опроса доступна всем ролям, но данные — по области видимости роли:
+    // админ видит всю карту (может фильтровать через ?resId), остальные
+    // (uploader / res_responsible / uec_responsible) — только свой РЭС.
+    if (req.user.role !== 'admin') resId = req.user.resId;
     const where = {};
     if (resId) where.resId = resId;
 
