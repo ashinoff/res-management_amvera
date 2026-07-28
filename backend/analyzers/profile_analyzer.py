@@ -147,11 +147,12 @@ def _read_sheet(ws):
     на реальном файле (1449×8). Здесь строки читаются последовательно, метаданные
     (ПУ/Ктт·Ктн) берём из строк 5/6, данные — с 9-й до «Итого»."""
     if ws is None:
-        return {}, {}, []
+        return {}, {}, [], []
 
     meta = {}                 # col -> {'pu': str, 'kt': float}
     series = {}               # col -> {dt: kw_raw}
     dates = []
+    all_dts = []              # все метки времени строк листа (сетка, вкл. пустые значения)
     pu_row_vals = None
     kt_row_vals = None
 
@@ -184,6 +185,7 @@ def _read_sheet(ws):
             break
         dt = _cell_dt(a, b)
         if dt is not None:
+            all_dts.append(dt)   # метка строки существует, даже если значение пустое
             d = _parse_date(a)
             if d is not None:
                 dates.append(d)
@@ -192,7 +194,7 @@ def _read_sheet(ws):
                 if val is not None:
                     series[c][dt] = val
 
-    return meta, series, dates
+    return meta, series, dates, all_dts
 
 
 def _hourly_from_60(dt_map):
@@ -211,6 +213,63 @@ def _hourly_from_30(dt_map):
     return hourly
 
 
+def _hour_grid(all_dts):
+    """Полная часовая сетка [min..max] из меток строк листа (по границам часа).
+    Метки строятся из ВСЕХ строк листа (в т.ч. с пустыми значениями), поэтому
+    сетка покрывает и «дыры» в начале/конце профиля отдельного ПУ."""
+    if not all_dts:
+        return []
+    hours = sorted({dt.replace(minute=0, second=0, microsecond=0) for dt in all_dts})
+    start, end = hours[0], hours[-1]
+    grid = []
+    t = start
+    while t <= end:
+        grid.append(t)
+        t = t + timedelta(hours=1)
+    return grid
+
+
+def _peak_excluding_gaps(hourly, grid):
+    """Пик часового ряда с учётом «дыр».
+
+    Дыра — один или более ПОДРЯД отсутствующих часов на равномерной часовой сетке
+    (пропущенный интервал ЛИБО пустое значение — оба дают отсутствие часа в ряду).
+    Счётчик потерянного объёма искажает ГРАНИЧНЫЕ отсчёты, поэтому из выбора ПИКА
+    исключаем ровно один заполненный отсчёт перед каждой дырой и один после
+    (для двух смежных дыр общий отсчёт исключается один раз). Дыра в начале —
+    исключаем только «после», в конце — только «до».
+
+    Возвращает (peak_dt, peak_raw, gaps, excluded_count). peak_dt=None, если после
+    исключений не осталось отсчётов (сплошные дыры / нет данных)."""
+    if not hourly:
+        return None, None, 0, 0
+    if not grid:
+        grid = sorted(hourly.keys())
+    present = set(hourly.keys())
+    excluded = set()
+    gaps = 0
+    n = len(grid)
+    i = 0
+    while i < n:
+        if grid[i] in present:
+            i += 1
+            continue
+        j = i
+        while j < n and grid[j] not in present:
+            j += 1
+        gaps += 1
+        if i - 1 >= 0 and grid[i - 1] in present:
+            excluded.add(grid[i - 1])          # последний отсчёт до дыры
+        if j < n and grid[j] in present:
+            excluded.add(grid[j])              # первый отсчёт после дыры
+        i = j
+    candidates = [d for d in grid if d in present and d not in excluded]
+    if not candidates:
+        return None, None, gaps, len(excluded)
+    peak_dt = max(candidates, key=lambda d: hourly[d])
+    return peak_dt, hourly[peak_dt], gaps, len(excluded)
+
+
 def analyze(filepath):
     # НЕ read_only: файлы небольшие (обычная загрузка ~0.5 c), а read-only делает
     # случайный доступ к ячейкам квадратичным. Данные читаем одним проходом.
@@ -218,8 +277,10 @@ def analyze(filepath):
     ws60 = _find_sheet(wb, '60')
     ws30 = _find_sheet(wb, '30')
 
-    meta60, series60, dates60 = _read_sheet(ws60)
-    meta30, series30, dates30 = _read_sheet(ws30)
+    meta60, series60, dates60, allDts60 = _read_sheet(ws60)
+    meta30, series30, dates30, allDts30 = _read_sheet(ws30)
+    grid60 = _hour_grid(allDts60)
+    grid30 = _hour_grid(allDts30)
 
     # ВАЖНО: kt берём из ТОГО ЖЕ листа, откуда взяты данные/пик. Раньше kt лежал в
     # общем pu_info с «последним победителем» (meta30 перезаписывал meta60), а пик
@@ -248,6 +309,9 @@ def analyze(filepath):
 
     results = []
     warnings = []
+    total_gaps = 0
+    total_excluded = 0
+    sections_with_gaps = 0
 
     for pu in all_pus:
         hourly = {}
@@ -270,11 +334,20 @@ def analyze(filepath):
             warnings.append(pu)
             continue
 
-        # Пик
-        peak_dt = max(hourly, key=lambda d: hourly[d])
-        peak_raw = hourly[peak_dt]
+        # Пик — с исключением граничных отсчётов у «дыр» (только выбор максимума;
+        # энергия считается по полному ряду).
+        grid = grid60 if source == '60' else grid30
+        peak_dt, peak_raw, gaps, excluded_pts = _peak_excluding_gaps(hourly, grid)
+        if peak_dt is None:
+            warnings.append(pu)   # достоверного пика нет (сплошные дыры)
+            continue
         peak_kw = peak_raw * kt
         energy_kwh = sum(hourly.values()) * kt
+
+        total_gaps += gaps
+        total_excluded += excluded_pts
+        if gaps > 0:
+            sections_with_gaps += 1
 
         results.append({
             'puNumber': pu,
@@ -286,7 +359,18 @@ def analyze(filepath):
             'energyKwh': round(energy_kwh, 4),
             'source': source,
             'period': period,
+            'gaps': gaps,
+            'excludedPoints': excluded_pts,
         })
+
+    # Лог одной строкой на файл (stderr — stdout занят JSON'ом для Node).
+    if total_gaps > 0:
+        try:
+            sys.stderr.write(
+                f"[profile] {filepath}: секций с дырами {sections_with_gaps}, "
+                f"дыр {total_gaps}, исключено {total_excluded} отсчётов\n")
+        except Exception:
+            pass
 
     return {
         'success': True,
