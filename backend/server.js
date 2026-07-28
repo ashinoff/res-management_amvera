@@ -1052,6 +1052,7 @@ const checkRole = (roles) => {
 const PERMISSIONS = {
   structure_upload:     'Загрузка/обновление структуры сети',
   structure_edit:       'Редактирование структуры (ПУ, ВЛ, секции, тех.учёты, добавление/удаление)',
+  structure_edit_pu:    'Изменение номеров ПУ в структуре (без секций/удаления)',
   checks_delete:        'Удаление карточек проверок и истории',
   notifications_delete: 'Удаление уведомлений',
   files_manage:         'Управление файлами (удаление, диагностика)',
@@ -1081,18 +1082,16 @@ async function getUserAccess(userId) {
   return info;
 }
 
-// Право на ОПАСНОЕ действие. Суперадмин — всегда; админ — если permissions[key];
-// не-админ проходит насквозь (его доступ уже проверен предыдущим checkRole —
-// роли res_responsible/uploader/uec этим механизмом НЕ ограничиваются).
+// Право на ОПАСНОЕ действие. Гранулярные права раздаются ЛЮБОЙ роли через раздел
+// «Права доступа» (кроме суперадмина, у него всё). `key` — ключ каталога ИЛИ массив
+// ключей (достаточно любого из них). Суперадмин → всегда; иначе нужен один из прав.
 const requirePerm = (key) => async (req, res, next) => {
   try {
+    const list = Array.isArray(key) ? key : [key];
     const info = await getUserAccess(req.user.id);
     if (info.isSuper) return next();
-    if (req.user.role === 'admin') {
-      if (info.permissions && info.permissions[key]) return next();
-      return res.status(403).json({ error: 'Недостаточно прав', permission: key, title: PERMISSIONS[key] || key });
-    }
-    return next();
+    if (info.permissions && list.some(k => info.permissions[k])) return next();
+    return res.status(403).json({ error: 'Недостаточно прав', permission: list[0], title: PERMISSIONS[list[0]] || list[0] });
   } catch (e) {
     console.error('requirePerm error:', e.message);
     return res.status(500).json({ error: 'Ошибка проверки прав' });
@@ -1770,12 +1769,12 @@ app.get('/api/poll-map', authenticateToken, async (req, res) => {
   }
 });
 
-// 4. ОБНОВЛЕНИЕ структуры сети. Админ (право structure_edit) — полностью, включая
-// привязку секций. Загрузчик (АСКУЭ) — ТОЛЬКО номера ПУ и ТОЛЬКО своего РЭС.
+// 4. ОБНОВЛЕНИЕ структуры сети. Доступ по праву (любая роль через «Права доступа»):
+// structure_edit — полностью (включая привязку секций); structure_edit_pu — ТОЛЬКО
+// номера ПУ и ТОЛЬКО своего РЭС.
 app.put('/api/network/structure/:id',
   authenticateToken,
-  checkRole(['admin', 'uploader']),
-  requirePerm('structure_edit'),
+  requirePerm(['structure_edit', 'structure_edit_pu']),
   async (req, res) => {
     try {
       const { startPu, middlePu, endPu } = req.body;
@@ -1785,9 +1784,11 @@ app.put('/api/network/structure/:id',
         return res.status(404).json({ error: 'ВЛ не найдена' });
       }
 
-      // Загрузчик (АСКУЭ) правит только ПУ и только своего РЭС; секции — не его.
-      const puOnly = req.user.role !== 'admin';
-      if (puOnly && Number(structure.resId) !== Number(req.user.resId)) {
+      // Полная правка — у кого есть structure_edit (или суперадмин); остальные
+      // (право structure_edit_pu) — только ПУ и только в своём РЭС.
+      const acc = await getUserAccess(req.user.id);
+      const fullEdit = acc.isSuper || !!(acc.permissions && acc.permissions.structure_edit);
+      if (!fullEdit && Number(structure.resId) !== Number(req.user.resId)) {
         return res.status(403).json({ error: 'Редактировать ПУ можно только в своём РЭС' });
       }
 
@@ -1798,9 +1799,9 @@ app.put('/api/network/structure/:id',
         lastUpdate: new Date()
       };
 
-      // Привязка/перепривязка ВЛ к секции шин (sectionId) — только админ. Секция
-      // должна быть того же РЭСа и той же ТП, что и ВЛ, иначе 400. null = снять.
-      if (!puOnly && 'sectionId' in req.body) {
+      // Привязка/перепривязка ВЛ к секции шин (sectionId) — только полная правка.
+      // Секция должна быть того же РЭСа и той же ТП, что и ВЛ, иначе 400. null = снять.
+      if (fullEdit && 'sectionId' in req.body) {
         const sectionId = req.body.sectionId;
         if (sectionId === null || sectionId === '') {
           updates.sectionId = null;
@@ -3661,18 +3662,20 @@ app.delete('/api/users/:id', authenticateToken, checkRole(['admin']), requirePer
 // =====================================================
 // УПРАВЛЕНИЕ ПРАВАМИ (только суперадмин)
 // =====================================================
-// Список обычных админов (без суперадмина) + их права + каталог для UI.
+// Список ВСЕХ пользователей (кроме суперадмина) — любой роли — + их права и каталог.
 app.get('/api/admin/permissions', authenticateToken, requireSuper, async (req, res) => {
   try {
-    const admins = await User.findAll({
-      where: { role: 'admin', isSuper: false },
-      attributes: ['id', 'fio', 'login', 'email', 'permissions'],
+    const users = await User.findAll({
+      where: { isSuper: false },
+      attributes: ['id', 'fio', 'login', 'email', 'role', 'permissions'],
+      include: [ResUnit],
       order: [['fio', 'ASC']]
     });
     res.json({
       catalog: PERMISSIONS,
-      admins: admins.map(u => ({
-        id: u.id, fio: u.fio, login: u.login, email: u.email,
+      admins: users.map(u => ({
+        id: u.id, fio: u.fio, login: u.login, email: u.email, role: u.role,
+        resName: u.ResUnit?.name || '',
         permissions: (u.permissions && typeof u.permissions === 'object') ? u.permissions : {}
       }))
     });
@@ -3682,14 +3685,13 @@ app.get('/api/admin/permissions', authenticateToken, requireSuper, async (req, r
   }
 });
 
-// Сохранить права обычного админа. Валидация ключей по каталогу; суперадмина не трогаем.
+// Сохранить права пользователя (любой роли, кроме суперадмина). Ключи — по каталогу.
 app.put('/api/admin/permissions/:userId', authenticateToken, requireSuper, async (req, res) => {
   try {
     const userId = req.params.userId;
     const user = await User.findByPk(userId);
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
     if (user.isSuper) return res.status(403).json({ error: 'Права суперадмина не редактируются' });
-    if (user.role !== 'admin') return res.status(400).json({ error: 'Права назначаются только администраторам' });
 
     const incoming = (req.body && typeof req.body.permissions === 'object' && req.body.permissions) || {};
     // Оставляем только известные ключи каталога со значением true.

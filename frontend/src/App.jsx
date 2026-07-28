@@ -135,9 +135,9 @@ api.interceptors.request.use(config => {
   return config;
 });
 
-// Право на действие в UI: суперадмин видит всё; обычный админ — по permissions;
-// прочие роли — только их обычные возможности (правами не расширяются).
-const hasPerm = (user, key) => !!(user && (user.isSuper || (user.role === 'admin' && user.permissions && user.permissions[key])));
+// Право на действие в UI: суперадмин видит всё; остальным (любой роли) право
+// раздаётся через «Права доступа» и лежит в user.permissions.
+const hasPerm = (user, key) => !!(user && (user.isSuper || (user.permissions && user.permissions[key])));
 
 // Человеческий тост (для 403 «нет права» и т.п.) без внешних зависимостей.
 function showToast(msg, kind = 'error') {
@@ -546,9 +546,9 @@ function NetworkStructure({ onSectionChange } = {}) {
   const { user, selectedRes } = useContext(AuthContext);
   const canEditStructure = hasPerm(user, 'structure_edit');   // секции/ВЛ/удаление/привязка
   const canClearChecks = hasPerm(user, 'checks_delete');      // очистка истории по ТП
-  // Правка номеров ПУ: админ с правом structure_edit ИЛИ любой загрузчик (АСКУЭ)
-  // по умолчанию — только в части ПУ своего РЭС (секции остаются за canEditStructure).
-  const canEditPu = canEditStructure || user.role === 'uploader';
+  // Правка номеров ПУ: полное право structure_edit ИЛИ узкое structure_edit_pu
+  // (раздаётся любой роли через «Права доступа»). Секции — только canEditStructure.
+  const canEditPu = canEditStructure || hasPerm(user, 'structure_edit_pu');
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedDetails, setSelectedDetails] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -8814,9 +8814,11 @@ function PollMap({ selectedRes }) {
 
       <div className="poll-topbar">
         <div className="poll-snapshot">
-          {data?.snapshotAt
-            ? <>Срез Пирамиды от <strong>{fmtDate(data.snapshotAt)}</strong></>
-            : 'Срез не загружен'}
+          {loading
+            ? 'Срез загружается, это может занять несколько секунд, подождите…'
+            : data?.snapshotAt
+              ? <>Срез Пирамиды от <strong>{fmtDate(data.snapshotAt)}</strong></>
+              : 'Срез не синхронизирован'}
         </div>
         <div className="poll-controls">
           <input type="text" className="search-input" placeholder="Поиск по ТП..." value={searchTp} onChange={(e) => setSearchTp(e.target.value)} />
@@ -9105,19 +9107,20 @@ function PermissionsAdmin() {
     <div className="permissions-admin">
       <PageHeader icon={<IconLock size={24} />} title="Права доступа" />
       <p className="perm-hint muted">
-        Отметьте разрешённые опасные действия для каждого администратора. Изменения применяются
-        <strong> без перелогина</strong> и вступают в силу в течение минуты. Суперадмин может всё и в списке не показан.
+        Отметьте разрешённые действия для каждого пользователя (админы, загрузчики, ответственные РЭС).
+        Изменения применяются <strong>без перелогина</strong> и вступают в силу в течение минуты.
+        Суперадмин может всё и в списке не показан.
       </p>
       {loading ? (
         <div className="loading"><RossetiLoader /></div>
       ) : admins.length === 0 ? (
-        <div className="no-data" style={{ padding: 16 }}>Обычных администраторов нет. Создайте их в «Настройках → Пользователи».</div>
+        <div className="no-data" style={{ padding: 16 }}>Пользователей нет. Создайте их в «Настройках → Пользователи».</div>
       ) : (
         <div className="perm-table-wrap">
           <table className="perm-table">
             <thead>
               <tr>
-                <th className="perm-sticky">Администратор</th>
+                <th className="perm-sticky">Пользователь</th>
                 {catKeys.map(k => <th key={k} title={catalog[k]}>{catalog[k]}</th>)}
                 <th></th>
               </tr>
@@ -9127,7 +9130,11 @@ function PermissionsAdmin() {
                 <tr key={a.id}>
                   <td className="perm-sticky">
                     <div className="perm-admin-name">{a.fio}</div>
-                    <div className="perm-admin-login muted">{a.login}{a.email ? ` · ${a.email}` : ''}</div>
+                    <div className="perm-admin-login muted">
+                      {a.login}
+                      {' · '}{a.role === 'admin' ? 'Администратор' : a.role === 'uploader' ? 'Загрузчик АСКУЭ' : a.role === 'res_responsible' ? 'Ответственный РЭС' : a.role}
+                      {a.resName ? ` · ${a.resName}` : ''}
+                    </div>
                   </td>
                   {catKeys.map(k => (
                     <td key={k} className="perm-check-cell">
