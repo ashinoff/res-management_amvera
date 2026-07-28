@@ -341,7 +341,7 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
 
   const menuItems = [
     { id: 'structure', label: 'Структура сети', icon: <IconLayers size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'poll_map', label: 'Карта опроса', icon: <IconMapPin size={18} />, roles: ['admin', 'res_responsible', 'uec_responsible'] },
+    { id: 'poll_map', label: 'Карта опроса', icon: <IconMapPin size={18} />, roles: ['admin', 'uploader', 'res_responsible', 'uec_responsible'] },
     { id: 'upload', label: 'Загрузить файлы', icon: <IconUpload size={18} />, roles: ['admin', 'uploader'] },
     { id: 'tech_pending', label: 'Ожидающие мероприятий', icon: <IconWrench size={18} />, roles: ['admin', 'res_responsible'], badge: notificationCounts.tech_pending },
     { id: 'askue_pending', label: 'Ожидающие проверки АСКУЭ', icon: <IconClipboard size={18} />, roles: ['admin', 'uploader'], badge: notificationCounts.askue_pending },
