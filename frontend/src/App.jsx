@@ -819,7 +819,7 @@ function NetworkStructure({ onSectionChange } = {}) {
   
   // Начать редактирование — открываем mac-модалку (старый ПУ / новый ПУ).
   const startEdit = (item, position) => {
-    if (user.role !== 'admin') return;
+    if (!canEditPu) return;   // гейт по ПРАВУ (structure_edit / structure_edit_pu), не по роли
     const currentValue = position === 'start' ? item.startPu :
                         position === 'middle' ? item.middlePu :
                         item.endPu;
@@ -846,7 +846,7 @@ function NetworkStructure({ onSectionChange } = {}) {
       setPuEdit(null);
       setEditValue('');
     } catch (error) {
-      alert('Ошибка при сохранении');
+      showToast(error.response?.data?.error || 'Ошибка при сохранении');
     }
   };
 

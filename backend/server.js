@@ -1863,16 +1863,19 @@ app.get('/api/network/sections', authenticateToken, async (req, res) => {
   }
 });
 
-// 4b. Создание секции (админ — как редактирование структуры)
+// 4b. Создание секции — право structure_edit (любая роль); область — свой РЭС.
 app.post('/api/network/sections',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('structure_edit'),
   async (req, res) => {
     try {
       const { resId, tpName, sectionNumber, tnKva, cosPhi, techPuNumber } = req.body;
       if (!resId || !tpName || sectionNumber === undefined || sectionNumber === null || sectionNumber === '') {
         return res.status(400).json({ error: 'Обязательны РЭС, ТП и номер секции' });
+      }
+      // Право не расширяет географию: не-админ создаёт секции только своего РЭС.
+      if (req.user.role !== 'admin' && Number(resId) !== Number(req.user.resId)) {
+        return res.status(403).json({ error: 'Создавать секции можно только в своём РЭС' });
       }
 
       // Десятичный разделитель — запятая или точка; невалид → null (Sном) / 0.9 (cosφ).
@@ -1897,15 +1900,17 @@ app.post('/api/network/sections',
     }
 });
 
-// 4c. Обновление секции
+// 4c. Обновление секции — право structure_edit; область — свой РЭС.
 app.put('/api/network/sections/:id',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('structure_edit'),
   async (req, res) => {
     try {
       const section = await TpSection.findByPk(req.params.id);
       if (!section) return res.status(404).json({ error: 'Секция не найдена' });
+      if (req.user.role !== 'admin' && Number(section.resId) !== Number(req.user.resId)) {
+        return res.status(403).json({ error: 'Редактировать секции можно только в своём РЭС' });
+      }
 
       const { sectionNumber, tnKva, cosPhi, techPuNumber } = req.body;
       const updates = {};
@@ -1941,15 +1946,17 @@ app.put('/api/network/sections/:id',
     }
 });
 
-// 4d. Удаление секции — запрещено, если к ней привязаны ВЛ
+// 4d. Удаление секции — право structure_edit; область — свой РЭС. Запрещено, если к ней привязаны ВЛ
 app.delete('/api/network/sections/:id',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('structure_edit'),
   async (req, res) => {
     try {
       const section = await TpSection.findByPk(req.params.id);
       if (!section) return res.status(404).json({ error: 'Секция не найдена' });
+      if (req.user.role !== 'admin' && Number(section.resId) !== Number(req.user.resId)) {
+        return res.status(403).json({ error: 'Удалять секции можно только в своём РЭС' });
+      }
 
       const linked = await NetworkStructure.count({ where: { sectionId: section.id } });
       if (linked > 0) {
@@ -2923,23 +2930,33 @@ app.delete('/api/network/clear-all',
 // 10. УДАЛЕНИЕ ВЫБРАННЫХ СТРУКТУР
 app.post('/api/network/delete-selected',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('structure_edit'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
-    
+
     try {
       const { ids, password } = req.body;
-      
+
       // Проверка пароля
       if (password !== DELETE_PASSWORD) {
         return res.status(403).json({ error: 'Неверный пароль' });
       }
-      
+
       if (!ids || !Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({ error: 'Не выбраны записи для удаления' });
       }
-      
+
+      // Право не расширяет географию: не-админ удаляет только ВЛ своего РЭС.
+      if (req.user.role !== 'admin') {
+        const foreign = await NetworkStructure.count({
+          where: { id: { [Op.in]: ids }, resId: { [Op.ne]: req.user.resId } }, transaction
+        });
+        if (foreign > 0) {
+          await transaction.rollback();
+          return res.status(403).json({ error: 'Удалять можно только ВЛ своего РЭС' });
+        }
+      }
+
       console.log(`Deleting network structures: ${ids.join(', ')}`);
       
       // ВАЖНО: правильный порядок удаления!
