@@ -1992,7 +1992,9 @@ app.get('/api/overload', authenticateToken, async (req, res) => {
   try {
     const { stage, resId } = req.query;
     const where = {};
-    if (req.user.role === 'res_responsible') {
+    // Область видимости: не-админ (res_responsible/uploader/uec) — только свой РЭС;
+    // админ — по фильтру ?resId либо все.
+    if (req.user.role !== 'admin') {
       where.resId = req.user.resId;
     } else if (resId) {
       where.resId = parseInt(resId, 10);

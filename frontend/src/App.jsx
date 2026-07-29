@@ -346,7 +346,7 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
     { id: 'tech_pending', label: 'Ожидающие мероприятий', icon: <IconWrench size={18} />, roles: ['admin', 'res_responsible'], badge: notificationCounts.tech_pending },
     { id: 'askue_pending', label: 'Ожидающие проверки АСКУЭ', icon: <IconClipboard size={18} />, roles: ['admin', 'uploader'], badge: notificationCounts.askue_pending },
     { id: 'problem_vl', label: 'Проблемные ВЛ', icon: <IconAlertTriangle size={18} />, roles: ['admin'], badge: notificationCounts.problem_vl },
-    { id: 'power_overload', label: 'Превышение Pном', icon: <IconZap size={18} />, roles: ['admin', 'res_responsible'], badge: notificationCounts.powerOverload },
+    { id: 'power_overload', label: 'Превышение Pном', icon: <IconZap size={18} />, roles: ['admin', 'uploader', 'res_responsible'], badge: notificationCounts.powerOverload },
     { id: 'power_analysis', label: 'Анализ мощности', icon: <IconChart size={18} />, roles: ['admin', 'res_responsible'] },
     { id: 'analytics', label: 'Анализ напряжения', icon: <IconChart size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
     { id: 'documents', label: 'Загруженные документы', icon: <IconFolder size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },

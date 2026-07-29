@@ -391,6 +391,14 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-29** — «Превышение Pном» доступно загрузчикам (просмотр, своя зона).
+  Пункт меню `power_overload` += `uploader` (роли admin/uploader/res_responsible).
+  Backend `GET /api/overload` scoping: не-админ (uploader/res_responsible/uec) — только
+  свой РЭС (`where.resId = req.user.resId`), админ — по `?resId` либо все (раньше
+  свой РЭС форсился только для res_responsible, uploader увидел бы всё). Загрузчик
+  просматривает кейсы своего РЭС; action-кнопки (askue/res-complete) скрыты по роли,
+  их роуты не трогали. Бейдж «требует действия» у uploader = 0 (действий в workflow
+  нет) — ожидаемо. node --check / npm run build — ОК.
 - **2026-07-29** — Баг прав: uploader с правом не мог открыть модалку правки ПУ.
   **Причина — FRONTEND (слой 2):** в `NetworkStructure.startEdit` был скрытый
   ролевой гейт `if (user.role !== 'admin') return;` ПОВЕРХ права — двойной клик
