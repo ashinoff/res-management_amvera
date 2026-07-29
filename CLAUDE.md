@@ -391,6 +391,13 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-29** — Бейдж «Превышение Pном» для загрузчиков (АСКУЭ). Причина: в
+  `getNotificationCounts` счётчик `powerOverloadCases` считался только для admin и
+  res_responsible → у uploader был 0, кругляшка не появлялась. Добавлена ветка
+  `uploader`: те же стадии, что у админа (`askue_limit`+`awaiting_recheck`), но по
+  своему РЭС (`resId = user.resId`). Кеш счётчиков keyed per-user
+  (`role_resId_id`) — пересечений нет. Только backend; фронт-бейдж уже читал
+  `notificationCounts.powerOverload`. node --check — ОК.
 - **2026-07-29** — «Превышение Pном» доступно загрузчикам (просмотр, своя зона).
   Пункт меню `power_overload` += `uploader` (роли admin/uploader/res_responsible).
   Backend `GET /api/overload` scoping: не-админ (uploader/res_responsible/uec) — только

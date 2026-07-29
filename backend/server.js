@@ -4108,6 +4108,11 @@ async function getNotificationCounts(user) {
     powerOverloadCases = await OverloadCase.count({
       where: { stage: { [Op.in]: ['askue_limit', 'awaiting_recheck'] } }
     });
+  } else if (user.role === 'uploader') {
+    // Загрузчик (АСКУЭ) — те же стадии, что у админа, но по своему РЭС.
+    powerOverloadCases = await OverloadCase.count({
+      where: { stage: { [Op.in]: ['askue_limit', 'awaiting_recheck'] }, resId: user.resId }
+    });
   } else if (user.role === 'res_responsible') {
     powerOverloadCases = await OverloadCase.count({
       where: { stage: 'res_work', resId: user.resId }
