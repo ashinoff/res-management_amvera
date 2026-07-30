@@ -447,6 +447,13 @@ const TpSection = sequelize.define('TpSection', {
   lastProfileAt: {
     type: DataTypes.DATE,        // когда профиль последний раз обновил секцию
     allowNull: true
+  },
+  // Данные АСКУЭ (последний снимок при завершении этапа АСКУЭ по кейсу перегруза):
+  // { consumers, limitedKw, unpolledKw, totalKw, at }. Для колонок значков в карточке
+  // секции («Структура сети»). Колонка/миграция — в initializeDatabase.
+  askueData: {
+    type: DataTypes.JSON,
+    allowNull: true
   }
 });
 
@@ -519,6 +526,8 @@ const OverloadCase = sequelize.define('OverloadCase', {
   askueUserId: { type: DataTypes.INTEGER, allowNull: true },
   askueCompletedAt: { type: DataTypes.DATE, allowNull: true },
   askueComment: { type: DataTypes.TEXT, allowNull: true },
+  // Снимок цифр АСКУЭ этого кейса: { consumers, limitedKw, unpolledKw, totalKw, at }.
+  askueData: { type: DataTypes.JSON, allowNull: true },
   // Этап РЭС (мероприятия + фото)
   resUserId: { type: DataTypes.INTEGER, allowNull: true },
   resCompletedAt: { type: DataTypes.DATE, allowNull: true },
@@ -2029,13 +2038,31 @@ app.post('/api/overload/:caseId/askue-complete',
   requirePerm('overload_askue'),
   async (req, res) => {
     try {
-      const { comment } = req.body;
+      const { comment, consumers, limitedKw, unpolledKw } = req.body;
       // Комментарий обязателен (что именно ограничили) — как у РЭС, мин. 5 слов.
       if (!comment || typeof comment !== 'string') {
         return res.status(400).json({ error: 'Комментарий обязателен' });
       }
       if (comment.trim().split(/\s+/).filter(w => w.length > 0).length < 5) {
         return res.status(400).json({ error: 'Комментарий должен содержать не менее 5 слов' });
+      }
+
+      // Числа АСКУЭ: мощности — целые 0–9999, потребители — целые 1–999.
+      const intPower = (v, name) => {
+        const n = Math.round(Number(v));
+        if (!Number.isFinite(n) || n < 0 || n > 9999) throw new Error(`${name}: допустимо целое 0–9999 кВт`);
+        return n;
+      };
+      let consumersN, limitedN, unpolledN, totalN;
+      try {
+        limitedN = intPower(limitedKw, 'Введённые ограничения');
+        unpolledN = intPower(unpolledKw, 'Не введённые (нет опроса)');
+        const c = Math.round(Number(consumers));
+        if (!Number.isFinite(c) || c < 1 || c > 999) throw new Error('Потребители: допустимо целое 1–999');
+        consumersN = c;
+        totalN = Math.round(limitedN + unpolledN);   // общая разрешённая мощность ТП
+      } catch (ve) {
+        return res.status(400).json({ error: ve.message });
       }
 
       const oc = await OverloadCase.findByPk(req.params.caseId, {
@@ -2045,12 +2072,19 @@ app.post('/api/overload/:caseId/askue-complete',
       if (oc.stage !== 'askue_limit') {
         return res.status(400).json({ error: 'Случай не на этапе АСКУЭ' });
       }
+      const askueData = {
+        consumers: consumersN, limitedKw: limitedN, unpolledKw: unpolledN,
+        totalKw: totalN, at: new Date().toISOString()
+      };
       await oc.update({
         stage: 'res_work',
         askueUserId: req.user.id,
         askueCompletedAt: new Date(),
-        askueComment: comment.trim()
+        askueComment: comment.trim(),
+        askueData
       });
+      // Снимок АСКУЭ дублируем на секцию — для колонок значков в «Структуре сети».
+      await TpSection.update({ askueData }, { where: { id: oc.sectionId } });
 
       // Уведомление стадии АСКУЭ убрать, создать для РЭС
       await removeSectionOverloadNotifs(oc.sectionId);
@@ -6508,7 +6542,10 @@ async function initializeDatabase() {
       `CREATE INDEX IF NOT EXISTS idx_polledmeter_tpnorm ON "PolledMeters" ("tpNorm")`,
       // Источник ряда и дата обновления профиля на секции (для модалки техучёта)
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileSource" VARCHAR(10)`,
-      `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileAt" TIMESTAMP WITH TIME ZONE`
+      `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileAt" TIMESTAMP WITH TIME ZONE`,
+      // Данные АСКУЭ (значки в карточке секции) и снимок на кейсе перегруза.
+      `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "askueData" JSONB`,
+      `ALTER TABLE "OverloadCases" ADD COLUMN IF NOT EXISTS "askueData" JSONB`
     ];
     for (const stmt of indexStatements) {
       try {

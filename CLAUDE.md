@@ -391,6 +391,14 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-30** — Данные АСКУЭ по перегрузу, коммит 1/2 (backend). `TpSection` и
+  `OverloadCase` += `askueData` JSONB `{consumers, limitedKw, unpolledKw, totalKw, at}`
+  (ALTER в initializeDatabase). `POST /api/overload/:caseId/askue-complete` принимает
+  `consumers/limitedKw/unpolledKw`: серверная валидация — мощности целые 0–9999
+  (`Math.round`), потребители целые 1–999, `totalKw = round(limited+unpolled)`;
+  при ошибке 400 с понятным текстом. Снимок пишется на кейс И дублируется на секцию
+  (`TpSection.update({askueData})`) — для колонок значков в карточке секции.
+  `/api/network/sections` уже отдаёт `askueData` (полный `toJSON`). node --check — ОК.
 - **2026-07-30** — Перегруз Pном, коммит 3/3: адресация уведомлений по этапам.
   **Минимальное решение:** к `errorData` power_overload-уведомлений добавлена метка
   `audience` (`askue` — этапы askue_limit [новый и повторный] и awaiting_recheck;
