@@ -4103,6 +4103,104 @@ function PowerOverload({ selectedRes }) {
   );
 }
 
+// Ярлык/цвет этапа кейса перегруза (для «Проблемных ТП»).
+const OVERLOAD_STAGE = {
+  askue_limit:      { label: 'Ожидает ограничения АСКУЭ', cls: 'stage-red' },
+  res_work:         { label: 'Мероприятия РЭС',            cls: 'stage-amber' },
+  awaiting_recheck: { label: 'Ожидает перепроверки',       cls: 'stage-blue' },
+  completed:        { label: 'Завершён',                   cls: 'stage-green' },
+};
+const f1 = (v) => (v == null ? '—' : Number(v).toFixed(1));
+
+// Список карточек «Проблемные ТП» (стиль как у «Проблемных ВЛ»).
+function ProblemTpList({ tps, onOpen }) {
+  if (!tps.length) {
+    return (
+      <div className="no-data">
+        <p><span className="svg-frame" style={{ marginRight: 8 }}><IconCheck size={26} /></span>
+          Проблемных ТП нет</p>
+      </div>
+    );
+  }
+  return (
+    <div className="problem-list">
+      {tps.map(tp => {
+        const st = OVERLOAD_STAGE[tp.stage] || { label: tp.stage, cls: '' };
+        return (
+          <div key={tp.id} className="problem-card" onClick={() => onOpen(tp)} title="Открыть историю">
+            <div className="problem-header">
+              <div className="problem-title">
+                <h3>{tp.tpName} · СШ-{toRoman(tp.sectionNumber)}</h3>
+                <span className="res-badge">{tp.resName}</span>
+              </div>
+              <span className="failure-badge critical">
+                <IconX className="ico" style={{ color: 'var(--red)' }} /> {tp.cycles} циклов
+              </span>
+            </div>
+            <div className="problem-meta">
+              <span className={`po-stage-badge ${st.cls}`}>{st.label}</span>
+              <span><b>Пик:</b> {f1(tp.peakKw)} кВт / лимит {f1(tp.limitKw)} кВт</span>
+              {tp.recheckPeakKw != null && <span><b>После мероприятий:</b> {f1(tp.recheckPeakKw)} кВт</span>}
+              {tp.techPuNumber && <span><b>Тех.учёт:</b> {tp.techPuNumber}</span>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Модалка истории проблемной ТП: этапы, пики, комментарии АСКУЭ/РЭС, фото.
+function ProblemTpModal({ tp, onClose, onViewFiles }) {
+  const st = OVERLOAD_STAGE[tp.stage] || { label: tp.stage, cls: '' };
+  const dt = (v) => v ? new Date(v).toLocaleString('ru-RU') : '—';
+  return (
+    <ModalShell title={`${tp.tpName} · СШ-${toRoman(tp.sectionNumber)} — история`}
+      icon={<IconAlertTriangle size={16} />} className="details-modal" onClose={onClose}>
+      <div className="modal-body">
+        <div className="detail-section">
+          <div className="detail-row"><strong>РЭС:</strong> {tp.resName}</div>
+          <div className="detail-row"><strong>Циклов мероприятий:</strong> <span className="failure-count">{tp.cycles}</span></div>
+          <div className="detail-row"><strong>Текущий этап:</strong> <span className={`po-stage-badge ${st.cls}`}>{st.label}</span></div>
+          <div className="detail-row"><strong>Пик:</strong> {f1(tp.peakKw)} кВт · лимит {f1(tp.limitKw)} кВт{tp.ratio != null ? ` (${Math.round(tp.ratio * 100)}%)` : ''}{tp.peakAt ? ` · ${tp.peakAt}` : ''}</div>
+          {tp.recheckPeakKw != null && (
+            <div className="detail-row"><strong>Пик после мероприятий:</strong> {f1(tp.recheckPeakKw)} кВт{tp.recheckAt ? ` · ${dt(tp.recheckAt)}` : ''} — <span className="po-fail-word">повторный перегруз</span></div>
+          )}
+        </div>
+
+        <div className="detail-section">
+          <h5>Этап АСКУЭ (ограничение):</h5>
+          {tp.askueCompletedAt ? (
+            <>
+              <div className="detail-row"><strong>Завершён:</strong> {dt(tp.askueCompletedAt)}{tp.askueUser ? ` · ${tp.askueUser}` : ''}</div>
+              {tp.askueComment && <div className="comment-box"><p>{tp.askueComment}</p></div>}
+            </>
+          ) : <div className="detail-row po-wait">ожидается</div>}
+        </div>
+
+        <div className="detail-section">
+          <h5>Этап РЭС (мероприятия):</h5>
+          {tp.resCompletedAt ? (
+            <>
+              <div className="detail-row"><strong>Завершён:</strong> {dt(tp.resCompletedAt)}{tp.resUser ? ` · ${tp.resUser}` : ''}</div>
+              {tp.resComment && <div className="comment-box"><p>{tp.resComment}</p></div>}
+              {Array.isArray(tp.attachments) && tp.attachments.length > 0 && (
+                <button className="pm-btn pm-btn--refresh" style={{ marginTop: 8 }}
+                  onClick={() => onViewFiles(tp.attachments, 0)}>
+                  <IconPaperclip className="ico" /> Фото/документы ({tp.attachments.length})
+                </button>
+              )}
+            </>
+          ) : <div className="detail-row po-wait">ожидается</div>}
+        </div>
+      </div>
+      <div className="modal-footer">
+        <button className="action-btn" onClick={onClose}>Закрыть</button>
+      </div>
+    </ModalShell>
+  );
+}
+
 function ProblemVL({ selectedRes }) {
   const [problemVLs, setProblemVLs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -4113,17 +4211,35 @@ function ProblemVL({ selectedRes }) {
   const [detailsProblem, setDetailsProblem] = useState(null);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailProblem, setEmailProblem] = useState(null);
+  const [tab, setTab] = useState('vl');            // 'vl' | 'tp'
+  const [overloadTps, setOverloadTps] = useState([]);
+  const [tpDetails, setTpDetails] = useState(null); // раскрытая карточка проблемной ТП
+  const [tpViewer, setTpViewer] = useState(null);   // { files, index } — просмотр фото РЭС
 
   useEffect(() => {
     loadProblemVLs();
-    
-    const handleUpdate = () => loadProblemVLs();
+    loadOverloadTps();
+
+    const handleUpdate = () => { loadProblemVLs(); loadOverloadTps(); };
     window.addEventListener('problemVLUpdated', handleUpdate);
+    window.addEventListener('notificationsUpdated', handleUpdate);
 
     return () => {
       window.removeEventListener('problemVLUpdated', handleUpdate);
+      window.removeEventListener('notificationsUpdated', handleUpdate);
     };
   }, [selectedRes]);
+
+  const loadOverloadTps = async () => {
+    try {
+      const { data } = await api.get('/api/problem-vl/overload-tp', {
+        params: selectedRes ? { resId: selectedRes } : {}
+      });
+      setOverloadTps(data);
+    } catch (error) {
+      console.error('Error loading problem TPs:', error);
+    }
+  };
 
 const handleSendEmail = async () => {
     try {
@@ -4169,7 +4285,19 @@ const handleSendEmail = async () => {
   return (
     <div className="problem-vl-container">
       <PageHeader icon={<IconAlertTriangle size={24} />} title="Проблемные ВЛ" />
-      
+
+      <div className="po-tabs">
+        <button className={`po-tab ${tab === 'vl' ? 'active' : ''}`} onClick={() => setTab('vl')}>
+          Проблемные ВЛ ({problemVLs.filter(p => p.status === 'active').length})
+        </button>
+        <button className={`po-tab ${tab === 'tp' ? 'active' : ''}`} onClick={() => setTab('tp')}>
+          Проблемные ТП (перегруз) ({overloadTps.length})
+        </button>
+      </div>
+
+      {tab === 'tp' ? (
+        <ProblemTpList tps={overloadTps} onOpen={setTpDetails} />
+      ) : (<>
       <div className="problem-info-row">
         <div className="problem-info-text">
           <p>В этом разделе отображаются ВЛ, которые не прошли проверку 2 и более раз после выполнения мероприятий РЭС.</p>
@@ -4222,7 +4350,23 @@ const handleSendEmail = async () => {
           ))}
         </div>
       )}
-      
+      </>)}
+
+      {/* Подробности проблемной ТП (перегруз) */}
+      {tpDetails && (
+        <ProblemTpModal tp={tpDetails} onClose={() => setTpDetails(null)}
+          onViewFiles={(files, index) => setTpViewer({ files, index })} />
+      )}
+      {tpViewer && (
+        <FileViewer
+          files={tpViewer.files}
+          currentIndex={tpViewer.index}
+          onClose={() => setTpViewer(null)}
+          onNext={() => setTpViewer(v => ({ ...v, index: (v.index + 1) % v.files.length }))}
+          onPrev={() => setTpViewer(v => ({ ...v, index: (v.index - 1 + v.files.length) % v.files.length }))}
+        />
+      )}
+
       {/* Модальное окно подтверждения отклонения */}
       {showDeleteModal && (
         <ModalShell variant="confirm" title="Рассмотреть без объяснительной" className="delete-modal"

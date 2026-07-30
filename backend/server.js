@@ -1063,6 +1063,10 @@ const PERMISSIONS = {
   db_tools:             'Сервисные операции с базой (diagnose, восстановление и пр.)',
 };
 
+// Порог «проблемной ТП»: кейс перегруза с cycles >= этого и stage != completed —
+// мероприятия не дали результата, ТП попадает в «Проблемные ТП».
+const PROBLEM_TP_CYCLES = 2;
+
 // Лёгкий кеш доступа: userId → { isSuper, permissions, ts }. TTL 60с; сбрасывается
 // при сохранении прав / изменении пользователя. Права в JWT не вшиваем — здесь истина.
 const ACCESS_TTL_MS = 60 * 1000;
@@ -2264,16 +2268,25 @@ async function processProfileFile(filePath, userId) {
           errorData: notifData(oc.id, 'askue_limit')
         });
       } else if (activeCase.stage === 'awaiting_recheck') {
+        const newCycles = activeCase.cycles + 1;
         await activeCase.update({
           recheckAt: new Date(), recheckPeakKw: r.peakKw, recheckResult: 'still_overload',
-          stage: 'askue_limit', cycles: activeCase.cycles + 1, ...snapshot()
+          stage: 'askue_limit', cycles: newCycles, ...snapshot()
         });
         await removeSectionOverloadNotifs(section.id);
         await Notification.create({
           type: 'power_overload', resId: section.resId, toUserId: null, fromUserId: userId,
-          message: `Повторный перегруз после мероприятий (цикл ${activeCase.cycles + 1}): ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт`,
-          errorData: { ...notifData(activeCase.id, 'askue_limit'), cycle: activeCase.cycles + 1 }
+          message: `Повторный перегруз после мероприятий (цикл ${newCycles}): ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт`,
+          errorData: { ...notifData(activeCase.id, 'askue_limit'), cycle: newCycles }
         });
+        // Эскалация в «Проблемные ТП» — ОДИН раз при достижении порога (cycles 1→2).
+        if (newCycles === PROBLEM_TP_CYCLES) {
+          await Notification.create({
+            type: 'power_overload', resId: section.resId, toUserId: null, fromUserId: userId,
+            message: `ТП ${section.tpName} СШ-${section.sectionNumber} переведена в проблемные: мероприятия не дали результата (цикл ${newCycles})`,
+            errorData: { ...notifData(activeCase.id, 'askue_limit'), cycle: newCycles, problemTp: true }
+          });
+        }
       } else {
         await activeCase.update(snapshot());
       }
@@ -3761,6 +3774,47 @@ app.get('/api/problem-vl/list',
     }
 });
 
+// Проблемные ТП (перегруз): кейсы, где мероприятия не дали результата — cycles >=
+// PROBLEM_TP_CYCLES и ещё не завершён. Выход из списка — когда кейс дошёл до completed.
+app.get('/api/problem-vl/overload-tp',
+  authenticateToken,
+  checkRole(['admin']),
+  async (req, res) => {
+    try {
+      const where = { cycles: { [Op.gte]: PROBLEM_TP_CYCLES }, stage: { [Op.ne]: 'completed' } };
+      if (req.query.resId) where.resId = parseInt(req.query.resId);
+      const cases = await OverloadCase.findAll({
+        where,
+        include: [
+          { model: TpSection, as: 'section', attributes: ['id', 'tpName', 'sectionNumber', 'tnKva', 'techPuNumber'] },
+          { model: ResUnit, attributes: ['id', 'name'] },
+          { model: User, as: 'askueUser', attributes: ['id', 'fio'] },
+          { model: User, as: 'resUser', attributes: ['id', 'fio'] }
+        ],
+        order: [['cycles', 'DESC'], ['id', 'DESC']]
+      });
+      const list = cases.map(c => ({
+        id: c.id, sectionId: c.sectionId, resId: c.resId,
+        resName: c.ResUnit?.name || '',
+        tpName: c.section?.tpName || '', sectionNumber: c.section?.sectionNumber ?? null,
+        techPuNumber: c.section?.techPuNumber || null,
+        cycles: c.cycles, stage: c.stage,
+        peakKw: c.peakKw, peakAt: c.peakAt, limitKw: c.limitKw, ratio: c.ratio,
+        tnKva: c.tnKva, cosPhi: c.cosPhi, period: c.period,
+        recheckPeakKw: c.recheckPeakKw, recheckAt: c.recheckAt, recheckResult: c.recheckResult,
+        askueComment: c.askueComment, askueCompletedAt: c.askueCompletedAt,
+        askueUser: c.askueUser?.fio || null,
+        resComment: c.resComment, resCompletedAt: c.resCompletedAt,
+        resUser: c.resUser?.fio || null,
+        attachments: c.attachments || []
+      }));
+      res.json(list);
+    } catch (error) {
+      console.error('Get problem TPs error:', error);
+      res.status(500).json({ error: error.message });
+    }
+});
+
 // Отклонение проблемы
 app.put('/api/problem-vl/:id/dismiss', 
   authenticateToken, 
@@ -4098,12 +4152,16 @@ async function getNotificationCounts(user) {
     };
   }
 
-  // Для проблемных ВЛ считаем только активные (только для admin)
+  // Для проблемных ВЛ считаем только активные + проблемные ТП (перегруз) — только admin.
   let problemVLCount = 0;
   let powerOverloadCount = 0;
   if (user.role === 'admin') {
     problemVLCount = await ProblemVL.count({
       where: { status: 'active' }  // Только активные!
+    });
+    // Бейдж «Проблемные ВЛ» учитывает и проблемные ТП (cycles >= порога, не завершён).
+    problemVLCount += await OverloadCase.count({
+      where: { cycles: { [Op.gte]: PROBLEM_TP_CYCLES }, stage: { [Op.ne]: 'completed' } }
     });
     // Перегрузы секций (профиль мощности) — для АСКУЭ/админа.
     powerOverloadCount = await Notification.count({
