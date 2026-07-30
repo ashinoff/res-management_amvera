@@ -3933,9 +3933,9 @@ function PowerOverload({ selectedRes }) {
   const STAGE_WORD = { done: 'выполнено', current: 'ожидание', todo: 'ещё не начато' };
   const poStages = (c) => {
     const items = [
-      { ico: <IconStageLimit size={52} />, name: 'Ввод ограничения по АСКУЭ' },
-      { ico: <IconWrench size={48} />, name: 'Мероприятия РЭС' },
-      { ico: <IconStageRecheck size={52} />, name: 'Перепроверка профилем' },
+      { ico: <IconStageLimit size={42} />, name: 'Ввод ограничения по АСКУЭ' },
+      { ico: <IconWrench size={38} />, name: 'Мероприятия РЭС' },
+      { ico: <IconStageRecheck size={42} />, name: 'Перепроверка профилем' },
     ];
     return (
       <div className="po-stages">
