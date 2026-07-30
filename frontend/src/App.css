@@ -7419,6 +7419,14 @@ tr.selected:hover,
 .ico-glow-blue { color: #2563eb; filter: drop-shadow(0 0 4px rgba(59,130,246,.75)); }
 .ico-glow-red  { color: var(--red); filter: drop-shadow(0 0 4px rgba(239,68,68,.8)); }
 .ico-glow-green { color: #16a34a; filter: drop-shadow(0 0 4px rgba(22,163,74,.8)); }
+.ico-glow-amber { color: #d97706; filter: drop-shadow(0 0 4px rgba(217,119,6,.85)); }
+.ico-dim { color: var(--text-faint); opacity: .55; filter: none; }
+
+/* Значки этапов кейса перегруза в теле карточки «Превышение Pном» */
+.po-stages { display: flex; align-items: center; gap: 16px; margin-top: 8px; }
+.po-stage-ico { display: inline-flex; transition: filter .12s ease, opacity .12s ease; }
+.po-stage-ico.ico-glow-green:hover { filter: drop-shadow(0 0 8px rgba(22,163,74,.95)); }
+.po-stage-ico.ico-glow-amber:hover { filter: drop-shadow(0 0 8px rgba(217,119,6,.95)); }
 
 /* Процент загрузки в заголовке тех-модалки — цветной */
 .tech-title-pct { font-weight: 800; }

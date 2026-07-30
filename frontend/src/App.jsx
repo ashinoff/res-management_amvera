@@ -558,6 +558,22 @@ const IconAskueSum = ({ size = 18 }) => (       // «ΣP» (общая разр�
   </svg>
 );
 
+// ── Значки этапов кейса перегруза (тело карточки «Превышение Pном») ──
+const IconStageLimit = ({ size = 24 }) => (     // манометр — ввод ограничения мощности (АСКУЭ)
+  <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3.5 17a8.5 8.5 0 0 1 17 0" />
+    <line x1="12" y1="17" x2="16.5" y2="11" />
+    <circle cx="12" cy="17" r="1.7" fill="currentColor" stroke="none" />
+    <line x1="12" y1="8.5" x2="12" y2="10" /><line x1="6" y1="17" x2="7.3" y2="17" /><line x1="18" y1="17" x2="16.7" y2="17" />
+  </svg>
+);
+const IconStageRecheck = ({ size = 24 }) => (   // столбцы профиля + галочка — перепроверка профилем
+  <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="4" y1="20" x2="4" y2="13" /><line x1="9" y1="20" x2="9" y2="6" /><line x1="14" y1="20" x2="14" y2="15" />
+    <path d="M15.5 10.5l2.2 2.2L22 8.4" />
+  </svg>
+);
+
 // =====================================================
 // КОМПОНЕНТ СТРУКТУРЫ СЕТИ
 // =====================================================
@@ -3907,6 +3923,34 @@ function PowerOverload({ selectedRes }) {
     completed: 'Завершён'
   };
 
+  // Состояние этапа кейса (idx: 0 ограничение, 1 мероприятия РЭС, 2 перепроверка).
+  const stageOrder = { askue_limit: 0, res_work: 1, awaiting_recheck: 2, completed: 3 };
+  const stageState = (c, idx) => {
+    const cur = stageOrder[c.stage] ?? 0;
+    return idx < cur ? 'done' : idx === cur ? 'current' : 'todo';
+  };
+  const STAGE_GLOW = { done: 'ico-glow-green', current: 'ico-glow-amber', todo: 'ico-dim' };
+  const STAGE_WORD = { done: 'выполнено', current: 'ожидание', todo: 'ещё не начато' };
+  const poStages = (c) => {
+    const items = [
+      { ico: <IconStageLimit size={26} />, name: 'Ввод ограничения по АСКУЭ' },
+      { ico: <IconWrench size={24} />, name: 'Мероприятия РЭС' },
+      { ico: <IconStageRecheck size={26} />, name: 'Перепроверка профилем' },
+    ];
+    return (
+      <div className="po-stages">
+        {items.map((it, i) => {
+          const st = stageState(c, i);
+          return (
+            <span key={i} className={`po-stage-ico ${STAGE_GLOW[st]}`} title={`${it.name} — ${STAGE_WORD[st]}`}>
+              {it.ico}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
   // showSpinner=false — тихий фон-рефреш (автообновление/возврат на вкладку), без мигания спиннера.
   const load = async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
@@ -4031,6 +4075,7 @@ function PowerOverload({ selectedRes }) {
                     <div className="notification-pu-number">
                       Этап: <strong>{STAGE_RU[c.stage]}</strong>
                     </div>
+                    {poStages(c)}
                   </div>
                   <div className="notification-narrow-actions">
                     {c.stage === 'awaiting_recheck' && (
@@ -4052,11 +4097,11 @@ function PowerOverload({ selectedRes }) {
           ? { t: c.recheckResult === 'ok' ? 'Устранён' : 'Завершён', cls: 'status-ok' }
           : c.stage === 'awaiting_recheck'
           ? { t: 'Ожидает перепроверки', cls: 'status-pending' }
-          : { t: 'Перегруз', cls: 'status-error' };
+          : { t: STAGE_RU[c.stage], cls: 'status-error' };
         return (
           <ModalShell
             title={<>{s.tpName} · СШ-{toRoman(s.sectionNumber)}</>}
-            dockTitle={`Перегруз: ${s.tpName} СШ-${toRoman(s.sectionNumber)}`}
+            dockTitle={`${s.tpName} СШ-${toRoman(s.sectionNumber)}`}
             titleExtra={<span className={`tech-pill ${status.cls}`}>{status.t}</span>}
             className="po-details-modal" icon={<IconZap size={16} />}
             onClose={() => setDetailsCase(null)}
