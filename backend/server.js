@@ -2059,7 +2059,7 @@ app.post('/api/overload/:caseId/askue-complete',
         type: 'power_overload', resId: oc.resId, toUserId: null, fromUserId: req.user.id,
         message: `Требуются мероприятия РЭС по перегрузу ${s.tpName} СШ-${s.sectionNumber}`,
         errorData: {
-          sectionId: oc.sectionId, caseId: oc.id, stage: 'res_work',
+          sectionId: oc.sectionId, caseId: oc.id, stage: 'res_work', audience: 'res',
           tpName: s.tpName, sectionNumber: s.sectionNumber,
           peakKw: oc.peakKw, peakAt: oc.peakAt, limitKw: oc.limitKw, ratio: oc.ratio,
           tnKva: oc.tnKva, cosPhi: oc.cosPhi, period: oc.period
@@ -2122,7 +2122,7 @@ app.post('/api/overload/:caseId/res-complete',
         type: 'power_overload', resId: oc.resId, toUserId: null, fromUserId: req.user.id,
         message: `Мероприятия РЭС выполнены, ожидает перепроверки профилем: ${s.tpName} СШ-${s.sectionNumber}`,
         errorData: {
-          sectionId: oc.sectionId, caseId: oc.id, stage: 'awaiting_recheck',
+          sectionId: oc.sectionId, caseId: oc.id, stage: 'awaiting_recheck', audience: 'askue',
           tpName: s.tpName, sectionNumber: s.sectionNumber,
           peakKw: oc.peakKw, peakAt: oc.peakAt, limitKw: oc.limitKw, ratio: oc.ratio,
           tnKva: oc.tnKva, cosPhi: oc.cosPhi, period: oc.period
@@ -2265,7 +2265,7 @@ async function processProfileFile(filePath, userId) {
         await Notification.create({
           type: 'power_overload', resId: section.resId, toUserId: null, fromUserId: userId,
           message: `Превышение Pном: ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт при лимите ${limitKw} кВт`,
-          errorData: notifData(oc.id, 'askue_limit')
+          errorData: { ...notifData(oc.id, 'askue_limit'), audience: 'askue' }
         });
       } else if (activeCase.stage === 'awaiting_recheck') {
         const newCycles = activeCase.cycles + 1;
@@ -2277,7 +2277,7 @@ async function processProfileFile(filePath, userId) {
         await Notification.create({
           type: 'power_overload', resId: section.resId, toUserId: null, fromUserId: userId,
           message: `Повторный перегруз после мероприятий (цикл ${newCycles}): ${section.tpName} СШ-${section.sectionNumber} — пик ${r.peakKw} кВт`,
-          errorData: { ...notifData(activeCase.id, 'askue_limit'), cycle: newCycles }
+          errorData: { ...notifData(activeCase.id, 'askue_limit'), cycle: newCycles, audience: 'askue' }
         });
         // Эскалация в «Проблемные ТП» — ОДИН раз при достижении порога (cycles 1→2).
         if (newCycles === PROBLEM_TP_CYCLES) {
@@ -2572,7 +2572,11 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
   try {
     const { resId, type } = req.query;   // ← добавили type
     let whereClause = {};
-    
+
+    // Право на этап АСКУЭ — определяет видимость power_overload с audience:'askue'.
+    const acc = await getUserAccess(req.user.id);
+    const canAskue = acc.isSuper || !!(acc.permissions && acc.permissions.overload_askue);
+
     if (req.user.role === 'admin') {
       // Админ видит ВСЕ уведомления нужного РЭС
       if (resId) {
@@ -2580,7 +2584,7 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
       } else {
         whereClause = {};  // Все уведомления
       }
-      
+
     } else if (req.user.role === 'res_responsible') {
       whereClause = {
         resId: req.user.resId,
@@ -2589,19 +2593,17 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
           { toUserId: req.user.id }
         ]
       };
-      
+
     } else if (req.user.role === 'uploader') {
-      whereClause = {
-        [Op.or]: [
-          { toUserId: req.user.id },
-          { 
-            toUserId: null,
-            resId: req.user.resId,
-            type: 'pending_askue'
-          }
-        ]
-      };
-      
+      const or = [
+        { toUserId: req.user.id },
+        { toUserId: null, resId: req.user.resId, type: 'pending_askue' }
+      ];
+      // Загрузчик с правом АСКУЭ видит перегрузы своего РЭС (этап АСКУЭ) — фильтр
+      // по audience ниже оставит только askue-адресованные.
+      if (canAskue) or.push({ toUserId: null, resId: req.user.resId, type: 'power_overload' });
+      whereClause = { [Op.or]: or };
+
     } else {
       whereClause = { toUserId: req.user.id };
     }
@@ -2644,9 +2646,21 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
       };
     });
     
+    // Адресация power_overload по этапу (audience): 'askue' — пользователям с правом
+    // overload_askue (и админам/суперу); 'res'/без метки — РЭС по resId (уже в
+    // whereClause) + админам. Так этап АСКУЭ не сыпется РЭСу и наоборот.
+    const isAdminLike = req.user.role === 'admin' || acc.isSuper;
+    const audienceFiltered = notificationsWithReadStatus.filter(notif => {
+      if (notif.type !== 'power_overload') return true;
+      if (isAdminLike) return true;
+      const aud = notif.errorData && notif.errorData.audience;
+      if (aud === 'askue') return canAskue;
+      return req.user.role === 'res_responsible';   // 'res'/без метки → только РЭС своего resId
+    });
+
     // ✅ Дедупликация: для error и pending_askue — 1 ПУ + 1 набор фаз = 1 запись (последняя)
     const seenKeys = new Set();
-    const deduplicatedNotifications = notificationsWithReadStatus.filter(notif => {
+    const deduplicatedNotifications = audienceFiltered.filter(notif => {
       if (notif.type !== 'error' && notif.type !== 'pending_askue') {
         return true; // Остальные типы не трогаем
       }
@@ -4176,10 +4190,14 @@ async function getNotificationCounts(user) {
       where: { stage: { [Op.in]: ['askue_limit', 'awaiting_recheck'] } }
     });
   } else if (user.role === 'uploader') {
-    // Загрузчик (АСКУЭ) — те же стадии, что у админа, но по своему РЭС.
-    powerOverloadCases = await OverloadCase.count({
-      where: { stage: { [Op.in]: ['askue_limit', 'awaiting_recheck'] }, resId: user.resId }
-    });
+    // Загрузчик (АСКУЭ) — этап АСКУЭ по своему РЭС, но ТОЛЬКО при праве overload_askue
+    // (иначе кнопки нет и бейдж-«требует действия» вводил бы в заблуждение).
+    const uacc = await getUserAccess(user.id);
+    if (uacc.isSuper || (uacc.permissions && uacc.permissions.overload_askue)) {
+      powerOverloadCases = await OverloadCase.count({
+        where: { stage: { [Op.in]: ['askue_limit', 'awaiting_recheck'] }, resId: user.resId }
+      });
+    }
   } else if (user.role === 'res_responsible') {
     powerOverloadCases = await OverloadCase.count({
       where: { stage: 'res_work', resId: user.resId }

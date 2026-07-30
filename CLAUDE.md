@@ -391,6 +391,20 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-30** — Перегруз Pном, коммит 3/3: адресация уведомлений по этапам.
+  **Минимальное решение:** к `errorData` power_overload-уведомлений добавлена метка
+  `audience` (`askue` — этапы askue_limit [новый и повторный] и awaiting_recheck;
+  `res` — этап res_work); модель Notification НЕ менялась. В `/api/notifications`:
+  вычисляется `canAskue = isSuper || permissions.overload_askue`; загрузчику с правом
+  в выборку добавлены power_overload его РЭС; JS-пост-фильтр по audience — `askue`
+  видят только обладатели права (+ админ/супер), `res`/без метки — РЭС по своему resId
+  (+ админ). Так этап АСКУЭ не сыпется РЭСу, а этап РЭС — АСКУЭ. Бейдж
+  `powerOverloadCases` у загрузчика теперь считается ТОЛЬКО при праве overload_askue
+  (иначе кнопки нет — бейдж не вводит в заблуждение); admin — все askue-стадии,
+  res_responsible — res_work своего РЭС (сходится с адресацией). Кеш counts (TTL 15с)
+  сам подхватит смену права в пределах минуты; хуки Notification/OverloadCase чистят
+  его при изменениях. node --check / npm run build — ОК. ⚠️ После деплоя выдать право
+  `overload_askue` нужным загрузчикам в «Правах доступа».
 - **2026-07-30** — Перегруз Pном, коммит 2/3: «болтается 2+ раза» → «Проблемные ТП».
   Backend: константа `PROBLEM_TP_CYCLES = 2`. Новый `GET /api/problem-vl/overload-tp`
   (admin): `OverloadCase` с `cycles >= 2` и `stage != completed` — отдаёт ТП/СШ, РЭС,
