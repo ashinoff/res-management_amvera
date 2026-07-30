@@ -3872,6 +3872,7 @@ function PowerOverload({ selectedRes }) {
   const openRes = (c) => { setComment(''); setCommentError(false); setFiles([]); setActionModal({ c, mode: 'res' }); };
 
   const submitAskue = async () => {
+    if (comment.trim().split(/\s+/).filter(w => w.length > 0).length < 5) { setCommentError(true); return; }
     if (!window.confirm('Подтвердите: ограничение по АСКУЭ выполнено?')) return;
     setSubmitting(true);
     try {
@@ -4033,7 +4034,7 @@ function PowerOverload({ selectedRes }) {
                 </div>
               </div>
               <div className="modal-footer">
-                {user.role === 'admin' && c.stage === 'askue_limit' && (
+                {hasPerm(user, 'overload_askue') && c.stage === 'askue_limit' && (
                   <button className="confirm-btn" onClick={() => openAskue(c)}>Ограничение по АСКУЭ выполнено</button>
                 )}
                 {user.role === 'res_responsible' && c.stage === 'res_work' && (
@@ -4061,13 +4062,13 @@ function PowerOverload({ selectedRes }) {
                 </div>
                 <div className="form-group">
                   <label style={commentError ? { color: '#dc2626', fontWeight: 600 } : undefined}>
-                    {isRes ? 'Что выполнено? (минимум 5 слов)' : 'Комментарий (необязательно)'}
+                    {isRes ? 'Что выполнено? (минимум 5 слов)' : 'Что именно ограничили? (минимум 5 слов)'}
                   </label>
                   <textarea rows={5} value={comment}
-                    placeholder={isRes ? 'Опишите выполненные мероприятия…' : 'Например: введено ограничение мощности по АСКУЭ'}
+                    placeholder={isRes ? 'Опишите выполненные мероприятия…' : 'Например: введено ограничение мощности по АСКУЭ для абонентов…'}
                     onChange={(e) => { setComment(e.target.value); if (commentError && e.target.value.trim().split(/\s+/).filter(w => w.length > 0).length >= 5) setCommentError(false); }}
                     style={commentError ? { borderColor: '#dc2626', boxShadow: '0 0 0 3px rgba(220,38,38,0.2)', outline: 'none' } : undefined} />
-                  {isRes && <small className="muted">Слов: {comment.trim().split(/\s+/).filter(w => w.length > 0).length} из 5</small>}
+                  <small className="muted">Слов: {comment.trim().split(/\s+/).filter(w => w.length > 0).length} из 5</small>
                 </div>
                 {isRes && (
                   <div className="form-group">

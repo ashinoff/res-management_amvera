@@ -391,6 +391,15 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-07-30** — Перегруз Pном, коммит 1/3: кнопка АСКУЭ по ПРАВУ, не роли.
+  Каталог `PERMISSIONS` += `overload_askue` («Завершение ограничений по перегрузу
+  (этап АСКУЭ)»). `POST /api/overload/:caseId/askue-complete`: `checkRole(['admin'])`
+  → `requirePerm('overload_askue')` (суперадмин проходит); комментарий стал
+  ОБЯЗАТЕЛЬНЫМ (мин. 5 слов, как у РЭС) — что именно ограничили. Frontend
+  `PowerOverload`: кнопка «Ограничение по АСКУЭ выполнено» видна по
+  `hasPerm(user,'overload_askue')` (было `role==='admin'`); `submitAskue` валидирует
+  5 слов; модалка АСКУЭ — label «Что именно ограничили? (минимум 5 слов)» + счётчик.
+  `res-complete` не трогали (этап РЭС ролевой). node --check / npm run build — ОК.
 - **2026-07-29** — Бейдж «Превышение Pном» для загрузчиков (АСКУЭ). Причина: в
   `getNotificationCounts` счётчик `powerOverloadCases` считался только для admin и
   res_responsible → у uploader был 0, кругляшка не появлялась. Добавлена ветка

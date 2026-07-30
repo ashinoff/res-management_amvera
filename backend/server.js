@@ -1058,6 +1058,7 @@ const PERMISSIONS = {
   files_manage:         'Управление файлами (удаление, диагностика)',
   history_purge:        'Очистка истории до даты',
   pollmap_sync:         'Синхронизация карты опроса',
+  overload_askue:       'Завершение ограничений по перегрузу (этап АСКУЭ)',
   users_manage:         'Управление пользователями',
   db_tools:             'Сервисные операции с базой (diagnose, восстановление и пр.)',
 };
@@ -2021,9 +2022,18 @@ app.get('/api/overload', authenticateToken, async (req, res) => {
 // АСКУЭ выполнила ограничение → этап РЭС
 app.post('/api/overload/:caseId/askue-complete',
   authenticateToken,
-  checkRole(['admin']),
+  requirePerm('overload_askue'),
   async (req, res) => {
     try {
+      const { comment } = req.body;
+      // Комментарий обязателен (что именно ограничили) — как у РЭС, мин. 5 слов.
+      if (!comment || typeof comment !== 'string') {
+        return res.status(400).json({ error: 'Комментарий обязателен' });
+      }
+      if (comment.trim().split(/\s+/).filter(w => w.length > 0).length < 5) {
+        return res.status(400).json({ error: 'Комментарий должен содержать не менее 5 слов' });
+      }
+
       const oc = await OverloadCase.findByPk(req.params.caseId, {
         include: [{ model: TpSection, as: 'section', attributes: ['tpName', 'sectionNumber'] }]
       });
@@ -2031,12 +2041,11 @@ app.post('/api/overload/:caseId/askue-complete',
       if (oc.stage !== 'askue_limit') {
         return res.status(400).json({ error: 'Случай не на этапе АСКУЭ' });
       }
-      const { comment } = req.body;
       await oc.update({
         stage: 'res_work',
         askueUserId: req.user.id,
         askueCompletedAt: new Date(),
-        askueComment: comment || null
+        askueComment: comment.trim()
       });
 
       // Уведомление стадии АСКУЭ убрать, создать для РЭС
