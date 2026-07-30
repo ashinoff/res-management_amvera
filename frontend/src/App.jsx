@@ -1304,7 +1304,7 @@ const executeClearHistory = async () => {
           // Строка одной ВЛ в единой сетке net-grid: [чекбокс][наименование]
           // [начало][середина][конец][селект секции][действия]. Колонки фиксированы
           // → квадраты всех строк совпадают по вертикали.
-          const renderVlRow = (item, showSectionSelect) => {
+          const renderVlRow = (item, showSectionSelect, askueCells = null) => {
             const tpSections = sections.filter(s => s.tpName === item.tpName);
             return (
               <div key={item.id} className={`net-grid vl-row ${selectedIds.includes(item.id) ? 'selected' : ''}`}>
@@ -1319,7 +1319,7 @@ const executeClearHistory = async () => {
                   )}
                 </div>
                 <span className="vl-name" title={item.vlName}>{item.vlName}</span>
-                <span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" />
+                {askueCells || <><span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" /></>}
                 {renderPuCell(item, 'start')}
                 {renderPuCell(item, 'middle')}
                 {renderPuCell(item, 'end')}
@@ -1376,25 +1376,33 @@ const executeClearHistory = async () => {
               </>
             );
           };
-          const askueNumRow = (section) => {
+          // 4 ячейки-числа АСКУЭ (вставляются в первую строку ВЛ секции — на линию
+          // цветных квадратов ПУ). Без данных — приглушённый «—».
+          const askueNumberCells = (section) => {
             const ad = section.askueData || null;
             const num = (v, unit) => (v == null
               ? <span className="askue-empty">—</span>
               : <span className="askue-val"><b className="askue-num">{v}</b><i className="askue-unit">{unit}</i></span>);
             return (
-              <div className="net-grid section-askue-row">
-                <div className="col-check"></div>
-                <div className="vl-name"></div>
+              <>
                 <span className="askue-cell" title={askueTip('Потребители', ad)}>{num(ad?.consumers, 'шт')}</span>
                 <span className="askue-cell" title={askueTip('Опрашиваемые (кВт)', ad)}>{num(ad?.limitedKw, 'кВт')}</span>
                 <span className="askue-cell" title={askueTip('Не опрашиваемые (кВт)', ad)}>{num(ad?.unpolledKw, 'кВт')}</span>
                 <span className="askue-cell" title={askueTip('Общая разрешённая мощность ТП (кВт)', ad)}>{num(ad?.totalKw, 'кВт')}</span>
-                <div className="pu-col-label"></div><div className="pu-col-label"></div><div className="pu-col-label"></div>
-                <div className="col-section"></div>
-                <div className="col-actions"></div>
-              </div>
+              </>
             );
           };
+          // Отдельная строка чисел — только для секции без привязанных ВЛ (некуда вставить).
+          const askueNumRow = (section) => (
+            <div className="net-grid section-askue-row">
+              <div className="col-check"></div>
+              <div className="vl-name"></div>
+              {askueNumberCells(section)}
+              <div className="pu-col-label"></div><div className="pu-col-label"></div><div className="pu-col-label"></div>
+              <div className="col-section"></div>
+              <div className="col-actions"></div>
+            </div>
+          );
 
           return uniqueTps.map(tp => {
             const tpItems = filteredData.filter(i => i.tpName === tp);
@@ -1464,11 +1472,10 @@ const executeClearHistory = async () => {
                   return (
                     <div key={section.id} className="section-block">
                       {colHeader(sectionNameCol, sectionActions, askueHeadCells(section))}
-                      {askueNumRow(section)}
                       <div className="section-lines">
                         {lines.length === 0
-                          ? <div className="section-empty">Нет привязанных ВЛ</div>
-                          : lines.map(item => renderVlRow(item, false))}
+                          ? <>{askueNumRow(section)}<div className="section-empty">Нет привязанных ВЛ</div></>
+                          : lines.map((item, i) => renderVlRow(item, false, i === 0 ? askueNumberCells(section) : null))}
                       </div>
                     </div>
                   );

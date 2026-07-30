@@ -6930,6 +6930,8 @@ tr.selected:hover,
   min-width: 0;
 }
 .askue-head { min-height: 24px; }
+/* Числа в строке ВЛ выравниваем по уровню цветных квадратов ПУ (верх строки). */
+.vl-row .askue-cell { align-self: start; padding-top: 8px; }
 /* Число крупнее (на порядок), единицы (шт/кВт) — мелкими, tabular-nums для ровных колонок. */
 .askue-val { display: inline-flex; align-items: baseline; gap: 2px; }
 .askue-num { font-size: 16px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
