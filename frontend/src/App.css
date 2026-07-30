@@ -6916,12 +6916,27 @@ tr.selected:hover,
    квадраты ПУ всех строк совпадали в три идеальные вертикальные колонки. */
 .net-grid {
   display: grid;
-  grid-template-columns: 28px minmax(160px, 1fr) 96px 96px 96px 140px 72px;
+  /* [чек][имя][АСКУЭ×4: потр 44 · limited/unpolled/sum по 54][Начало/Середина/Конец][секция][действия] */
+  grid-template-columns: 28px minmax(160px, 1fr) 44px 54px 54px 54px 96px 96px 96px 140px 72px;
   align-items: center;
   gap: 8px;
   padding: 2px 8px;
 }
 .net-grid-head { margin-bottom: 2px; }
+
+/* Колонки АСКУЭ: значок в заголовке / число в теле — строго по центру своей колонки. */
+.askue-cell {
+  display: flex; align-items: center; justify-content: center;
+  font-variant-numeric: tabular-nums; font-size: 12.5px; font-weight: 600;
+  min-width: 0;
+}
+.askue-head { min-height: 20px; }
+.askue-num { color: var(--text); }
+.askue-empty { color: var(--text-faint); }
+.section-askue-row { padding-top: 0; padding-bottom: 0; }
+/* Свечение значков АСКУЭ — формат «редактировать/удалить» (статичное, hover-усиление, .12s). */
+.askue-ico { display: inline-flex; transition: filter .12s ease; }
+.net-grid-head:hover .askue-ico.ico-glow-blue { filter: drop-shadow(0 0 6px rgba(59, 130, 246, .95)); }
 .col-check { display: flex; align-items: center; justify-content: center; }
 .col-section { display: flex; align-items: center; }
 .col-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
@@ -6947,7 +6962,19 @@ tr.selected:hover,
 
 /* Мобильная ширина: горизонтальный скролл карточки ТП, сетка не ломается. */
 .tp-card { overflow-x: auto; }
-.net-grid { min-width: 680px; }
+.net-grid { min-width: 900px; }
+/* На узких экранах — мельче значки/числа АСКУЭ и колонки, без переносов. */
+@media (max-width: 640px) {
+  .net-grid { grid-template-columns: 26px minmax(140px, 1fr) 38px 46px 46px 46px 84px 84px 84px 120px 60px; gap: 6px; }
+  .askue-cell { font-size: 11px; }
+  .askue-ico svg { width: 15px; height: 15px; }
+}
+
+/* Форма АСКУЭ: сетка числовых полей + read-only «Общая мощность». */
+.askue-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-bottom: 12px; }
+.askue-grid .form-group { margin: 0; }
+.askue-grid input { width: 100%; font-variant-numeric: tabular-nums; }
+.askue-total { background: var(--surface-2); font-weight: 700; }
 
 /* ===== Меню «Превышение Pном» (этап 3) ===== */
 .po-tabs { display: flex; gap: 8px; margin-bottom: 14px; }

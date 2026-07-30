@@ -10,7 +10,7 @@ import './App.css';
 // xlsx-js-style — drop-in форк SheetJS (тот же API, включая utils/read), плюс стили
 // ячеек. Один импорт вместо двух ('xlsx' удалён из зависимостей — был дубль).
 import * as XLSX from 'xlsx-js-style';
-import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo, IconMeter, IconUpload, IconSettings } from './icons.jsx';
+import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo, IconMeter, IconUpload, IconSettings, IconUsers } from './icons.jsx';
 import RossetiLoader from './RossetiLoader.jsx';
 
 // =====================================================
@@ -532,6 +532,31 @@ function ModalShell({ title, dockTitle, titleExtra, icon, onClose, onBackdrop, v
     </ModalShellCtx.Provider>
   );
 }
+
+// ── SVG-значки колонок АСКУЭ в карточке секции («Структура сети») ──
+// Свечение — через класс .ico-glow-blue (как у «редактировать»); wrapper .askue-ico.
+const IconAskueLimited = ({ size = 18 }) => (   // «P» + wi-fi (введённые ограничения)
+  <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <text x="1.5" y="17" fontSize="13" fontWeight="700" fill="currentColor" stroke="none">P</text>
+    <path d="M12.5 8.5a7 7 0 0 1 9 0" />
+    <path d="M14.5 11.5a4 4 0 0 1 5 0" />
+    <circle cx="17" cy="15" r="1" fill="currentColor" stroke="none" />
+  </svg>
+);
+const IconAskueUnpolled = ({ size = 18 }) => (  // «P» + перечёркнутый wi-fi (нет опроса)
+  <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <text x="1.5" y="17" fontSize="13" fontWeight="700" fill="currentColor" stroke="none">P</text>
+    <path d="M12.5 8.5a7 7 0 0 1 9 0" />
+    <path d="M14.5 11.5a4 4 0 0 1 5 0" />
+    <circle cx="17" cy="15" r="1" fill="currentColor" stroke="none" />
+    <line x1="11.5" y1="6" x2="22.5" y2="17" />
+  </svg>
+);
+const IconAskueSum = ({ size = 18 }) => (       // «ΣP» (общая разрешённая мощность)
+  <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="none">
+    <text x="12" y="17" fontSize="12" fontWeight="700" fill="currentColor" textAnchor="middle">ΣP</text>
+  </svg>
+);
 
 // =====================================================
 // КОМПОНЕНТ СТРУКТУРЫ СЕТИ
@@ -1294,6 +1319,7 @@ const executeClearHistory = async () => {
                   )}
                 </div>
                 <span className="vl-name" title={item.vlName}>{item.vlName}</span>
+                <span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" />
                 {renderPuCell(item, 'start')}
                 {renderPuCell(item, 'middle')}
                 {renderPuCell(item, 'end')}
@@ -1321,11 +1347,12 @@ const executeClearHistory = async () => {
             );
           };
 
-          // Строка-заголовок колонок ПУ (подписи Начало/Середина/Конец).
-          const colHeader = (nameCol, actionsCol) => (
+          // Строка-заголовок колонок ПУ (подписи Начало/Середина/Конец) + значки АСКУЭ.
+          const colHeader = (nameCol, actionsCol, askueCells = null) => (
             <div className="net-grid net-grid-head">
               <div className="col-check"></div>
               <div className="vl-name section-title-cell">{nameCol}</div>
+              {askueCells || <><span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" /></>}
               <div className="pu-col-label">Начало</div>
               <div className="pu-col-label">Середина</div>
               <div className="pu-col-label">Конец</div>
@@ -1333,6 +1360,39 @@ const executeClearHistory = async () => {
               <div className="col-actions">{actionsCol}</div>
             </div>
           );
+
+          // Значки/числа АСКУЭ по секции. Ширины колонок резервируются всегда;
+          // без данных — «—». Дата — в tooltip.
+          const askueDate = (ad) => ad && ad.at ? new Date(ad.at).toLocaleString('ru-RU') : null;
+          const askueTip = (name, ad) => `${name} · ${askueDate(ad) ? `данные АСКУЭ от ${askueDate(ad)}` : 'данных АСКУЭ нет'}`;
+          const askueHeadCells = (section) => {
+            const ad = section.askueData || null;
+            return (
+              <>
+                <span className="askue-cell askue-head" title={askueTip('Потребители', ad)}><span className="askue-ico ico-glow-blue"><IconUsers size={18} /></span></span>
+                <span className="askue-cell askue-head" title={askueTip('Введённые ограничения (кВт)', ad)}><span className="askue-ico ico-glow-blue"><IconAskueLimited size={18} /></span></span>
+                <span className="askue-cell askue-head" title={askueTip('Не введённые — нет опроса (кВт)', ad)}><span className="askue-ico ico-glow-blue"><IconAskueUnpolled size={18} /></span></span>
+                <span className="askue-cell askue-head" title={askueTip('Общая разрешённая мощность ТП (кВт)', ad)}><span className="askue-ico ico-glow-blue"><IconAskueSum size={18} /></span></span>
+              </>
+            );
+          };
+          const askueNumRow = (section) => {
+            const ad = section.askueData || null;
+            const num = (v) => (v == null ? <span className="askue-empty">—</span> : <span className="askue-num">{v}</span>);
+            return (
+              <div className="net-grid section-askue-row">
+                <div className="col-check"></div>
+                <div className="vl-name"></div>
+                <span className="askue-cell" title={askueTip('Потребители', ad)}>{num(ad?.consumers)}</span>
+                <span className="askue-cell" title={askueTip('Введённые ограничения (кВт)', ad)}>{num(ad?.limitedKw)}</span>
+                <span className="askue-cell" title={askueTip('Не введённые — нет опроса (кВт)', ad)}>{num(ad?.unpolledKw)}</span>
+                <span className="askue-cell" title={askueTip('Общая разрешённая мощность ТП (кВт)', ad)}>{num(ad?.totalKw)}</span>
+                <div className="pu-col-label"></div><div className="pu-col-label"></div><div className="pu-col-label"></div>
+                <div className="col-section"></div>
+                <div className="col-actions"></div>
+              </div>
+            );
+          };
 
           return uniqueTps.map(tp => {
             const tpItems = filteredData.filter(i => i.tpName === tp);
@@ -1401,7 +1461,8 @@ const executeClearHistory = async () => {
                   ) : null;
                   return (
                     <div key={section.id} className="section-block">
-                      {colHeader(sectionNameCol, sectionActions)}
+                      {colHeader(sectionNameCol, sectionActions, askueHeadCells(section))}
+                      {askueNumRow(section)}
                       <div className="section-lines">
                         {lines.length === 0
                           ? <div className="section-empty">Нет привязанных ВЛ</div>
@@ -3820,6 +3881,9 @@ function PowerOverload({ selectedRes }) {
   const [commentError, setCommentError] = useState(false);
   const [files, setFiles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  // Числа этапа АСКУЭ (строки для контролируемого ввода)
+  const [askueForm, setAskueForm] = useState({ consumers: '', limitedKw: '', unpolledKw: '' });
+  const [askueError, setAskueError] = useState('');
   // Просмотрщик вложений (без навигации)
   const [showFileViewer, setShowFileViewer] = useState(false);
   const [viewerFiles, setViewerFiles] = useState([]);
@@ -3868,15 +3932,22 @@ function PowerOverload({ selectedRes }) {
 
   const shown = cases.filter(c => tab === 'completed' ? c.stage === 'completed' : c.stage !== 'completed');
 
-  const openAskue = (c) => { setComment(''); setCommentError(false); setActionModal({ c, mode: 'askue' }); };
+  const openAskue = (c) => { setComment(''); setCommentError(false); setAskueForm({ consumers: '', limitedKw: '', unpolledKw: '' }); setAskueError(''); setActionModal({ c, mode: 'askue' }); };
   const openRes = (c) => { setComment(''); setCommentError(false); setFiles([]); setActionModal({ c, mode: 'res' }); };
 
   const submitAskue = async () => {
+    const consumers = Math.round(Number(askueForm.consumers));
+    const limitedKw = Math.round(Number(askueForm.limitedKw));
+    const unpolledKw = Math.round(Number(askueForm.unpolledKw));
+    if (!Number.isFinite(consumers) || consumers < 1 || consumers > 999) { setAskueError('Потребители: целое 1–999'); return; }
+    if (!Number.isFinite(limitedKw) || limitedKw < 0 || limitedKw > 9999) { setAskueError('Введённые ограничения: целое 0–9999 кВт'); return; }
+    if (!Number.isFinite(unpolledKw) || unpolledKw < 0 || unpolledKw > 9999) { setAskueError('Не введённые (нет опроса): целое 0–9999 кВт'); return; }
+    setAskueError('');
     if (comment.trim().split(/\s+/).filter(w => w.length > 0).length < 5) { setCommentError(true); return; }
     if (!window.confirm('Подтвердите: ограничение по АСКУЭ выполнено?')) return;
     setSubmitting(true);
     try {
-      await api.post(`/api/overload/${actionModal.c.id}/askue-complete`, { comment });
+      await api.post(`/api/overload/${actionModal.c.id}/askue-complete`, { comment, consumers, limitedKw, unpolledKw });
       setActionModal(null);
       window.dispatchEvent(new CustomEvent('notificationsUpdated'));
       await load();
@@ -4060,6 +4131,38 @@ function PowerOverload({ selectedRes }) {
                   <p><strong>ТП:</strong> {s.tpName} · СШ-{toRoman(s.sectionNumber)}</p>
                   <p><strong>Пик:</strong> {f1(actionModal.c.peakKw)} кВт · лимит {f1(actionModal.c.limitKw)} кВт</p>
                 </div>
+                {!isRes && (() => {
+                  const lim = Math.round(Number(askueForm.limitedKw)) || 0;
+                  const unp = Math.round(Number(askueForm.unpolledKw)) || 0;
+                  const total = (askueForm.limitedKw === '' && askueForm.unpolledKw === '') ? '' : lim + unp;
+                  const numInput = (key, max) => (
+                    <input type="number" min="0" max={max} step="1" value={askueForm[key]}
+                      onChange={(e) => { setAskueForm(f => ({ ...f, [key]: e.target.value })); if (askueError) setAskueError(''); }} />
+                  );
+                  return (
+                    <>
+                      <div className="askue-grid">
+                        <div className="form-group">
+                          <label>Потребители (шт.)</label>
+                          {numInput('consumers', 999)}
+                        </div>
+                        <div className="form-group">
+                          <label>Введённые ограничения (кВт)</label>
+                          {numInput('limitedKw', 9999)}
+                        </div>
+                        <div className="form-group">
+                          <label>Не введённые — нет опроса (кВт)</label>
+                          {numInput('unpolledKw', 9999)}
+                        </div>
+                        <div className="form-group">
+                          <label>Общая разрешённая мощность ТП (кВт)</label>
+                          <input type="text" value={total} readOnly className="askue-total" title="Сумма: введённые + не введённые" />
+                        </div>
+                      </div>
+                      {askueError && <p className="askue-error" style={{ color: '#dc2626', fontWeight: 600, margin: '0 0 10px' }}>{askueError}</p>}
+                    </>
+                  );
+                })()}
                 <div className="form-group">
                   <label style={commentError ? { color: '#dc2626', fontWeight: 600 } : undefined}>
                     {isRes ? 'Что выполнено? (минимум 5 слов)' : 'Что именно ограничили? (минимум 5 слов)'}
