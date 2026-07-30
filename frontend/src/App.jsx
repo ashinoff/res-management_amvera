@@ -4075,8 +4075,8 @@ function PowerOverload({ selectedRes }) {
                     <div className="notification-pu-number">
                       Этап: <strong>{STAGE_RU[c.stage]}</strong>
                     </div>
-                    {poStages(c)}
                   </div>
+                  {poStages(c)}
                   <div className="notification-narrow-actions">
                     {c.stage === 'awaiting_recheck' && (
                       <span className="po-plaque">Ожидает перепроверки</span>
