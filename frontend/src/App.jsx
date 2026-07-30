@@ -1369,24 +1369,26 @@ const executeClearHistory = async () => {
             const ad = section.askueData || null;
             return (
               <>
-                <span className="askue-cell askue-head" title={askueTip('Потребители', ad)}><span className="askue-ico ico-glow-blue"><IconUsers size={18} /></span></span>
-                <span className="askue-cell askue-head" title={askueTip('Введённые ограничения (кВт)', ad)}><span className="askue-ico ico-glow-blue"><IconAskueLimited size={18} /></span></span>
-                <span className="askue-cell askue-head" title={askueTip('Не введённые — нет опроса (кВт)', ad)}><span className="askue-ico ico-glow-blue"><IconAskueUnpolled size={18} /></span></span>
-                <span className="askue-cell askue-head" title={askueTip('Общая разрешённая мощность ТП (кВт)', ad)}><span className="askue-ico ico-glow-blue"><IconAskueSum size={18} /></span></span>
+                <span className="askue-cell askue-head" title={askueTip('Потребители', ad)}><span className="askue-ico ico-glow-blue"><IconUsers size={24} /></span></span>
+                <span className="askue-cell askue-head" title={askueTip('Опрашиваемые (кВт)', ad)}><span className="askue-ico ico-glow-green"><IconAskueLimited size={24} /></span></span>
+                <span className="askue-cell askue-head" title={askueTip('Не опрашиваемые (кВт)', ad)}><span className="askue-ico ico-glow-red"><IconAskueUnpolled size={24} /></span></span>
+                <span className="askue-cell askue-head" title={askueTip('Общая разрешённая мощность ТП (кВт)', ad)}><span className="askue-ico ico-glow-blue"><IconAskueSum size={24} /></span></span>
               </>
             );
           };
           const askueNumRow = (section) => {
             const ad = section.askueData || null;
-            const num = (v) => (v == null ? <span className="askue-empty">—</span> : <span className="askue-num">{v}</span>);
+            const num = (v, unit) => (v == null
+              ? <span className="askue-empty">—</span>
+              : <span className="askue-val"><b className="askue-num">{v}</b><i className="askue-unit">{unit}</i></span>);
             return (
               <div className="net-grid section-askue-row">
                 <div className="col-check"></div>
                 <div className="vl-name"></div>
-                <span className="askue-cell" title={askueTip('Потребители', ad)}>{num(ad?.consumers)}</span>
-                <span className="askue-cell" title={askueTip('Введённые ограничения (кВт)', ad)}>{num(ad?.limitedKw)}</span>
-                <span className="askue-cell" title={askueTip('Не введённые — нет опроса (кВт)', ad)}>{num(ad?.unpolledKw)}</span>
-                <span className="askue-cell" title={askueTip('Общая разрешённая мощность ТП (кВт)', ad)}>{num(ad?.totalKw)}</span>
+                <span className="askue-cell" title={askueTip('Потребители', ad)}>{num(ad?.consumers, 'шт')}</span>
+                <span className="askue-cell" title={askueTip('Опрашиваемые (кВт)', ad)}>{num(ad?.limitedKw, 'кВт')}</span>
+                <span className="askue-cell" title={askueTip('Не опрашиваемые (кВт)', ad)}>{num(ad?.unpolledKw, 'кВт')}</span>
+                <span className="askue-cell" title={askueTip('Общая разрешённая мощность ТП (кВт)', ad)}>{num(ad?.totalKw, 'кВт')}</span>
                 <div className="pu-col-label"></div><div className="pu-col-label"></div><div className="pu-col-label"></div>
                 <div className="col-section"></div>
                 <div className="col-actions"></div>
@@ -4147,11 +4149,11 @@ function PowerOverload({ selectedRes }) {
                           {numInput('consumers', 999)}
                         </div>
                         <div className="form-group">
-                          <label>Введённые ограничения (кВт)</label>
+                          <label>Опрашиваемые, P (кВт)</label>
                           {numInput('limitedKw', 9999)}
                         </div>
                         <div className="form-group">
-                          <label>Не введённые — нет опроса (кВт)</label>
+                          <label>Не опрашиваемые (кВт)</label>
                           {numInput('unpolledKw', 9999)}
                         </div>
                         <div className="form-group">
