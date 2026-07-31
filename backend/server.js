@@ -2005,15 +2005,36 @@ app.delete('/api/network/sections/:id',
 app.get('/api/overload', authenticateToken, async (req, res) => {
   try {
     const { stage, resId } = req.query;
-    const where = {};
-    // Область видимости: не-админ (res_responsible/uploader/uec) — только свой РЭС;
-    // админ — по фильтру ?resId либо все.
-    if (req.user.role !== 'admin') {
-      where.resId = req.user.resId;
-    } else if (resId) {
-      where.resId = parseInt(resId, 10);
+    const acc = await getUserAccess(req.user.id);
+    const isAdmin = req.user.role === 'admin' || acc.isSuper;
+    const canAskue = acc.isSuper || !!(acc.permissions && acc.permissions.overload_askue);
+    const isRes = req.user.role === 'res_responsible';
+
+    // Область «своя работа» по этапам (для не-админа). Пользователь с обеими ролями
+    // доступа (право + РЭС) — объединение. Пусто → без права и не РЭС/админ.
+    let allowedStages = null; // null = все (админ/супер)
+    if (!isAdmin) {
+      const set = new Set();
+      if (canAskue) { set.add('askue_limit'); set.add('awaiting_recheck'); }
+      if (isRes) { set.add('res_work'); set.add('awaiting_recheck'); }
+      allowedStages = [...set];
     }
-    if (stage) where.stage = stage;
+
+    const where = {};
+    // РЭС-скоуп: не-админ — свой РЭС; админ — ?resId либо все.
+    if (!isAdmin) where.resId = req.user.resId;
+    else if (resId) where.resId = parseInt(resId, 10);
+
+    // Этап: явный ?stage у админа — как есть; у не-админа — только из своей области
+    // (чужой этап → пусто). Без ?stage — дефолтная область (у админа все).
+    if (stage) {
+      if (isAdmin) where.stage = stage;
+      else if ((allowedStages || []).includes(stage)) where.stage = stage;
+      else return res.json([]);
+    } else if (allowedStages !== null) {
+      if (allowedStages.length === 0) return res.json([]);
+      where.stage = { [Op.in]: allowedStages };
+    }
 
     const cases = await OverloadCase.findAll({
       where,
@@ -4217,19 +4238,20 @@ async function getNotificationCounts(user) {
     });
   }
 
-  // Кейсы перегруза, требующие действия по роли (для меню «Превышение Pном»).
+  // Бейдж «Превышение Pном» — ТОЛЬКО рабочие кейсы пользователя (нужно действие).
+  // awaiting_recheck в бейдж НЕ входит ни у кого (там действия нет — ждём профиль).
   let powerOverloadCases = 0;
   if (user.role === 'admin') {
+    // Сумма активных рабочих этапов (askue_limit + res_work), без awaiting_recheck.
     powerOverloadCases = await OverloadCase.count({
-      where: { stage: { [Op.in]: ['askue_limit', 'awaiting_recheck'] } }
+      where: { stage: { [Op.in]: ['askue_limit', 'res_work'] } }
     });
   } else if (user.role === 'uploader') {
-    // Загрузчик (АСКУЭ) — этап АСКУЭ по своему РЭС, но ТОЛЬКО при праве overload_askue
-    // (иначе кнопки нет и бейдж-«требует действия» вводил бы в заблуждение).
+    // Загрузчик (АСКУЭ) с правом — этап АСКУЭ (askue_limit) своего РЭС.
     const uacc = await getUserAccess(user.id);
     if (uacc.isSuper || (uacc.permissions && uacc.permissions.overload_askue)) {
       powerOverloadCases = await OverloadCase.count({
-        where: { stage: { [Op.in]: ['askue_limit', 'awaiting_recheck'] }, resId: user.resId }
+        where: { stage: 'askue_limit', resId: user.resId }
       });
     }
   } else if (user.role === 'res_responsible') {

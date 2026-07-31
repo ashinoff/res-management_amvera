@@ -3899,7 +3899,7 @@ function PowerOverload({ selectedRes }) {
   const { user } = useContext(AuthContext);
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('active'); // active | completed
+  const [tab, setTab] = useState(''); // id этапа-вкладки; по умолчанию — первая доступная
   const [detailsCase, setDetailsCase] = useState(null);
   const [actionModal, setActionModal] = useState(null); // { c, mode: 'askue'|'res' }
   const [comment, setComment] = useState('');
@@ -3983,7 +3983,25 @@ function PowerOverload({ selectedRes }) {
     // eslint-disable-next-line
   }, [selectedRes]);
 
-  const shown = cases.filter(c => tab === 'completed' ? c.stage === 'completed' : c.stage !== 'completed');
+  // Вкладки «своей работы» по роли/праву. Backend уже отдаёт только доступную область,
+  // здесь — разбивка по этапам с бейджами-счётчиками.
+  const isAdmin = user.role === 'admin' || user.isSuper;
+  const askueRight = hasPerm(user, 'overload_askue');
+  const isRes = user.role === 'res_responsible';
+  const cnt = (stg) => cases.filter(c => c.stage === stg).length;
+  const stageTabs = [];
+  if (isAdmin) {
+    stageTabs.push({ id: 'askue_limit', label: 'К ограничению' });
+    stageTabs.push({ id: 'res_work', label: 'Мероприятия РЭС' });
+    stageTabs.push({ id: 'awaiting_recheck', label: 'Ожидают перепроверки' });
+    stageTabs.push({ id: 'completed', label: 'Завершённые' });
+  } else {
+    if (askueRight) stageTabs.push({ id: 'askue_limit', label: 'К ограничению' });
+    if (isRes) stageTabs.push({ id: 'res_work', label: 'Мероприятия РЭС' });
+    if (askueRight || isRes) stageTabs.push({ id: 'awaiting_recheck', label: 'Ожидают перепроверки' });
+  }
+  const curTab = (tab && stageTabs.some(t => t.id === tab)) ? tab : (stageTabs[0]?.id || 'askue_limit');
+  const shown = cases.filter(c => c.stage === curTab);
 
   const openAskue = (c) => { setComment(''); setCommentError(false); setAskueForm({ consumers: '', limitedKw: '', unpolledKw: '' }); setAskueError(''); setActionModal({ c, mode: 'askue' }); };
   const openRes = (c) => { setComment(''); setCommentError(false); setFiles([]); setActionModal({ c, mode: 'res' }); };
@@ -4042,8 +4060,11 @@ function PowerOverload({ selectedRes }) {
       </div>
 
       <div className="po-tabs">
-        <button className={`po-tab ${tab === 'active' ? 'active' : ''}`} onClick={() => setTab('active')}>Активные</button>
-        <button className={`po-tab ${tab === 'completed' ? 'active' : ''}`} onClick={() => setTab('completed')}>Завершённые</button>
+        {stageTabs.map(t => (
+          <button key={t.id} className={`po-tab ${curTab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
+            {t.label} ({cnt(t.id)})
+          </button>
+        ))}
       </div>
 
       {shown.length === 0 ? (
@@ -4075,6 +4096,11 @@ function PowerOverload({ selectedRes }) {
                     <div className="notification-pu-number">
                       Этап: <strong>{STAGE_RU[c.stage]}</strong>
                     </div>
+                    {c.stage === 'awaiting_recheck' && (
+                      <div className="po-await-hint">
+                        Ожидает загрузки профиля мощности{c.resCompletedAt ? ` после отчёта РЭС от ${new Date(c.resCompletedAt).toLocaleDateString('ru-RU')}` : ''}
+                      </div>
+                    )}
                   </div>
                   {poStages(c)}
                   <div className="notification-narrow-actions">
@@ -4162,7 +4188,7 @@ function PowerOverload({ selectedRes }) {
                 {hasPerm(user, 'overload_askue') && c.stage === 'askue_limit' && (
                   <button className="confirm-btn" onClick={() => openAskue(c)}>Ограничение по АСКУЭ выполнено</button>
                 )}
-                {user.role === 'res_responsible' && c.stage === 'res_work' && (
+                {(user.role === 'res_responsible' || isAdmin) && c.stage === 'res_work' && (
                   <button className="confirm-btn" onClick={() => openRes(c)}>Мероприятия выполнены</button>
                 )}
                 <button className="action-btn" onClick={() => setDetailsCase(null)}>Закрыть</button>
