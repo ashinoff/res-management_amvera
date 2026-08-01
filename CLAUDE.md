@@ -391,6 +391,23 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-08-01** — Новый раздел «Глубокий анализ работ» — детектор формально
+  закрытых мероприятий РЭС (роль admin). Бэкенд: `GET /api/analytics/work-quality`
+  (`authenticateToken`+`checkRole(['admin'])`, без requirePerm) — ОДИН `findAll`
+  из `CheckHistory` (workCompletedDate в периоде, +resId), вся математика в JS без
+  запросов в цикле, БЕЗ новых таблиц/миграций. По каждому РЭС: ёмкость (скользящее
+  окно `windowDays`, пик уникальных ТП vs `brigades*perBrigade*windowDays`), пачки
+  (кластеры ≥`batchCount` закрытий в `batchMinutes` мин), ночные закрытия (час <7/≥21),
+  шаблонные комментарии (норм. текст, ≥5 на разных ТП), дубли фото (ключ
+  `original_name|size` на разных ТП), провалы перепроверки (error>0.4 при ≥5).
+  Скоринг 0..100 → level red/yellow/green, ответ `{params, rows[]}` (rows по score
+  DESC, reasons по-русски). Фронт (`App.jsx`): компонент `DeepWorkAnalysis` + пункт
+  меню (icon `IconSearch`, roles `['admin']`) + case `deep_analysis` в renderContent;
+  настройки в localStorage `deepAnalysisSettings`; загрузка — `RossetiLoader`; карточки
+  `.problem-card` + бейдж score (статичный цвет level, без pulse) + раскрытие по кнопке;
+  экспорт XLSX (листы «Сводка»/«Причины») через `styleExportSheet`/`XLS_COLORS`. Мелкий
+  scoped-CSS `.da-*` в App.css (существующие стили не тронуты). Без поллинга. Проверки:
+  `node --check backend/server.js` — ОК, `npx vite build` — ОК.
 - **2026-08-01** — Доработка дедупа структуры (#2, до деплоя). Оставляем строку МИН id
   (на неё старые FK), но ПЕРЕД удалением дублей переносим на неё актуальные данные из
   самой свежей строки (МАКС id): `startPu/middlePu/endPu/lastUpdate` — значения МАКС id

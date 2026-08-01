@@ -349,6 +349,7 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
     { id: 'power_overload', label: 'Превышение Pном', icon: <IconZap size={18} />, roles: ['admin', 'uploader', 'res_responsible'], badge: notificationCounts.powerOverload },
     { id: 'power_analysis', label: 'Анализ мощности', icon: <IconChart size={18} />, roles: ['admin', 'res_responsible'] },
     { id: 'analytics', label: 'Анализ напряжения', icon: <IconChart size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
+    { id: 'deep_analysis', label: 'Глубокий анализ работ', icon: <IconSearch size={18} />, roles: ['admin'] },
     { id: 'documents', label: 'Загруженные документы', icon: <IconFolder size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
     { id: 'history', label: 'История системы', icon: <IconClock size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
     { id: 'reports', label: 'Отчеты', icon: <IconFileText size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
@@ -9551,6 +9552,239 @@ function PermissionsAdmin() {
   );
 }
 
+// «Глубокий анализ работ» — детектор формально закрытых мероприятий РЭС.
+// Вся математика на бэкенде (GET /api/analytics/work-quality) из CheckHistory;
+// здесь только UI. Роль admin, работает по кнопке (без поллинга).
+const DA_LEVEL_COLOR = { red: '#B91C1C', yellow: '#B45309', green: '#15803D' };
+const DA_LEVEL_LABEL = { red: 'Высокий риск', yellow: 'Средний риск', green: 'Норма' };
+const DA_DEFAULTS = { resId: '', dateFrom: '', dateTo: '', windowDays: 4, brigades: 3, perBrigade: 5 };
+
+function DeepWorkAnalysis() {
+  const [resList, setResList] = useState([]);
+  const [settings, setSettings] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('deepAnalysisSettings') || '{}');
+      return { ...DA_DEFAULTS, ...saved };
+    } catch { return { ...DA_DEFAULTS }; }
+  });
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [expanded, setExpanded] = useState({});
+
+  useEffect(() => {
+    api.get('/api/res/list').then(r => setResList(r.data)).catch(e => console.error('Error loading RES list:', e));
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('deepAnalysisSettings', JSON.stringify(settings));
+  }, [settings]);
+
+  const setF = (key, value) => setSettings(prev => ({ ...prev, [key]: value }));
+
+  const analyze = async () => {
+    setLoading(true); setError('');
+    try {
+      const params = new URLSearchParams();
+      if (settings.resId) params.set('resId', settings.resId);
+      if (settings.dateFrom) params.set('dateFrom', settings.dateFrom);
+      if (settings.dateTo) params.set('dateTo', settings.dateTo);
+      params.set('windowDays', settings.windowDays);
+      params.set('brigades', settings.brigades);
+      params.set('perBrigade', settings.perBrigade);
+      const resp = await api.get(`/api/analytics/work-quality?${params}`);
+      setData(resp.data);
+      setExpanded({});
+    } catch (e) {
+      console.error('Deep analysis error:', e);
+      setError(e.response?.data?.error || 'Ошибка анализа');
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const dt = (v) => v ? new Date(v).toLocaleString('ru-RU') : '—';
+  const pct = (v) => `${Math.round((v || 0) * 100)}%`;
+
+  const exportExcel = () => {
+    if (!data || !data.rows.length) { alert('Нет данных для экспорта'); return; }
+    const sumRows = data.rows.map(r => ({
+      'РЭС': r.resName,
+      'Балл': r.score,
+      'Закрыто': r.totalClosed,
+      'Уникальных ТП': r.uniqueTp,
+      'Пик ТП/окно': r.capacity.maxTpInWindow,
+      'Ёмкость': r.capacity.capacityLimit,
+      'Превышение, раз': Number(r.capacity.ratio.toFixed(2)),
+      '% ночных': Math.round(r.afterHoursShare * 100),
+      '% провалов перепроверки': Math.round(r.recheck.failShare * 100)
+    }));
+    const reasonRows = [];
+    data.rows.forEach(r => {
+      if (!r.reasons.length) reasonRows.push({ 'РЭС': r.resName, 'Причина': '—' });
+      else r.reasons.forEach(reason => reasonRows.push({ 'РЭС': r.resName, 'Причина': reason }));
+    });
+    const scoreColor = (v) => { const n = Number(v); return n >= 60 ? XLS_COLORS.red : n >= 30 ? XLS_COLORS.amber : XLS_COLORS.green; };
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.json_to_sheet(sumRows);
+    ws1['!cols'] = [{ wch: 18 }, { wch: 7 }, { wch: 9 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 22 }];
+    styleExportSheet(ws1, { 'Балл': scoreColor });
+    XLSX.utils.book_append_sheet(wb, ws1, 'Сводка');
+    const ws2 = XLSX.utils.json_to_sheet(reasonRows);
+    ws2['!cols'] = [{ wch: 18 }, { wch: 80 }];
+    styleExportSheet(ws2);
+    XLSX.utils.book_append_sheet(wb, ws2, 'Причины');
+    XLSX.writeFile(wb, `Глубокий_анализ_работ_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
+  };
+
+  return (
+    <div className="deep-analysis">
+      <PageHeader icon={<IconSearch size={24} />} title="Глубокий анализ работ" />
+
+      <div className="history-filters">
+        <div className="filter-row">
+          <div className="filter-group">
+            <label>РЭС</label>
+            <select value={settings.resId} onChange={e => setF('resId', e.target.value)}>
+              <option value="">Все РЭС</option>
+              {resList.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+          <div className="filter-group">
+            <label>Период с</label>
+            <input type="date" value={settings.dateFrom} onChange={e => setF('dateFrom', e.target.value)} />
+          </div>
+          <div className="filter-group">
+            <label>по</label>
+            <input type="date" value={settings.dateTo} onChange={e => setF('dateTo', e.target.value)} />
+          </div>
+          <div className="filter-group">
+            <label>Окно, дней</label>
+            <input type="number" min="1" max="60" value={settings.windowDays} onChange={e => setF('windowDays', e.target.value)} />
+          </div>
+          <div className="filter-group">
+            <label>Бригад ОВБ</label>
+            <input type="number" min="1" max="100" value={settings.brigades} onChange={e => setF('brigades', e.target.value)} />
+          </div>
+          <div className="filter-group">
+            <label>План ТП/бригаду/день</label>
+            <input type="number" min="1" max="100" value={settings.perBrigade} onChange={e => setF('perBrigade', e.target.value)} />
+          </div>
+          <div className="filter-group">
+            <button className="export-btn" onClick={analyze} disabled={loading}>
+              <IconSearch size={16} /> Проанализировать
+            </button>
+          </div>
+          {data && data.rows.length > 0 && (
+            <div className="filter-group">
+              <button className="export-btn" onClick={exportExcel}>
+                <IconDownload size={16} /> Экспорт в Excel
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="loading"><RossetiLoader /></div>
+      ) : error ? (
+        <div className="no-data"><p><span className="svg-frame" style={{ marginRight: 8 }}><IconAlertTriangle size={26} /></span>{error}</p></div>
+      ) : !data ? (
+        <div className="no-data"><p><span className="svg-frame" style={{ marginRight: 8 }}><IconSearch size={26} /></span>Задайте параметры и нажмите «Проанализировать»</p></div>
+      ) : data.rows.length === 0 ? (
+        <div className="no-data"><p><span className="svg-frame" style={{ marginRight: 8 }}><IconCheck size={26} /></span>За выбранный период закрытых мероприятий нет</p></div>
+      ) : (
+        <div className="problem-list">
+          {data.rows.map(r => {
+            const open = !!expanded[r.resId];
+            const ratioTxt = r.capacity.ratio > 1 ? ` — превышение в ${r.capacity.ratio.toFixed(1)} раза` : '';
+            return (
+              <div key={r.resId} className="problem-card">
+                <div className="problem-header">
+                  <div className="problem-title">
+                    <h3>{r.resName}</h3>
+                    <span className="res-badge">{DA_LEVEL_LABEL[r.level]}</span>
+                  </div>
+                  <span className="failure-badge" style={{ background: DA_LEVEL_COLOR[r.level], color: '#fff' }}>
+                    Балл {r.score}
+                  </span>
+                </div>
+                <div className="problem-meta">
+                  <span>Закрыто <b>{r.totalClosed}</b> мероприятий по <b>{r.uniqueTp}</b> ТП; пик: <b>{r.capacity.maxTpInWindow}</b> ТП за {settings.windowDays} дн. при ёмкости {r.capacity.capacityLimit}{ratioTxt}</span>
+                </div>
+                <button className="da-toggle" onClick={() => setExpanded(prev => ({ ...prev, [r.resId]: !open }))}>
+                  {open ? 'Свернуть детали' : 'Показать детали'}
+                  <IconArrowDown size={14} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .12s ease' }} />
+                </button>
+                {open && (
+                  <div className="da-details">
+                    <div className="detail-section">
+                      <h5>Причины оценки</h5>
+                      {r.reasons.length ? (
+                        <ul className="da-reasons">{r.reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul>
+                      ) : <div className="detail-row">Признаков формального закрытия не обнаружено.</div>}
+                    </div>
+
+                    <div className="detail-section">
+                      <h5>Пакетные закрытия ({r.batches.length})</h5>
+                      {r.batches.length ? (
+                        <table className="diag-table">
+                          <thead><tr><th>Начало</th><th>Конец</th><th>Закрытий</th><th>Уник. ТП</th><th>Длит., мин</th></tr></thead>
+                          <tbody>
+                            {r.batches.map((b, i) => (
+                              <tr key={i}><td>{dt(b.start)}</td><td>{dt(b.end)}</td><td>{b.count}</td><td>{b.uniqueTp}</td><td>{b.durationMin}</td></tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : <div className="detail-row">Нет.</div>}
+                    </div>
+
+                    <div className="detail-section">
+                      <h5>Шаблонные комментарии ({r.templateComments.length})</h5>
+                      {r.templateComments.length ? (
+                        <table className="diag-table">
+                          <thead><tr><th>Текст</th><th>Повторов</th><th>ТП</th></tr></thead>
+                          <tbody>
+                            {r.templateComments.map((c, i) => (
+                              <tr key={i}><td style={{ textAlign: 'left' }}>{c.text}</td><td>{c.count}</td><td>{c.tpCount}</td></tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : <div className="detail-row">Нет.</div>}
+                    </div>
+
+                    <div className="detail-section">
+                      <h5>Дубли фото ({r.duplicatePhotos.length})</h5>
+                      {r.duplicatePhotos.length ? (
+                        <table className="diag-table">
+                          <thead><tr><th>Файл</th><th>Встречен на ТП</th></tr></thead>
+                          <tbody>
+                            {r.duplicatePhotos.map((p, i) => (
+                              <tr key={i}><td style={{ textAlign: 'left' }}>{p.name}</td><td>{p.tpCount}</td></tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : <div className="detail-row">Нет.</div>}
+                    </div>
+
+                    <div className="detail-section">
+                      <h5>Перепроверки</h5>
+                      <div className="detail-row">
+                        Перепроверено: <b>{r.recheck.checked}</b> · провалов: <b>{r.recheck.failed}</b> ({pct(r.recheck.failShare)}) · ночных закрытий: <b>{pct(r.afterHoursShare)}</b>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   // Пока в iframe ждём/меняем токен платформы — показываем лоадер, а не форму логина.
@@ -9763,8 +9997,10 @@ const renderContent = () => {
       return <PermissionsAdmin />;
     case 'history':
       return <SystemHistory />;
-    case 'analytics':  
+    case 'analytics':
       return <Analytics />;
+    case 'deep_analysis':
+      return <DeepWorkAnalysis />;
     default:
       return <NetworkStructure />;
   }
@@ -9785,7 +10021,7 @@ const renderContent = () => {
           <header className="app-header">
             <div className="header-left">
               <h1>Система контроля уровня напряжения в сетях 0,4 кВ</h1>
-              {user.role === 'admin' && activeSection !== 'history' && activeSection !== 'analytics' && (
+              {user.role === 'admin' && activeSection !== 'history' && activeSection !== 'analytics' && activeSection !== 'deep_analysis' && (
                 <select 
                   value={selectedRes || ''}
                   onChange={(e) => setSelectedRes(e.target.value ? parseInt(e.target.value) : null)}

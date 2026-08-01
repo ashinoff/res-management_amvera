@@ -2909,6 +2909,25 @@ tr.selected {
   box-shadow: var(--shadow-sm);
 }
 
+/* «Глубокий анализ работ»: раскрытие деталей карточки РЭС.
+   Карточка не кликабельна целиком (кликабелен только тумблер), но единый hover
+   сохраняем. Никаких анимаций/пульсаций — только мгновенные transition. */
+.deep-analysis .problem-card { cursor: default; }
+.da-toggle {
+  margin-top: 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+.da-toggle:hover { border-color: var(--navy); background: var(--surface); }
+.da-details { margin-top: 14px; display: flex; flex-direction: column; gap: 14px; }
+.da-details .diag-table { margin-top: 6px; }
+.da-reasons { margin: 6px 0 0; padding-left: 20px; }
+.da-reasons li { margin-bottom: 4px; color: var(--text); }
+
 /* Компактная карточка проблемной ВЛ */
 .problem-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .problem-meta {

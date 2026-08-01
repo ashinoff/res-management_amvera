@@ -8351,3 +8351,206 @@ app.get('/api/analytics/summary',
       res.status(500).json({ error: error.message });
     }
 });
+
+// «Глубокий анализ работ» — детектор формально закрытых мероприятий РЭС.
+// Просмотровый роут (admin), без requirePerm. Всё считается из CheckHistory на лету,
+// БЕЗ новых таблиц и БЕЗ запросов в цикле — один findAll, дальше математика в JS.
+app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const numParam = (v, def, min, max) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return def;
+      return Math.min(max, Math.max(min, Math.round(n)));
+    };
+    const windowDays  = numParam(req.query.windowDays, 4, 1, 60);
+    const brigades    = numParam(req.query.brigades, 3, 1, 100);
+    const perBrigade  = numParam(req.query.perBrigade, 5, 1, 100);
+    const batchMinutes = numParam(req.query.batchMinutes, 60, 1, 1440);
+    const batchCount   = numParam(req.query.batchCount, 10, 2, 1000);
+    const resIdFilter  = req.query.resId ? parseInt(req.query.resId, 10) : null;
+
+    // Период по workCompletedDate — дефолт последние 30 дней.
+    let dTo = req.query.dateTo ? new Date(req.query.dateTo) : new Date();
+    let dFrom = req.query.dateFrom ? new Date(req.query.dateFrom) : new Date(dTo);
+    if (!req.query.dateFrom) dFrom.setDate(dFrom.getDate() - 30);
+    const from = new Date(dFrom); from.setHours(0, 0, 0, 0);
+    const to = new Date(dTo); to.setHours(23, 59, 59, 999);
+
+    const where = { workCompletedDate: { [Op.ne]: null, [Op.gte]: from, [Op.lte]: to } };
+    if (resIdFilter) where.resId = resIdFilter;
+
+    const records = await CheckHistory.findAll({
+      where,
+      attributes: ['id', 'resId', 'puNumber', 'tpName', 'vlName', 'resComment',
+        'attachments', 'initialCheckDate', 'workCompletedDate', 'recheckDate',
+        'recheckResult', 'status'],
+      include: [{ model: ResUnit, attributes: ['id', 'name'] }]
+    });
+
+    const params = {
+      resId: resIdFilter, dateFrom: from.toISOString(), dateTo: to.toISOString(),
+      windowDays, brigades, perBrigade, batchMinutes, batchCount
+    };
+    if (records.length === 0) return res.json({ params, rows: [] });
+
+    // Группировка по РЭС
+    const byRes = new Map();
+    for (const r of records) {
+      if (!byRes.has(r.resId)) byRes.set(r.resId, { resId: r.resId, resName: r.ResUnit?.name || '—', items: [] });
+      byRes.get(r.resId).items.push(r);
+    }
+
+    const periodDays = Math.max(1, Math.round((to - from) / 86400000));
+    const capacityLimit = brigades * perBrigade * windowDays;
+
+    const parseAtt = (a) => {
+      if (!a) return [];
+      if (Array.isArray(a)) return a;
+      if (typeof a === 'string') { try { const p = JSON.parse(a); return Array.isArray(p) ? p : []; } catch { return []; } }
+      return [];
+    };
+    const normComment = (c) => String(c || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const dayKey = (dt) => {
+      const d = new Date(dt);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const rows = [];
+    for (const g of byRes.values()) {
+      const items = g.items
+        .filter(x => x.workCompletedDate)
+        .sort((a, b) => new Date(a.workCompletedDate) - new Date(b.workCompletedDate));
+      const totalClosed = items.length;
+      const uniqueTp = new Set(items.map(x => x.tpName)).size;
+      const closes = items.map(x => ({ t: new Date(x.workCompletedDate), tp: x.tpName }));
+
+      // 1) capacity — скользящее окно windowDays календарных дней, макс уникальных ТП.
+      let maxTpInWindow = 0, windowStart = null;
+      const dayStarts = [...new Set(closes.map(c => dayKey(c.t)))].sort();
+      for (const ds of dayStarts) {
+        const start = new Date(`${ds}T00:00:00`);
+        const end = new Date(start); end.setDate(end.getDate() + windowDays);
+        const tps = new Set();
+        for (const c of closes) if (c.t >= start && c.t < end) tps.add(c.tp);
+        if (tps.size > maxTpInWindow) { maxTpInWindow = tps.size; windowStart = start; }
+      }
+      const ratio = capacityLimit > 0 ? maxTpInWindow / capacityLimit : 0;
+
+      // 2) batches — непересекающиеся кластеры >= batchCount закрытий в batchMinutes минут.
+      const batches = [];
+      const winMs = batchMinutes * 60000;
+      const n = closes.length;
+      let j = 0;
+      while (j < n) {
+        let k = j;
+        while (k < n && (closes[k].t - closes[j].t) <= winMs) k++;
+        const cnt = k - j;
+        if (cnt >= batchCount) {
+          const seg = closes.slice(j, k);
+          batches.push({
+            start: seg[0].t.toISOString(),
+            end: seg[seg.length - 1].t.toISOString(),
+            count: cnt,
+            uniqueTp: new Set(seg.map(s => s.tp)).size,
+            durationMin: Math.round((seg[seg.length - 1].t - seg[0].t) / 60000)
+          });
+          j = k;
+        } else {
+          j++;
+        }
+      }
+
+      // 3) afterHours — доля закрытий с локальным часом <7 или >=21 (TZ Europe/Moscow).
+      let afterCnt = 0;
+      for (const c of closes) { const h = c.t.getHours(); if (h < 7 || h >= 21) afterCnt++; }
+      const afterHoursShare = totalClosed > 0 ? afterCnt / totalClosed : 0;
+
+      // 4) templateComments — одинаковый нормализованный resComment, count>=5 на РАЗНЫХ ТП.
+      const commentMap = new Map();
+      for (const x of items) {
+        const norm = normComment(x.resComment);
+        if (!norm) continue;
+        if (!commentMap.has(norm)) commentMap.set(norm, { text: String(x.resComment || '').trim(), tps: new Set(), count: 0 });
+        const e = commentMap.get(norm); e.count++; e.tps.add(x.tpName);
+      }
+      const templateComments = [];
+      for (const e of commentMap.values()) {
+        if (e.count >= 5 && e.tps.size >= 2) templateComments.push({ text: e.text.slice(0, 200), count: e.count, tpCount: e.tps.size });
+      }
+      templateComments.sort((a, b) => b.count - a.count);
+
+      // 5) duplicatePhotos — ключ original_name|size, встречается на РАЗНЫХ ТП.
+      const photoMap = new Map();
+      for (const x of items) {
+        for (const att of parseAtt(x.attachments)) {
+          const name = att && att.original_name;
+          const size = att && att.size;
+          if (!name || size == null) continue;
+          const key = `${name}|${size}`;
+          if (!photoMap.has(key)) photoMap.set(key, { name, tps: new Set() });
+          photoMap.get(key).tps.add(x.tpName);
+        }
+      }
+      const duplicatePhotos = [];
+      for (const e of photoMap.values()) {
+        if (e.tps.size >= 2) duplicatePhotos.push({ name: e.name, tpCount: e.tps.size });
+      }
+      duplicatePhotos.sort((a, b) => b.tpCount - a.tpCount);
+
+      // 6) recheckFail — доля error среди перепроверенных (ok/error).
+      const rechecked = items.filter(x => x.recheckResult === 'ok' || x.recheckResult === 'error');
+      const checked = rechecked.length;
+      const failed = rechecked.filter(x => x.recheckResult === 'error').length;
+      const failShare = checked > 0 ? failed / checked : 0;
+      const recheckFailFlag = failShare > 0.4 && checked >= 5;
+
+      // Скоринг 0..100
+      let score = 0;
+      const reasons = [];
+      if (ratio > 2) {
+        score += 45;
+        reasons.push(`Пик закрытий ${maxTpInWindow} ТП за ${windowDays} дн. при ёмкости ${capacityLimit} — превышение в ${ratio.toFixed(1)} раза`);
+      } else if (ratio > 1) {
+        score += 30;
+        reasons.push(`Пик закрытий ${maxTpInWindow} ТП за ${windowDays} дн. при ёмкости ${capacityLimit} — превышение в ${ratio.toFixed(1)} раза`);
+      }
+      if (batches.length > 0) {
+        score += Math.min(30, batches.length * 10);
+        reasons.push(`Пакетные закрытия: ${batches.length} кластер(ов) по ≥${batchCount} закрытий в пределах ${batchMinutes} мин`);
+      }
+      if (afterHoursShare > 0.3) {
+        score += 10;
+        reasons.push(`Доля ночных закрытий (до 7:00 / после 21:00): ${Math.round(afterHoursShare * 100)}%`);
+      }
+      if (templateComments.length > 0) {
+        score += Math.min(15, templateComments.length * 5);
+        reasons.push(`Шаблонные комментарии: ${templateComments.length} (одинаковый текст на разных ТП)`);
+      }
+      if (duplicatePhotos.length > 0) {
+        score += Math.min(30, duplicatePhotos.length * 10);
+        reasons.push(`Дубли фото: ${duplicatePhotos.length} файл(ов) встречаются на разных ТП`);
+      }
+      if (recheckFailFlag) {
+        score += 20;
+        reasons.push(`Провалы перепроверки: ${Math.round(failShare * 100)}% из ${checked} перепроверенных`);
+      }
+      score = Math.min(100, score);
+      const level = score >= 60 ? 'red' : score >= 30 ? 'yellow' : 'green';
+
+      rows.push({
+        resId: g.resId, resName: g.resName,
+        totalClosed, uniqueTp, periodDays,
+        capacity: { maxTpInWindow, windowStart: windowStart ? windowStart.toISOString() : null, capacityLimit, ratio },
+        batches, afterHoursShare, templateComments, duplicatePhotos,
+        recheck: { checked, failed, failShare },
+        score, level, reasons
+      });
+    }
+
+    rows.sort((a, b) => b.score - a.score);
+    res.json({ params, rows });
+  } catch (error) {
+    console.error('work-quality error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
