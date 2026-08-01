@@ -6597,9 +6597,34 @@ async function initializeDatabase() {
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "askueData" JSONB`,
       `ALTER TABLE "OverloadCases" ADD COLUMN IF NOT EXISTS "askueData" JSONB`,
       // Дедуп структуры перед уникальным индексом (resId,tpName,vlName): оставляем
-      // строку с МИН id в группе, перевешиваем на неё FK, удаляем дубли, ставим
-      // уникальный индекс. Идемпотентно: после чистки update/delete затрагивают 0 строк.
+      // строку с МИН id (на неё указывают старые входящие FK), но СНАЧАЛА переносим
+      // на неё актуальные данные из самой свежей строки группы (МАКС id), затем
+      // перевешиваем входящие FK, удаляем дубли, ставим уникальный индекс.
+      // Идемпотентно: HAVING count(*)>1 → после чистки update/delete затрагивают 0 строк.
       // IS NOT DISTINCT FROM — чтобы NULL-ключи группировались так же, как в GROUP BY.
+      // (1) Перенос данных МАКС id → строку МИН id. startPu/middlePu/endPu/lastUpdate —
+      //     значения самой свежей строки как есть; sectionId — первый НЕ-NULL от новых
+      //     к старым (COALESCE по группе), чтобы не потерять привязку ВЛ к секции.
+      `UPDATE "NetworkStructures" keep SET
+         "startPu"    = fresh."startPu",
+         "middlePu"   = fresh."middlePu",
+         "endPu"      = fresh."endPu",
+         "lastUpdate" = fresh."lastUpdate",
+         "sectionId"  = fresh."sectionId"
+       FROM (
+         SELECT
+           (array_agg(id ORDER BY id ASC))[1]                                      AS min_id,
+           (array_agg("startPu"    ORDER BY id DESC))[1]                           AS "startPu",
+           (array_agg("middlePu"   ORDER BY id DESC))[1]                           AS "middlePu",
+           (array_agg("endPu"      ORDER BY id DESC))[1]                           AS "endPu",
+           (array_agg("lastUpdate" ORDER BY id DESC))[1]                           AS "lastUpdate",
+           (array_agg("sectionId"  ORDER BY id DESC) FILTER (WHERE "sectionId" IS NOT NULL))[1] AS "sectionId"
+         FROM "NetworkStructures"
+         GROUP BY "resId","tpName","vlName"
+         HAVING count(*) > 1
+       ) fresh
+       WHERE keep.id = fresh.min_id`,
+      // (2) Перевес входящих FK на строку МИН id.
       `UPDATE "PuStatuses" t SET "networkStructureId" = k.min_id
          FROM "NetworkStructures" ns
          JOIN (SELECT "resId","tpName","vlName", MIN(id) AS min_id FROM "NetworkStructures"
@@ -6641,6 +6666,20 @@ async function initializeDatabase() {
           AND ns.id <> k.min_id`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_netstruct_unique ON "NetworkStructures" ("resId","tpName","vlName")`
     ];
+
+    // Лог дублей структуры ДО чистки (виден в логах Amvera). Дедуп идёт в цикле ниже.
+    const dupCountSql = `
+      SELECT COALESCE(SUM(cnt - 1), 0)::int AS to_delete, COUNT(*)::int AS groups
+      FROM (SELECT count(*) AS cnt FROM "NetworkStructures"
+            GROUP BY "resId","tpName","vlName" HAVING count(*) > 1) g`;
+    if (sequelize.getDialect() === 'postgres') {
+      try {
+        const [rows] = await sequelize.query(dupCountSql);
+        const r = rows[0] || {};
+        console.log(`[dedup NetworkStructures] ДО чистки: групп-дублей ${r.groups || 0}, строк к удалению ${r.to_delete || 0}`);
+      } catch (e) { console.warn('[dedup NetworkStructures] count before failed:', e.message); }
+    }
+
     for (const stmt of indexStatements) {
       try {
         await sequelize.query(stmt);
@@ -6649,6 +6688,15 @@ async function initializeDatabase() {
       }
     }
     console.log('Performance indexes ensured');
+
+    // Лог дублей структуры ПОСЛЕ чистки — должно быть 0/0 (иначе смотреть warn выше).
+    if (sequelize.getDialect() === 'postgres') {
+      try {
+        const [rows] = await sequelize.query(dupCountSql);
+        const r = rows[0] || {};
+        console.log(`[dedup NetworkStructures] ПОСЛЕ чистки: групп-дублей ${r.groups || 0}, строк к удалению ${r.to_delete || 0}`);
+      } catch (e) { console.warn('[dedup NetworkStructures] count after failed:', e.message); }
+    }
 
     // Backfill помесячных пиков из текущих lastPeakKw/lastPeakAt секций (однократно,
     // идемпотентно через ON CONFLICT «максимум побеждает»). Повторный старт не ломает.
