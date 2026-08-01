@@ -1176,18 +1176,6 @@ const uploadExcel = multer({
   }
 });
 
-// Обработчик ошибок multer
-app.use((error, req, res, next) => {
-  if (error instanceof multer.MulterError) {
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ 
-        error: 'Файл слишком большой. Максимальный размер: 10MB' 
-      });
-    }
-  }
-  next(error);
-});
-
 // Email сервис (SMTP — Яндекс по умолчанию, всё переопределяется env).
 const createEmailTransporter = () => {
   return nodemailer.createTransport({
@@ -6497,6 +6485,20 @@ if (fs.existsSync(FRONTEND_DIST)) {
     res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
   });
 }
+
+// Обработчик ошибок multer — ДОЛЖЕН стоять ПОСЛЕ всех роутов и SPA-fallback,
+// иначе Express не отдаст ему ошибки роутов, объявленных ниже. На не-multer
+// ошибки не влияет (next(error)).
+app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        error: 'Файл слишком большой. Максимальный размер: 10MB'
+      });
+    }
+  }
+  next(error);
+});
 
 // =====================================================
 // ИНИЦИАЛИЗАЦИЯ БД И ЗАПУСК СЕРВЕРА
