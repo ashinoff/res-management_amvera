@@ -391,6 +391,19 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-08-01** — «Превышение Pном»: значки+счётчики у вкладок и удаление кейсов (админ).
+  (1) Вкладки этапов теперь «значок + подпись + крупный ЦВЕТНОЙ счётчик» (не «(N)»):
+  `TAB_META` — значок (`IconStageLimit`/`IconWrench`/`IconStageRecheck`/`IconCheck`),
+  свечение (red/amber/blue/green, формат как всегда, hover-усиление .12s) и цвет числа
+  (`.po-tab-count` 26px, tabular-nums). (2) Удаление кейсов для админа: чекбоксы на
+  карточках (`.notification-checkbox-left`), панель «Удалить выбранные (N)»
+  (`.po-bulk-bar`) и корзина `IconTrash` с красным свечением в конце карточки; клики
+  по чекбоксу/корзине не открывают детали (stopPropagation); подтверждение — confirm
+  `ModalShell`. Право — переиспользован **`notifications_delete`** (`canDeleteCases =
+  isAdmin && hasPerm('notifications_delete')`). (3) Backend `POST /api/overload/delete-bulk`
+  (`checkRole(['admin'])` + `requirePerm('notifications_delete')`): удаляет
+  `OverloadCase` по ids, чистит висящие power_overload-уведомления затронутых секций.
+  node --check / npm run build — ОК.
 - **2026-07-31** — «Превышение Pном»: развели этапы по принципу «каждый видит свою
   работу» (одно меню). Backend `GET /api/overload`: без явного `?stage` применяется
   дефолтная область по доступу — АСКУЭ (право overload_askue, не админ): `askue_limit`

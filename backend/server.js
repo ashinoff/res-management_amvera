@@ -2190,6 +2190,30 @@ app.post('/api/overload/:caseId/res-complete',
     }
 });
 
+// Удаление кейсов перегруза (админ, право notifications_delete — то же, что у
+// удаления уведомлений). Чистит и висящие power_overload-уведомления секций.
+app.post('/api/overload/delete-bulk',
+  authenticateToken,
+  checkRole(['admin']),
+  requirePerm('notifications_delete'),
+  async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Boolean) : [];
+      if (ids.length === 0) return res.status(400).json({ error: 'Не выбраны записи для удаления' });
+      const cases = await OverloadCase.findAll({ where: { id: { [Op.in]: ids } }, attributes: ['id', 'sectionId'] });
+      const sectionIds = [...new Set(cases.map(c => c.sectionId).filter(Boolean))];
+      const deleted = await OverloadCase.destroy({ where: { id: { [Op.in]: ids } } });
+      // Убрать возможные висящие уведомления перегруза по затронутым секциям.
+      for (const sid of sectionIds) {
+        try { await removeSectionOverloadNotifs(sid); } catch { /* noop */ }
+      }
+      res.json({ success: true, deleted });
+    } catch (error) {
+      console.error('overload delete-bulk error:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+});
+
 // Обработка файла профиля мощности (Пирамида): анализатор → матчинг секций по
 // техучёту → обновление секций/кейсов/уведомлений. Переиспользуется роутом
 // /api/upload/analyze и почтовым приёмником. Файл НЕ удаляет (это делает вызывающий).

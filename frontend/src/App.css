@@ -7422,6 +7422,18 @@ tr.selected:hover,
 .ico-glow-amber { color: #d97706; filter: drop-shadow(0 0 4px rgba(217,119,6,.85)); }
 .ico-dim { color: var(--text-faint); opacity: .55; filter: none; }
 
+/* Вкладки «Превышение Pном»: значок + подпись + крупный цветной счётчик */
+.po-tab--rich { display: inline-flex; align-items: center; gap: 8px; }
+.po-tab-ico { display: inline-flex; transition: filter .12s ease; }
+.po-tab--rich:hover .po-tab-ico.ico-glow-red { filter: drop-shadow(0 0 7px rgba(239,68,68,.95)); }
+.po-tab--rich:hover .po-tab-ico.ico-glow-amber { filter: drop-shadow(0 0 7px rgba(217,119,6,.95)); }
+.po-tab--rich:hover .po-tab-ico.ico-glow-blue { filter: drop-shadow(0 0 7px rgba(59,130,246,.95)); }
+.po-tab--rich:hover .po-tab-ico.ico-glow-green { filter: drop-shadow(0 0 7px rgba(22,163,74,.95)); }
+.po-tab-count { font-size: 26px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+/* Панель массового удаления кейсов */
+.po-bulk-bar { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; font-size: 13.5px; }
+.po-del-btn { background: transparent; border: none; cursor: pointer; padding: 4px; }
+
 /* Пояснение «чего ждём» на read-only карточке ожидания перепроверки */
 .po-await-hint { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; font-style: italic; }
 

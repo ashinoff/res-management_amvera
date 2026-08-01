@@ -3901,6 +3901,9 @@ function PowerOverload({ selectedRes }) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(''); // id этапа-вкладки; по умолчанию — первая доступная
   const [detailsCase, setDetailsCase] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);   // выбор кейсов для удаления (админ)
+  const [delIds, setDelIds] = useState(null);            // id для подтверждения удаления
+  const [deleting, setDeleting] = useState(false);
   const [actionModal, setActionModal] = useState(null); // { c, mode: 'askue'|'res' }
   const [comment, setComment] = useState('');
   const [commentError, setCommentError] = useState(false);
@@ -3988,7 +3991,29 @@ function PowerOverload({ selectedRes }) {
   const isAdmin = user.role === 'admin' || user.isSuper;
   const askueRight = hasPerm(user, 'overload_askue');
   const isRes = user.role === 'res_responsible';
+  const canDeleteCases = isAdmin && hasPerm(user, 'notifications_delete'); // удаление кейсов = право удаления уведомлений
   const cnt = (stg) => cases.filter(c => c.stage === stg).length;
+  // Значок + цвет свечения/счётчика по вкладке-этапу.
+  const TAB_META = {
+    askue_limit:      { icon: <IconStageLimit size={22} />, glow: 'ico-glow-red', color: 'var(--red)' },
+    res_work:         { icon: <IconWrench size={20} />, glow: 'ico-glow-amber', color: 'var(--amber)' },
+    awaiting_recheck: { icon: <IconStageRecheck size={22} />, glow: 'ico-glow-blue', color: 'var(--blue, #2563eb)' },
+    completed:        { icon: <IconCheck size={20} />, glow: 'ico-glow-green', color: 'var(--green)' },
+  };
+  const toggleSel = (id) => setSelectedIds(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  const doDeleteCases = async () => {
+    if (!delIds || !delIds.length) return;
+    setDeleting(true);
+    try {
+      await api.post('/api/overload/delete-bulk', { ids: delIds });
+      setSelectedIds(s => s.filter(id => !delIds.includes(id)));
+      setDelIds(null);
+      window.dispatchEvent(new CustomEvent('notificationsUpdated'));
+      await load();
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Ошибка удаления');
+    } finally { setDeleting(false); }
+  };
   const stageTabs = [];
   if (isAdmin) {
     stageTabs.push({ id: 'askue_limit', label: 'К ограничению' });
@@ -4060,12 +4085,26 @@ function PowerOverload({ selectedRes }) {
       </div>
 
       <div className="po-tabs">
-        {stageTabs.map(t => (
-          <button key={t.id} className={`po-tab ${curTab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
-            {t.label} ({cnt(t.id)})
-          </button>
-        ))}
+        {stageTabs.map(t => {
+          const m = TAB_META[t.id] || {};
+          return (
+            <button key={t.id} className={`po-tab po-tab--rich ${curTab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
+              <span className={`po-tab-ico ${m.glow || ''}`}>{m.icon}</span>
+              <span className="po-tab-label">{t.label}</span>
+              <span className="po-tab-count" style={{ color: m.color }}>{cnt(t.id)}</span>
+            </button>
+          );
+        })}
       </div>
+
+      {canDeleteCases && selectedIds.length > 0 && (
+        <div className="po-bulk-bar">
+          <span>Выбрано: <b>{selectedIds.length}</b></span>
+          <button className="delete-selected-btn" onClick={() => setDelIds(selectedIds)}>
+            <IconTrash className="ico" /> Удалить выбранные ({selectedIds.length})
+          </button>
+        </div>
+      )}
 
       {shown.length === 0 ? (
         <div className="no-issues"><IconCheck className="ico" style={{ color: 'var(--green)' }} /> Случаев нет</div>
@@ -4080,6 +4119,12 @@ function PowerOverload({ selectedRes }) {
               <div key={c.id} className="notification-compact power_overload"
                    onClick={() => setDetailsCase(c)} title="Открыть подробности">
                 <div className="notification-narrow-content">
+                  {canDeleteCases && (
+                    <input type="checkbox" className="notification-checkbox-left"
+                      checked={selectedIds.includes(c.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleSel(c.id)} />
+                  )}
                   <div className="po-indicator">
                     <span className={`status-box ${indClass}`}></span>
                   </div>
@@ -4107,12 +4152,34 @@ function PowerOverload({ selectedRes }) {
                     {c.stage === 'awaiting_recheck' && (
                       <span className="po-plaque">Ожидает перепроверки</span>
                     )}
+                    {canDeleteCases && (
+                      <button className="btn-icon danger po-del-btn" title="Удалить кейс"
+                        onClick={(e) => { e.stopPropagation(); setDelIds([c.id]); }}>
+                        <IconTrash className="ico ico-glow-red" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Подтверждение удаления кейса(ов) перегруза */}
+      {delIds && (
+        <ModalShell variant="confirm" title="Удаление кейса перегруза" className="delete-modal"
+          onClose={() => !deleting && setDelIds(null)}>
+          <div className="modal-body">
+            <p>Удалить {delIds.length > 1 ? `выбранные кейсы (${delIds.length})` : 'этот кейс'} перегруза? История этапов будет потеряна безвозвратно.</p>
+          </div>
+          <div className="modal-footer">
+            <button className="cancel-btn" onClick={() => setDelIds(null)} disabled={deleting}>Отмена</button>
+            <button className="danger-btn" onClick={doDeleteCases} disabled={deleting}>
+              {deleting ? 'Удаление...' : 'Удалить'}
+            </button>
+          </div>
+        </ModalShell>
       )}
 
       {/* Детали кейса — крупная содержательная модалка */}
