@@ -104,19 +104,20 @@ class NartisAnalyzer:
                     phase = None
                     event_type = None
                     
-                    if 'фаза A' in event:
+                    event_lower = event.lower()
+                    if 'фаза a' in event_lower or 'фаза а' in event_lower:
                         phase = 'A'
-                    elif 'фаза B' in event:
+                    elif 'фаза b' in event_lower or 'фаза в' in event_lower:
                         phase = 'B'
-                    elif 'фаза C' in event:
+                    elif 'фаза c' in event_lower or 'фаза с' in event_lower:
                         phase = 'C'
                     
                     if phase:
-                        if 'Окончание провала' in event:
+                        if 'окончание провала' in event_lower:
                             event_type = 'undervoltage'
                             if voltage >= self.UNDERVOLTAGE_THRESHOLD:
                                 continue
-                        elif 'Окончание перенапряжения' in event:
+                        elif 'окончание перенапряжения' in event_lower:
                             event_type = 'overvoltage'
                             if voltage <= self.OVERVOLTAGE_THRESHOLD:
                                 continue

@@ -76,11 +76,11 @@ class EnergomeraAnalyzer:
                     event_lower = event.lower()
                     
                     # Определяем фазу (Фаза А, Фаза B, Фаза С)
-                    if 'фаза а' in event_lower:
+                    if 'фаза a' in event_lower or 'фаза а' in event_lower:
                         phase = 'A'
-                    elif 'фаза b' in event_lower:
+                    elif 'фаза b' in event_lower or 'фаза в' in event_lower:
                         phase = 'B'
-                    elif 'фаза с' in event_lower or 'фаза c' in event_lower:
+                    elif 'фаза c' in event_lower or 'фаза с' in event_lower:
                         phase = 'C'
                     
                     # Определяем тип события
