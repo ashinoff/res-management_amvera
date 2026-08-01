@@ -2467,26 +2467,29 @@ app.post('/api/upload/analyze',
       
       // Запускаем анализ с передачей оригинального имени файла
       console.log('Starting analysis...');
+      // Гарантированное удаление temp-файла на ЛЮБОМ исходе analyzeFile
+      // (wrong_period, code!==0, таймаут, «Python недоступен», ошибка JSON) — finally.
+      try {
       const analysisResult = await analyzeFile(
-        req.file.path, 
-        type, 
+        req.file.path,
+        type,
         req.file.originalname, // передаем оригинальное имя
         requiredPeriod,
         userId
       );
-      
+
       console.log('Analysis result:', {
         processed: analysisResult.processed.length,
         errors: analysisResult.errors.length
       });
-      
+
       // Обновляем историю
       await uploadRecord.update({
         processedCount: analysisResult.processed.length,
         errorCount: analysisResult.errors.length,
         status: 'completed'
       });
-      
+
       // Отправляем уведомления если есть ошибки
       if (analysisResult.errors.length > 0) {
         console.log(`Creating notifications for ${analysisResult.errors.length} errors`);
@@ -2498,7 +2501,7 @@ app.post('/api/upload/analyze',
           // НЕ падаем, продолжаем работу!
         }
       }
-      
+
       // Возвращаем результат
       res.json({
         success: true,
@@ -2507,7 +2510,10 @@ app.post('/api/upload/analyze',
         errors: analysisResult.errors.length,
         details: analysisResult.processed
       });
-      
+      } finally {
+        try { fs.unlinkSync(req.file.path); } catch (e) {}
+      }
+
     } catch (error) {
       console.error('Upload analyze error:', error);
       
