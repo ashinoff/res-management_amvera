@@ -391,6 +391,26 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-08-01** — Багфиксы по код-ревью (8 коммитов `948c514`…`2e89b6e`, по 1 на пункт).
+  #1 Утечка пула БД: в 6 роутах (network/clear-all, network/delete-selected,
+  documents/delete-bulk, history/clear-pu, history/clear-tp [+ поиск ПУ и
+  `puNumbers===0`], history/clear-all) валидация password/ids перенесена ВЫШЕ
+  `sequelize.transaction()`; остальные транзакц. роуты проверены — там rollback перед
+  early-return либо return только из catch. #2 Дубли структуры: в `initializeDatabase()`
+  (конец indexStatements) идемпотентная чистка дублей `NetworkStructures` (перевес FK
+  networkStructureId на MIN id группы resId,tpName,vlName; IS NOT DISTINCT FROM) +
+  `idx_netstruct_unique`; в upsert upload-full-structure — `conflictFields`. #3 Cloudinary
+  вынесен из транзакций (notifications/delete-bulk, documents/delete-bulk) по образцу
+  purge: сбор public_id → commit → `purgeCloudinary`; ошибки → `cloudinaryErrors`, форматы
+  ответов сохранены. #4 PDF-сироты в documents/record/:recordId → `purgeCloudinary`.
+  #5 multer error-middleware перенесён в конец файла (после роутов и SPA-fallback).
+  #6 Анализаторы (energomera/nartis/rim): детекция фаз по event_lower с ОБЕИМИ буквами
+  (лат+кир), в nartis + «окончание провала/перенапряжения» через event_lower. #7
+  `SYSTEM_USER_ID` (из суперадмина в initializeDatabase) вместо хардкода `fromUserId: 1`
+  (4 места). #8 upload/analyze (не-profile): analyzeFile обёрнут в try/finally с
+  гарантированным `fs.unlinkSync` temp-файла. Проверки: node --check после каждого,
+  py_compile analyzers/*.py (п.6), npx vite build в конце — всё зелёное. Логику,
+  форматы API, поллинг/кеши/лимиты и фронт (кроме сборки) не трогал.
 - **2026-08-01** — «Превышение Pном»: значки+счётчики у вкладок и удаление кейсов (админ).
   (1) Вкладки этапов теперь «значок + подпись + крупный ЦВЕТНОЙ счётчик» (не «(N)»):
   `TAB_META` — значок (`IconStageLimit`/`IconWrench`/`IconStageRecheck`/`IconCheck`),
