@@ -1076,6 +1076,10 @@ const PERMISSIONS = {
 // мероприятия не дали результата, ТП попадает в «Проблемные ТП».
 const PROBLEM_TP_CYCLES = 2;
 
+// id учётки для системных уведомлений (fromUserId). Проставляется в
+// initializeDatabase() из суперадмина; null — безопасный fallback (поле nullable).
+let SYSTEM_USER_ID = null;
+
 // Лёгкий кеш доступа: userId → { isSuper, permissions, ts }. TTL 60с; сбрасывается
 // при сохранении прав / изменении пользователя. Права в JWT не вшиваем — здесь истина.
 const ACCESS_TTL_MS = 60 * 1000;
@@ -4867,7 +4871,7 @@ if (result.has_errors) {
                 
                 // Создаем успешное уведомление для всех ответственных РЭС
                 await Notification.create({
-                  fromUserId: 1,
+                  fromUserId: SYSTEM_USER_ID,
                   toUserId: null, // для всех ответственных РЭС
                   resId: networkStructure.resId,
                   networkStructureId: networkStructure.id,
@@ -4905,7 +4909,7 @@ if (result.has_errors) {
                 
                 // Создаем уведомление об ошибке для РЭС
                 await Notification.create({
-                  fromUserId: 1,
+                  fromUserId: SYSTEM_USER_ID,
                   toUserId: null, // для всех ответственных РЭС
                   resId: networkStructure.resId,
                   networkStructureId: networkStructure.id,
@@ -4956,7 +4960,7 @@ if (result.has_errors) {
                   const admins = await User.findAll({ where: { role: 'admin' } });
                   for (const admin of admins) {
                     await Notification.create({
-                      fromUserId: 1,
+                      fromUserId: SYSTEM_USER_ID,
                       toUserId: admin.id,
                       resId: networkStructure.resId,
                       networkStructureId: networkStructure.id,
@@ -5996,7 +6000,7 @@ app.post('/api/admin/database-cleanup',
       };
       
       await Notification.create({
-        fromUserId: 1, // Системное уведомление
+        fromUserId: SYSTEM_USER_ID, // Системное уведомление
         toUserId: null,
         resId: puStatus.NetworkStructure.resId,
         networkStructureId: puStatus.networkStructureId,
@@ -6786,7 +6790,12 @@ async function initializeDatabase() {
       });
       console.log('Admin user created');
     }
-    
+
+    // id системной учётки для fromUserId системных уведомлений (суперадмин).
+    // Если суперадмин ещё не помечен (самый первый старт) — null (поле nullable).
+    const superUser = await User.findOne({ where: { isSuper: true }, attributes: ['id'] });
+    SYSTEM_USER_ID = superUser?.id ?? null;
+
   } catch (error) {
     console.error('Database initialization error:', error);
     process.exit(1);
