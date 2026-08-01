@@ -6902,26 +6902,23 @@ app.delete('/api/documents/record/:recordId',
         return res.status(404).json({ error: 'Запись не найдена' });
       }
       
-      // Удаляем все файлы из Cloudinary
-      if (record.attachments && record.attachments.length > 0) {
-        for (const file of record.attachments) {
-          try {
-            await cloudinary.uploader.destroy(file.public_id);
-            console.log(`Deleted file from Cloudinary: ${file.public_id}`);
-          } catch (err) {
-            console.error('Error deleting file from Cloudinary:', err);
-          }
-        }
-      }
-      
+      // Собираем public_id и удаляем через purgeCloudinary — она различает
+      // raw/image по .pdf (иначе PDF оставались сиротами в Cloudinary).
+      const fileIds = Array.isArray(record.attachments)
+        ? record.attachments.filter(f => f && f.public_id).map(f => f.public_id)
+        : [];
+
       // Удаляем запись из БД
       await record.destroy();
-      
-      res.json({ 
-        success: true, 
-        message: 'Запись и все связанные файлы удалены' 
+
+      const cl = await purgeCloudinary(fileIds);
+
+      res.json({
+        success: true,
+        message: 'Запись и все связанные файлы удалены',
+        cloudinaryErrors: cl.errors
       });
-      
+
     } catch (error) {
       console.error('Delete record error:', error);
       res.status(500).json({ error: error.message });
