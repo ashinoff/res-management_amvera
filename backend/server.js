@@ -8367,6 +8367,9 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
     const perBrigade  = numParam(req.query.perBrigade, 5, 1, 100);
     const batchMinutes = numParam(req.query.batchMinutes, 60, 1, 1440);
     const batchCount   = numParam(req.query.batchCount, 10, 2, 1000);
+    // fastDays — за сколько дней после проверки закрытие считаем «мгновенным»
+    // (для выездных мероприятий физически невыполнимо), дефолт 1.
+    const fastDays     = numParam(req.query.fastDays, 1, 0, 60);
     const resIdFilter  = req.query.resId ? parseInt(req.query.resId, 10) : null;
 
     // Период по workCompletedDate — дефолт последние 30 дней.
@@ -8389,7 +8392,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
 
     const params = {
       resId: resIdFilter, dateFrom: from.toISOString(), dateTo: to.toISOString(),
-      windowDays, brigades, perBrigade, batchMinutes, batchCount
+      windowDays, brigades, perBrigade, batchMinutes, batchCount, fastDays
     };
     if (records.length === 0) return res.json({ params, rows: [] });
 
@@ -8475,9 +8478,14 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         if (!commentMap.has(norm)) commentMap.set(norm, { text: String(x.resComment || '').trim(), tps: new Set(), count: 0 });
         const e = commentMap.get(norm); e.count++; e.tps.add(x.tpName);
       }
+      // Шаблонный коммент группируем по ГРУППЕ ТП — сразу видно, каким ТП поставили
+      // один и тот же текст (список ТП, до 50 имён).
       const templateComments = [];
       for (const e of commentMap.values()) {
-        if (e.count >= 5 && e.tps.size >= 2) templateComments.push({ text: e.text.slice(0, 200), count: e.count, tpCount: e.tps.size });
+        if (e.count >= 5 && e.tps.size >= 2) {
+          const tps = [...e.tps].sort((a, b) => a.localeCompare(b, 'ru'));
+          templateComments.push({ text: e.text.slice(0, 200), count: e.count, tpCount: tps.length, tps: tps.slice(0, 50) });
+        }
       }
       templateComments.sort((a, b) => b.count - a.count);
 
@@ -8506,13 +8514,31 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       const failShare = checked > 0 ? failed / checked : 0;
       const recheckFailFlag = failShare > 0.4 && checked >= 5;
 
-      // Перечень подозрительных ТП для ручного разбора: по каждому ТП — в чём проблема.
+      // 7) fast — «мгновенное» закрытие: дней между проверкой и мероприятиями <= fastDays.
+      //    Это ядро признака фикции: выездные работы не делаются в день/следующий день.
+      const dayDiff = (a, b) => (a && b) ? Math.round((new Date(b) - new Date(a)) / 86400000) : null;
+      let fastCount = 0;
+      for (const x of items) {
+        const d = dayDiff(x.initialCheckDate, x.workCompletedDate);
+        if (d != null && d >= 0 && d <= fastDays) fastCount++;
+      }
+      const fastShare = totalClosed > 0 ? fastCount / totalClosed : 0;
+      const fastFlag = fastShare > 0.5 && totalClosed >= 5;
+
+      // Перечень подозрительных ТП для ручного разбора: по каждому ТП — в чём проблема
+      // и по каждой записи — дата проверки → дата мероприятий и сколько дней прошло.
       const tpAgg = new Map();
       const tpEntry = (tp) => {
-        if (!tpAgg.has(tp)) tpAgg.set(tp, { tpName: tp, closedCount: 0, batch: 0, templates: [], photos: [], night: 0, recheckError: 0 });
+        if (!tpAgg.has(tp)) tpAgg.set(tp, { tpName: tp, closedCount: 0, batch: 0, templates: [], photos: [], night: 0, recheckError: 0, records: [], fast: 0 });
         return tpAgg.get(tp);
       };
-      for (const x of items) tpEntry(x.tpName).closedCount++;
+      for (const x of items) {
+        const e = tpEntry(x.tpName);
+        e.closedCount++;
+        const days = dayDiff(x.initialCheckDate, x.workCompletedDate);
+        if (days != null && days >= 0 && days <= fastDays) e.fast++;
+        e.records.push({ puNumber: x.puNumber, checkDate: x.initialCheckDate, workDate: x.workCompletedDate, days });
+      }
       for (const [tp, c] of batchTpCount) tpEntry(tp).batch += c;
       for (const e of commentMap.values()) {
         if (e.count >= 5 && e.tps.size >= 2) for (const tp of e.tps) tpEntry(tp).templates.push(e.text.slice(0, 120));
@@ -8526,12 +8552,18 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       const suspectTp = [];
       for (const e of tpAgg.values()) {
         const problems = [];
-        if (e.batch > 0) problems.push(`Пакетное закрытие (${e.batch} шт.)`);
-        if (e.templates.length) problems.push(`Шаблонный комментарий: «${e.templates[0]}»${e.templates.length > 1 ? ` и ещё ${e.templates.length - 1}` : ''}`);
-        if (e.photos.length) problems.push(`Дубль фото: ${e.photos.length === 1 ? e.photos[0] : `${e.photos.length} файл(ов)`}`);
-        if (e.night > 0) problems.push(`Закрытий в нерабочее время: ${e.night}`);
-        if (e.recheckError > 0) problems.push(`Провал перепроверки: ${e.recheckError}`);
-        if (problems.length) suspectTp.push({ tpName: e.tpName, closedCount: e.closedCount, problems });
+        const daysVals = e.records.map(r => r.days).filter(d => d != null && d >= 0);
+        const minDays = daysVals.length ? Math.min(...daysVals) : null;
+        if (e.fast > 0) problems.push(`Мгновенное закрытие: ${minDays === 0 ? 'в день проверки' : `через ${minDays} дн. после проверки`} (${e.fast} из ${e.closedCount}) — выездные работы за такой срок невыполнимы`);
+        if (e.batch > 0) problems.push(`Пакетное закрытие (${e.batch} шт.) — закрыто «пачкой» вместе с другими ТП за минуты`);
+        if (e.templates.length) problems.push(`Шаблонный комментарий: «${e.templates[0]}»${e.templates.length > 1 ? ` и ещё ${e.templates.length - 1}` : ''} — тот же текст на других ТП`);
+        if (e.photos.length) problems.push(`Дубль фото: ${e.photos.length === 1 ? e.photos[0] : `${e.photos.length} файл(ов)`} — то же фото приложено к другим ТП`);
+        if (e.night > 0) problems.push(`Закрытий в нерабочее время: ${e.night} (до 7:00 / после 21:00)`);
+        if (e.recheckError > 0) problems.push(`Провал перепроверки: ${e.recheckError} — после «мероприятий» ошибка повторилась`);
+        if (problems.length) {
+          const recs = e.records.slice().sort((a, b) => new Date(a.workDate) - new Date(b.workDate));
+          suspectTp.push({ tpName: e.tpName, closedCount: e.closedCount, minDays, fast: e.fast, problems, records: recs });
+        }
       }
       suspectTp.sort((a, b) => b.problems.length - a.problems.length || b.closedCount - a.closedCount || a.tpName.localeCompare(b.tpName, 'ru'));
 
@@ -8565,6 +8597,10 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         score += 20;
         reasons.push(`Провалы перепроверки: ${Math.round(failShare * 100)}% из ${checked} перепроверенных`);
       }
+      if (fastFlag) {
+        score += 15;
+        reasons.push(`Мгновенное закрытие: ${fastCount} из ${totalClosed} (${Math.round(fastShare * 100)}%) закрыты в течение ≤${fastDays} дн. после проверки — для выездных работ физически невыполнимо`);
+      }
       score = Math.min(100, score);
       const level = score >= 60 ? 'red' : score >= 30 ? 'yellow' : 'green';
 
@@ -8574,6 +8610,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         capacity: { maxTpInWindow, windowStart: windowStart ? windowStart.toISOString() : null, capacityLimit, ratio },
         batches, afterHoursShare, templateComments, duplicatePhotos,
         recheck: { checked, failed, failShare },
+        fast: { count: fastCount, share: fastShare, days: fastDays },
         suspectTp,
         score, level, reasons
       });

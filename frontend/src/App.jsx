@@ -9557,7 +9557,7 @@ function PermissionsAdmin() {
 // здесь только UI. Роль admin, работает по кнопке (без поллинга).
 const DA_LEVEL_COLOR = { red: '#B91C1C', yellow: '#B45309', green: '#15803D' };
 const DA_LEVEL_LABEL = { red: 'Высокий риск', yellow: 'Средний риск', green: 'Норма' };
-const DA_DEFAULTS = { resId: '', dateFrom: '', dateTo: '', windowDays: 4, brigades: 3, perBrigade: 5 };
+const DA_DEFAULTS = { resId: '', dateFrom: '', dateTo: '', windowDays: 4, brigades: 3, perBrigade: 5, fastDays: 1 };
 
 function DeepWorkAnalysis() {
   const [resList, setResList] = useState([]);
@@ -9592,6 +9592,7 @@ function DeepWorkAnalysis() {
       params.set('windowDays', settings.windowDays);
       params.set('brigades', settings.brigades);
       params.set('perBrigade', settings.perBrigade);
+      params.set('fastDays', settings.fastDays);
       const resp = await api.get(`/api/analytics/work-quality?${params}`);
       setData(resp.data);
       setExpanded({});
@@ -9605,7 +9606,9 @@ function DeepWorkAnalysis() {
   };
 
   const dt = (v) => v ? new Date(v).toLocaleString('ru-RU') : '—';
+  const dd = (v) => v ? new Date(v).toLocaleDateString('ru-RU') : '—';
   const pct = (v) => `${Math.round((v || 0) * 100)}%`;
+  const daysWord = (d) => d == null ? '—' : d === 0 ? 'в тот же день' : `${d} дн.`;
 
   const exportExcel = () => {
     if (!data || !data.rows.length) { alert('Нет данных для экспорта'); return; }
@@ -9618,7 +9621,8 @@ function DeepWorkAnalysis() {
       'Ёмкость': r.capacity.capacityLimit,
       'Превышение, раз': Number(r.capacity.ratio.toFixed(2)),
       '% ночных': Math.round(r.afterHoursShare * 100),
-      '% провалов перепроверки': Math.round(r.recheck.failShare * 100)
+      '% провалов перепроверки': Math.round(r.recheck.failShare * 100),
+      '% мгновенных закрытий': Math.round((r.fast?.share || 0) * 100)
     }));
     const reasonRows = [];
     data.rows.forEach(r => {
@@ -9628,7 +9632,7 @@ function DeepWorkAnalysis() {
     const scoreColor = (v) => { const n = Number(v); return n >= 60 ? XLS_COLORS.red : n >= 30 ? XLS_COLORS.amber : XLS_COLORS.green; };
     const wb = XLSX.utils.book_new();
     const ws1 = XLSX.utils.json_to_sheet(sumRows);
-    ws1['!cols'] = [{ wch: 18 }, { wch: 7 }, { wch: 9 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 22 }];
+    ws1['!cols'] = [{ wch: 18 }, { wch: 7 }, { wch: 9 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 22 }, { wch: 20 }];
     styleExportSheet(ws1, { 'Балл': scoreColor });
     XLSX.utils.book_append_sheet(wb, ws1, 'Сводка');
     const ws2 = XLSX.utils.json_to_sheet(reasonRows);
@@ -9646,6 +9650,41 @@ function DeepWorkAnalysis() {
       ws3['!cols'] = [{ wch: 18 }, { wch: 28 }, { wch: 10 }, { wch: 60 }];
       styleExportSheet(ws3);
       XLSX.utils.book_append_sheet(wb, ws3, 'ТП');
+    }
+    // Сроки: по каждой записи проверка → мероприятия и сколько дней (мгновенные — «да»).
+    const fastDaysEff = data.params.fastDays;
+    const timeRows = [];
+    data.rows.forEach(r => {
+      r.suspectTp.forEach(t => {
+        t.records.forEach(rec => {
+          const fast = rec.days != null && rec.days >= 0 && rec.days <= fastDaysEff;
+          timeRows.push({
+            'РЭС': r.resName, 'ТП': t.tpName, 'ПУ': rec.puNumber || '',
+            'Дата проверки': dd(rec.checkDate), 'Дата мероприятий': dd(rec.workDate),
+            'Дней': rec.days == null ? '' : rec.days, 'Мгновенно': fast ? 'да' : ''
+          });
+        });
+      });
+    });
+    if (timeRows.length) {
+      const ws4 = XLSX.utils.json_to_sheet(timeRows);
+      ws4['!cols'] = [{ wch: 18 }, { wch: 28 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 7 }, { wch: 11 }];
+      styleExportSheet(ws4, { 'Мгновенно': (v) => v === 'да' ? XLS_COLORS.red : null });
+      XLSX.utils.book_append_sheet(wb, ws4, 'Сроки');
+    }
+    // Шаблоны: один и тот же комментарий и группа ТП, которым он поставлен.
+    const tmplRows = [];
+    data.rows.forEach(r => {
+      r.templateComments.forEach(c => {
+        const extra = c.tpCount > (c.tps || []).length ? ` … (+${c.tpCount - (c.tps || []).length})` : '';
+        tmplRows.push({ 'РЭС': r.resName, 'Комментарий': c.text, 'Повторов': c.count, 'Кол-во ТП': c.tpCount, 'ТП': (c.tps || []).join(', ') + extra });
+      });
+    });
+    if (tmplRows.length) {
+      const ws5 = XLSX.utils.json_to_sheet(tmplRows);
+      ws5['!cols'] = [{ wch: 18 }, { wch: 50 }, { wch: 10 }, { wch: 10 }, { wch: 60 }];
+      styleExportSheet(ws5);
+      XLSX.utils.book_append_sheet(wb, ws5, 'Шаблоны');
     }
     XLSX.writeFile(wb, `Глубокий_анализ_работ_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
   };
@@ -9682,6 +9721,10 @@ function DeepWorkAnalysis() {
           <div className="filter-group">
             <label>План ТП/бригаду/день</label>
             <input type="number" min="1" max="100" value={settings.perBrigade} onChange={e => setF('perBrigade', e.target.value)} />
+          </div>
+          <div className="filter-group">
+            <label>«Мгновенно», дней</label>
+            <input type="number" min="0" max="60" value={settings.fastDays} onChange={e => setF('fastDays', e.target.value)} />
           </div>
           <div className="filter-group">
             <button className="export-btn" onClick={analyze} disabled={loading}>
@@ -9740,14 +9783,25 @@ function DeepWorkAnalysis() {
 
                     <div className="detail-section">
                       <h5>ТП для ручной проверки ({r.suspectTp.length})</h5>
+                      <div className="detail-row da-hint">Для каждого ТП: дата проверки → дата «мероприятий» и сколько дней прошло. Красным — закрытия в течение ≤{r.fast?.days ?? data.params.fastDays} дн. (мгновенно, для выезда невыполнимо) — это и считаем фикцией.</div>
                       {r.suspectTp.length ? (
                         <table className="diag-table">
-                          <thead><tr><th>ТП</th><th>Закрытий</th><th>В чём проблема</th></tr></thead>
+                          <thead><tr><th>ТП</th><th>Закр.</th><th>Проверка → мероприятия (дней)</th><th>Почему считаем фикцией</th></tr></thead>
                           <tbody>
                             {r.suspectTp.map((t, i) => (
                               <tr key={i}>
                                 <td style={{ textAlign: 'left' }}>{t.tpName}</td>
                                 <td>{t.closedCount}</td>
+                                <td style={{ textAlign: 'left' }}>
+                                  {t.records.map((rec, k) => {
+                                    const fast = rec.days != null && rec.days >= 0 && rec.days <= (r.fast?.days ?? data.params.fastDays);
+                                    return (
+                                      <div key={k} className={fast ? 'da-fast' : ''}>
+                                        {rec.puNumber ? `${rec.puNumber}: ` : ''}{dd(rec.checkDate)} → {dd(rec.workDate)} ({daysWord(rec.days)})
+                                      </div>
+                                    );
+                                  })}
+                                </td>
                                 <td style={{ textAlign: 'left' }}>
                                   <ul className="da-reasons" style={{ margin: 0 }}>
                                     {t.problems.map((p, k) => <li key={k}>{p}</li>)}
@@ -9777,14 +9831,16 @@ function DeepWorkAnalysis() {
                     <div className="detail-section">
                       <h5>Шаблонные комментарии ({r.templateComments.length})</h5>
                       {r.templateComments.length ? (
-                        <table className="diag-table">
-                          <thead><tr><th>Текст</th><th>Повторов</th><th>ТП</th></tr></thead>
-                          <tbody>
-                            {r.templateComments.map((c, i) => (
-                              <tr key={i}><td style={{ textAlign: 'left' }}>{c.text}</td><td>{c.count}</td><td>{c.tpCount}</td></tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <div className="da-tmpl-list">
+                          {r.templateComments.map((c, i) => (
+                            <div key={i} className="da-tmpl">
+                              <div className="da-tmpl-head">«{c.text}» — повторов: <b>{c.count}</b>, на <b>{c.tpCount}</b> ТП</div>
+                              <div className="da-tmpl-tps">
+                                {(c.tps || []).join(', ')}{c.tpCount > (c.tps || []).length ? ` … (+${c.tpCount - (c.tps || []).length})` : ''}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       ) : <div className="detail-row">Нет.</div>}
                     </div>
 
