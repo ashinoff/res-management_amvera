@@ -8438,6 +8438,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
 
       // 2) batches — непересекающиеся кластеры >= batchCount закрытий в batchMinutes минут.
       const batches = [];
+      const batchTpCount = new Map(); // tpName -> сколько закрытий этого ТП попало в пачки
       const winMs = batchMinutes * 60000;
       const n = closes.length;
       let j = 0;
@@ -8447,6 +8448,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         const cnt = k - j;
         if (cnt >= batchCount) {
           const seg = closes.slice(j, k);
+          for (const s of seg) batchTpCount.set(s.tp, (batchTpCount.get(s.tp) || 0) + 1);
           batches.push({
             start: seg[0].t.toISOString(),
             end: seg[seg.length - 1].t.toISOString(),
@@ -8504,6 +8506,35 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       const failShare = checked > 0 ? failed / checked : 0;
       const recheckFailFlag = failShare > 0.4 && checked >= 5;
 
+      // Перечень подозрительных ТП для ручного разбора: по каждому ТП — в чём проблема.
+      const tpAgg = new Map();
+      const tpEntry = (tp) => {
+        if (!tpAgg.has(tp)) tpAgg.set(tp, { tpName: tp, closedCount: 0, batch: 0, templates: [], photos: [], night: 0, recheckError: 0 });
+        return tpAgg.get(tp);
+      };
+      for (const x of items) tpEntry(x.tpName).closedCount++;
+      for (const [tp, c] of batchTpCount) tpEntry(tp).batch += c;
+      for (const e of commentMap.values()) {
+        if (e.count >= 5 && e.tps.size >= 2) for (const tp of e.tps) tpEntry(tp).templates.push(e.text.slice(0, 120));
+      }
+      for (const e of photoMap.values()) {
+        if (e.tps.size >= 2) for (const tp of e.tps) tpEntry(tp).photos.push(e.name);
+      }
+      for (const c of closes) { const h = c.t.getHours(); if (h < 7 || h >= 21) tpEntry(c.tp).night++; }
+      for (const x of items) if (x.recheckResult === 'error') tpEntry(x.tpName).recheckError++;
+
+      const suspectTp = [];
+      for (const e of tpAgg.values()) {
+        const problems = [];
+        if (e.batch > 0) problems.push(`Пакетное закрытие (${e.batch} шт.)`);
+        if (e.templates.length) problems.push(`Шаблонный комментарий: «${e.templates[0]}»${e.templates.length > 1 ? ` и ещё ${e.templates.length - 1}` : ''}`);
+        if (e.photos.length) problems.push(`Дубль фото: ${e.photos.length === 1 ? e.photos[0] : `${e.photos.length} файл(ов)`}`);
+        if (e.night > 0) problems.push(`Закрытий в нерабочее время: ${e.night}`);
+        if (e.recheckError > 0) problems.push(`Провал перепроверки: ${e.recheckError}`);
+        if (problems.length) suspectTp.push({ tpName: e.tpName, closedCount: e.closedCount, problems });
+      }
+      suspectTp.sort((a, b) => b.problems.length - a.problems.length || b.closedCount - a.closedCount || a.tpName.localeCompare(b.tpName, 'ru'));
+
       // Скоринг 0..100
       let score = 0;
       const reasons = [];
@@ -8543,6 +8574,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         capacity: { maxTpInWindow, windowStart: windowStart ? windowStart.toISOString() : null, capacityLimit, ratio },
         batches, afterHoursShare, templateComments, duplicatePhotos,
         recheck: { checked, failed, failShare },
+        suspectTp,
         score, level, reasons
       });
     }

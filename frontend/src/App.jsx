@@ -9635,6 +9635,18 @@ function DeepWorkAnalysis() {
     ws2['!cols'] = [{ wch: 18 }, { wch: 80 }];
     styleExportSheet(ws2);
     XLSX.utils.book_append_sheet(wb, ws2, 'Причины');
+    const tpRows = [];
+    data.rows.forEach(r => {
+      r.suspectTp.forEach(t => {
+        t.problems.forEach(p => tpRows.push({ 'РЭС': r.resName, 'ТП': t.tpName, 'Закрытий': t.closedCount, 'Проблема': p }));
+      });
+    });
+    if (tpRows.length) {
+      const ws3 = XLSX.utils.json_to_sheet(tpRows);
+      ws3['!cols'] = [{ wch: 18 }, { wch: 28 }, { wch: 10 }, { wch: 60 }];
+      styleExportSheet(ws3);
+      XLSX.utils.book_append_sheet(wb, ws3, 'ТП');
+    }
     XLSX.writeFile(wb, `Глубокий_анализ_работ_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
   };
 
@@ -9724,6 +9736,28 @@ function DeepWorkAnalysis() {
                       {r.reasons.length ? (
                         <ul className="da-reasons">{r.reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul>
                       ) : <div className="detail-row">Признаков формального закрытия не обнаружено.</div>}
+                    </div>
+
+                    <div className="detail-section">
+                      <h5>ТП для ручной проверки ({r.suspectTp.length})</h5>
+                      {r.suspectTp.length ? (
+                        <table className="diag-table">
+                          <thead><tr><th>ТП</th><th>Закрытий</th><th>В чём проблема</th></tr></thead>
+                          <tbody>
+                            {r.suspectTp.map((t, i) => (
+                              <tr key={i}>
+                                <td style={{ textAlign: 'left' }}>{t.tpName}</td>
+                                <td>{t.closedCount}</td>
+                                <td style={{ textAlign: 'left' }}>
+                                  <ul className="da-reasons" style={{ margin: 0 }}>
+                                    {t.problems.map((p, k) => <li key={k}>{p}</li>)}
+                                  </ul>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : <div className="detail-row">Подозрительных ТП не выявлено.</div>}
                     </div>
 
                     <div className="detail-section">
