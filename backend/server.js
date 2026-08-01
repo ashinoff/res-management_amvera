@@ -2579,6 +2579,7 @@ app.post('/api/network/upload-full-structure',
             middlePu: row['Середина'] ? String(row['Середина']) : null
           }, {
             returning: true,
+            conflictFields: ['resId', 'tpName', 'vlName'],
             transaction
           });
 
@@ -6591,7 +6592,51 @@ async function initializeDatabase() {
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileAt" TIMESTAMP WITH TIME ZONE`,
       // Данные АСКУЭ (значки в карточке секции) и снимок на кейсе перегруза.
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "askueData" JSONB`,
-      `ALTER TABLE "OverloadCases" ADD COLUMN IF NOT EXISTS "askueData" JSONB`
+      `ALTER TABLE "OverloadCases" ADD COLUMN IF NOT EXISTS "askueData" JSONB`,
+      // Дедуп структуры перед уникальным индексом (resId,tpName,vlName): оставляем
+      // строку с МИН id в группе, перевешиваем на неё FK, удаляем дубли, ставим
+      // уникальный индекс. Идемпотентно: после чистки update/delete затрагивают 0 строк.
+      // IS NOT DISTINCT FROM — чтобы NULL-ключи группировались так же, как в GROUP BY.
+      `UPDATE "PuStatuses" t SET "networkStructureId" = k.min_id
+         FROM "NetworkStructures" ns
+         JOIN (SELECT "resId","tpName","vlName", MIN(id) AS min_id FROM "NetworkStructures"
+               GROUP BY "resId","tpName","vlName") k
+           ON ns."resId" IS NOT DISTINCT FROM k."resId"
+          AND ns."tpName" IS NOT DISTINCT FROM k."tpName"
+          AND ns."vlName" IS NOT DISTINCT FROM k."vlName"
+        WHERE t."networkStructureId" = ns.id AND ns.id <> k.min_id`,
+      `UPDATE "Notifications" t SET "networkStructureId" = k.min_id
+         FROM "NetworkStructures" ns
+         JOIN (SELECT "resId","tpName","vlName", MIN(id) AS min_id FROM "NetworkStructures"
+               GROUP BY "resId","tpName","vlName") k
+           ON ns."resId" IS NOT DISTINCT FROM k."resId"
+          AND ns."tpName" IS NOT DISTINCT FROM k."tpName"
+          AND ns."vlName" IS NOT DISTINCT FROM k."vlName"
+        WHERE t."networkStructureId" = ns.id AND ns.id <> k.min_id`,
+      `UPDATE "CheckHistories" t SET "networkStructureId" = k.min_id
+         FROM "NetworkStructures" ns
+         JOIN (SELECT "resId","tpName","vlName", MIN(id) AS min_id FROM "NetworkStructures"
+               GROUP BY "resId","tpName","vlName") k
+           ON ns."resId" IS NOT DISTINCT FROM k."resId"
+          AND ns."tpName" IS NOT DISTINCT FROM k."tpName"
+          AND ns."vlName" IS NOT DISTINCT FROM k."vlName"
+        WHERE t."networkStructureId" = ns.id AND ns.id <> k.min_id`,
+      `UPDATE "ProblemVLs" t SET "networkStructureId" = k.min_id
+         FROM "NetworkStructures" ns
+         JOIN (SELECT "resId","tpName","vlName", MIN(id) AS min_id FROM "NetworkStructures"
+               GROUP BY "resId","tpName","vlName") k
+           ON ns."resId" IS NOT DISTINCT FROM k."resId"
+          AND ns."tpName" IS NOT DISTINCT FROM k."tpName"
+          AND ns."vlName" IS NOT DISTINCT FROM k."vlName"
+        WHERE t."networkStructureId" = ns.id AND ns.id <> k.min_id`,
+      `DELETE FROM "NetworkStructures" ns
+         USING (SELECT "resId","tpName","vlName", MIN(id) AS min_id FROM "NetworkStructures"
+                GROUP BY "resId","tpName","vlName") k
+        WHERE ns."resId" IS NOT DISTINCT FROM k."resId"
+          AND ns."tpName" IS NOT DISTINCT FROM k."tpName"
+          AND ns."vlName" IS NOT DISTINCT FROM k."vlName"
+          AND ns.id <> k.min_id`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_netstruct_unique ON "NetworkStructures" ("resId","tpName","vlName")`
     ];
     for (const stmt of indexStatements) {
       try {
