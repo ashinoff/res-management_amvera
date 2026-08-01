@@ -6704,7 +6704,14 @@ function UploadedDocuments() {
   const [showDeleteRecordModal, setShowDeleteRecordModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
-  
+  // Вид списка: таблица (как было) или плитка с предпросмотром. Выбор запоминаем.
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('documentsViewMode') || 'table');
+
+  useEffect(() => { localStorage.setItem('documentsViewMode', viewMode); }, [viewMode]);
+
+  // Файл-картинка (для миниатюры в плитке) — по mime или расширению.
+  const isImg = (f) => (f?.mime_type || '').startsWith('image/') || /\.(jpe?g|png|gif|webp)$/i.test(f?.original_name || f?.url || '');
+
   useEffect(() => {
     loadDocuments();
   }, [selectedRes]);
@@ -6818,7 +6825,16 @@ function UploadedDocuments() {
         <div className="documents-info">
           <p>Всего документов: <strong>{documents.reduce((sum, doc) => sum + (doc.attachments?.length || 0), 0)}</strong></p>
         </div>
-        
+
+        <div className="doc-view-toggle">
+          <button className={`doc-view-btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => setViewMode('table')} title="Таблица">
+            <IconFileText size={16} /> Таблица
+          </button>
+          <button className={`doc-view-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')} title="Плитка с предпросмотром">
+            <IconLayers size={16} /> Плитка
+          </button>
+        </div>
+
         {canManageFiles && selectedIds.length > 0 && (
   <button
     className="delete-selected-btn"
@@ -6829,6 +6845,7 @@ function UploadedDocuments() {
 )}
 </div>
       
+      {viewMode === 'table' ? (
       <div className="documents-table">
         <table>
           <thead>
@@ -6909,7 +6926,56 @@ function UploadedDocuments() {
           </tbody>
         </table>
       </div>
-      
+      ) : (
+        <div className="documents-grid">
+          {documents.map((doc) => {
+            const cover = (doc.attachments || []).find(isImg);
+            const fileCount = doc.attachments?.length || 0;
+            return (
+              <div key={doc.id} className={`doc-card ${selectedIds.includes(doc.id) ? 'selected' : ''}`}>
+                <div className="doc-card-thumb" onClick={() => fileCount && handleViewFile(doc.attachments)} title={fileCount ? 'Просмотреть' : 'Нет файлов'}>
+                  {cover ? (
+                    <BlobImage file={cover} alt={doc.puNumber} className="doc-thumb-img" />
+                  ) : (
+                    <div className="doc-thumb-icon">{fileCount ? <IconFileText size={44} /> : <IconPaperclip size={44} />}</div>
+                  )}
+                  {fileCount > 0 && <span className="doc-file-badge">{fileCount} файл(ов)</span>}
+                  {canManageFiles && (
+                    <label className="doc-card-check" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedIds.includes(doc.id)} onChange={() => handleSelectRecord(doc.id)} />
+                    </label>
+                  )}
+                </div>
+                <div className="doc-card-body">
+                  <div className="doc-card-title"><strong>{doc.puNumber}</strong></div>
+                  <div className="doc-card-sub">{doc.tpName} · {doc.vlName}</div>
+                  <div className="doc-card-meta">
+                    <span>{doc.uploadedBy}</span>
+                    <span>{new Date(doc.workCompletedDate).toLocaleDateString('ru-RU')}</span>
+                  </div>
+                  {doc.resComment && <div className="doc-card-comment" title={doc.resComment}>{doc.resComment}</div>}
+                  <div className="doc-card-foot">
+                    <span className={`status-badge status-${doc.status}`}>{doc.status === 'completed' ? 'Завершен' : 'На проверке'}</span>
+                    <div className="action-buttons">
+                      {fileCount > 0 && (
+                        <button className="btn-view" onClick={() => handleViewFile(doc.attachments)} title="Просмотреть">
+                          <IconEye className="ico ico-glow-blue" />
+                        </button>
+                      )}
+                      {canManageFiles && (
+                        <button className="btn-icon danger" onClick={() => { setDeleteRecordId(doc.id); setShowDeleteRecordModal(true); }} title="Удалить запись">
+                          <IconTrash className="ico ico-glow-red" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {documents.length === 0 && (
         <div className="no-data">
           <p>Пока нет загруженных документов</p>

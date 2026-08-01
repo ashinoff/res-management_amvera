@@ -3361,6 +3361,55 @@ tr.selected {
   margin-bottom: 20px;
 }
 
+/* Переключатель вида «таблица / плитка» */
+.doc-view-toggle { display: inline-flex; gap: 6px; }
+.doc-view-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: 8px;
+  background: var(--surface); color: var(--text-muted);
+  border: 1px solid var(--border); font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, color .12s ease;
+}
+.doc-view-btn:hover { border-color: var(--navy); color: var(--text); }
+.doc-view-btn.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+
+/* Плитка с предпросмотром */
+.documents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px;
+}
+.doc-card {
+  display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+  transition: border-color .12s, background .12s, box-shadow .12s;
+}
+.doc-card:hover { border-color: var(--navy); box-shadow: var(--shadow-sm); }
+.doc-card.selected { border-color: var(--accent); background: var(--accent-soft); }
+.doc-card-thumb {
+  position: relative; height: 160px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2); cursor: pointer; overflow: hidden;
+}
+.doc-thumb-img { width: 100%; height: 100%; object-fit: cover; }
+.doc-thumb-icon { color: var(--text-muted); }
+.doc-file-badge {
+  position: absolute; bottom: 8px; right: 8px;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(0,0,0,.6); color: #fff; font-size: 11px; font-weight: 600;
+}
+.doc-card-check {
+  position: absolute; top: 8px; left: 8px;
+  background: rgba(255,255,255,.9); border-radius: 6px; padding: 3px 4px; line-height: 0; cursor: pointer;
+}
+.doc-card-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.doc-card-title { font-size: 15px; color: var(--text); }
+.doc-card-sub { font-size: 12.5px; color: var(--text-muted); }
+.doc-card-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-muted); }
+.doc-card-comment { font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-card-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 6px; }
+
 .documents-table tr.selected {
   background-color: var(--accent-soft);
 }
