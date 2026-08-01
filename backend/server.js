@@ -2909,15 +2909,15 @@ app.delete('/api/network/clear-all',
   checkRole(['admin']),
   requirePerm('structure_edit'),
   async (req, res) => {
+    const { password, beforeDate } = req.body;  // ДОБАВИЛИ beforeDate
+
+    if (password !== DELETE_PASSWORD) {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
     const transaction = await sequelize.transaction();
-    
+
     try {
-      const { password, beforeDate } = req.body;  // ДОБАВИЛИ beforeDate
-      
-      if (password !== DELETE_PASSWORD) {
-        return res.status(403).json({ error: 'Неверный пароль' });
-      }
-      
       console.log('Starting data cleanup...');
       console.log('Before date:', beforeDate);
       
@@ -3049,20 +3049,20 @@ app.post('/api/network/delete-selected',
   authenticateToken,
   requirePerm('structure_edit'),
   async (req, res) => {
+    const { ids, password } = req.body;
+
+    // Проверка пароля
+    if (password !== DELETE_PASSWORD) {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Не выбраны записи для удаления' });
+    }
+
     const transaction = await sequelize.transaction();
 
     try {
-      const { ids, password } = req.body;
-
-      // Проверка пароля
-      if (password !== DELETE_PASSWORD) {
-        return res.status(403).json({ error: 'Неверный пароль' });
-      }
-
-      if (!ids || !Array.isArray(ids) || ids.length === 0) {
-        return res.status(400).json({ error: 'Не выбраны записи для удаления' });
-      }
-
       // Право не расширяет географию: не-админ удаляет только ВЛ своего РЭС.
       if (req.user.role !== 'admin') {
         const foreign = await NetworkStructure.count({
@@ -4393,19 +4393,19 @@ app.post('/api/documents/delete-bulk',
   checkRole(['admin']),
   requirePerm('files_manage'),
   async (req, res) => {
+    const { ids, password } = req.body;
+
+    if (password !== DELETE_PASSWORD) {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Не выбраны записи для удаления' });
+    }
+
     const transaction = await sequelize.transaction();
-    
+
     try {
-      const { ids, password } = req.body;
-      
-      if (password !== DELETE_PASSWORD) {
-        return res.status(403).json({ error: 'Неверный пароль' });
-      }
-      
-      if (!ids || !Array.isArray(ids) || ids.length === 0) {
-        return res.status(400).json({ error: 'Не выбраны записи для удаления' });
-      }
-      
       // Получаем все записи для удаления
       const records = await CheckHistory.findAll({
         where: { id: { [Op.in]: ids } },
@@ -7375,16 +7375,16 @@ app.delete('/api/history/clear-pu/:puNumber',
   checkRole(['admin']),
   requirePerm('checks_delete'),
   async (req, res) => {
+    const { password } = req.body;
+    const { puNumber } = req.params;
+
+    if (password !== DELETE_PASSWORD) {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
     const transaction = await sequelize.transaction();
-    
+
     try {
-      const { password } = req.body;
-      const { puNumber } = req.params;
-      
-      if (password !== DELETE_PASSWORD) {
-        return res.status(403).json({ error: 'Неверный пароль' });
-      }
-      
       // Удаляем из PuUploadHistory
       const uploadsDeleted = await PuUploadHistory.destroy({
         where: { puNumber },
@@ -7433,38 +7433,38 @@ app.post('/api/history/clear-tp',
   checkRole(['admin']),
   requirePerm('checks_delete'),
   async (req, res) => {
+    const { password, tpNames, resId } = req.body;
+
+    if (password !== DELETE_PASSWORD) {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
+    // Находим все ПУ для выбранных ТП
+    const structures = await NetworkStructure.findAll({
+      where: {
+        tpName: tpNames,
+        resId: resId
+      }
+    });
+
+    const puNumbers = [];
+    structures.forEach(s => {
+      if (s.startPu) puNumbers.push(s.startPu);
+      if (s.middlePu) puNumbers.push(s.middlePu);
+      if (s.endPu) puNumbers.push(s.endPu);
+    });
+
+    if (puNumbers.length === 0) {
+      return res.json({
+        success: true,
+        message: 'Нет ПУ для очистки',
+        deleted: { uploads: 0, checks: 0 }
+      });
+    }
+
     const transaction = await sequelize.transaction();
-    
+
     try {
-      const { password, tpNames, resId } = req.body;
-      
-      if (password !== DELETE_PASSWORD) {
-        return res.status(403).json({ error: 'Неверный пароль' });
-      }
-      
-      // Находим все ПУ для выбранных ТП
-      const structures = await NetworkStructure.findAll({
-        where: {
-          tpName: tpNames,
-          resId: resId
-        }
-      });
-      
-      const puNumbers = [];
-      structures.forEach(s => {
-        if (s.startPu) puNumbers.push(s.startPu);
-        if (s.middlePu) puNumbers.push(s.middlePu);
-        if (s.endPu) puNumbers.push(s.endPu);
-      });
-      
-      if (puNumbers.length === 0) {
-        return res.json({
-          success: true,
-          message: 'Нет ПУ для очистки',
-          deleted: { uploads: 0, checks: 0 }
-        });
-      }
-      
       // Удаляем историю
       const uploadsDeleted = await PuUploadHistory.destroy({
         where: { puNumber: puNumbers },
@@ -7513,15 +7513,15 @@ app.delete('/api/history/clear-all',
   checkRole(['admin']),
   requirePerm('checks_delete'),
   async (req, res) => {
+    const { password } = req.body;
+
+    if (password !== DELETE_PASSWORD) {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
     const transaction = await sequelize.transaction();
-    
+
     try {
-      const { password } = req.body;
-      
-      if (password !== DELETE_PASSWORD) {
-        return res.status(403).json({ error: 'Неверный пароль' });
-      }
-      
       // Удаляем всю историю
       const uploadsDeleted = await PuUploadHistory.destroy({
         where: {},
