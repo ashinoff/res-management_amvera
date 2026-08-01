@@ -3414,28 +3414,26 @@ app.post('/api/notifications/delete-bulk',
   checkRole(['admin']),
   requirePerm('notifications_delete'),
   async (req, res) => {
+    const { ids, password, deleteDocuments } = req.body; // ✅ ДОБАВИЛИ deleteDocuments
+
+    if (password !== DELETE_PASSWORD) {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Не выбраны записи для удаления' });
+    }
+
+    console.log('=== BULK DELETE NOTIFICATIONS ===');
+    console.log('Notification IDs:', ids);
+    console.log('Delete documents?', deleteDocuments);
+
     const transaction = await sequelize.transaction();
-    
+    const fileIds = [];           // public_id для удаления ПОСЛЕ commit
+    let deletedCount = 0;
+    let deletedDocumentsCount = 0;
+
     try {
-      const { ids, password, deleteDocuments } = req.body; // ✅ ДОБАВИЛИ deleteDocuments
-      
-      if (password !== DELETE_PASSWORD) {
-        await transaction.rollback();
-        return res.status(403).json({ error: 'Неверный пароль' });
-      }
-      
-      if (!ids || !Array.isArray(ids) || ids.length === 0) {
-        await transaction.rollback();
-        return res.status(400).json({ error: 'Не выбраны записи для удаления' });
-      }
-      
-      console.log('=== BULK DELETE NOTIFICATIONS ===');
-      console.log('Notification IDs:', ids);
-      console.log('Delete documents?', deleteDocuments);
-      
-      let deletedDocumentsCount = 0;
-      let deletedFilesCount = 0;
-      
       // ✅ НОВОЕ: Если нужно удалить связанные документы
       if (deleteDocuments) {
         // Находим все уведомления
@@ -3443,9 +3441,9 @@ app.post('/api/notifications/delete-bulk',
           where: { id: { [Op.in]: ids } },
           transaction
         });
-        
+
         console.log(`Found ${notifications.length} notifications to process`);
-        
+
         // Собираем уникальные номера ПУ из уведомлений
         const puNumbers = new Set();
         notifications.forEach(notif => {
@@ -3458,9 +3456,9 @@ app.post('/api/notifications/delete-bulk',
             console.error('Error parsing notification message:', e);
           }
         });
-        
+
         console.log('PU numbers to check:', Array.from(puNumbers));
-        
+
         // Находим все связанные документы в CheckHistory
         if (puNumbers.size > 0) {
           const relatedDocs = await CheckHistory.findAll({
@@ -3469,27 +3467,18 @@ app.post('/api/notifications/delete-bulk',
             },
             transaction
           });
-          
+
           console.log(`Found ${relatedDocs.length} related documents`);
-          
-          // Удаляем файлы из Cloudinary
+
+          // Собираем public_id (файлы удалим ПОСЛЕ commit — не держим коннект БД)
           for (const doc of relatedDocs) {
-            if (doc.attachments && doc.attachments.length > 0) {
+            if (Array.isArray(doc.attachments)) {
               for (const file of doc.attachments) {
-                try {
-                  const isPdf = file.public_id.toLowerCase().endsWith('.pdf');
-                  await cloudinary.uploader.destroy(file.public_id, {
-                    resource_type: isPdf ? 'raw' : 'image'
-                  });
-                  deletedFilesCount++;
-                  console.log(`✅ Deleted file: ${file.public_id}`);
-                } catch (err) {
-                  console.error(`❌ Error deleting file ${file.public_id}:`, err);
-                }
+                if (file && file.public_id) fileIds.push(file.public_id);
               }
             }
           }
-          
+
           // Удаляем записи из CheckHistory
           deletedDocumentsCount = await CheckHistory.destroy({
             where: {
@@ -3497,39 +3486,43 @@ app.post('/api/notifications/delete-bulk',
             },
             transaction
           });
-          
+
           console.log(`✅ Deleted ${deletedDocumentsCount} documents`);
         }
       }
-      
+
       // Удаляем уведомления
-      const deletedCount = await Notification.destroy({
+      deletedCount = await Notification.destroy({
         where: { id: { [Op.in]: ids } },
         transaction
       });
-      
+
       await transaction.commit();
-      
-      console.log('=== DELETE COMPLETE ===');
-      console.log(`Notifications: ${deletedCount}`);
-      console.log(`Documents: ${deletedDocumentsCount}`);
-      console.log(`Files: ${deletedFilesCount}`);
-      
-      res.json({
-        success: true,
-        message: deleteDocuments 
-          ? `Удалено:\n• Уведомлений: ${deletedCount}\n• Документов: ${deletedDocumentsCount}\n• Файлов: ${deletedFilesCount}`
-          : `Удалено уведомлений: ${deletedCount}`,
-        deletedCount,
-        deletedDocumentsCount,
-        deletedFilesCount
-      });
-      
     } catch (error) {
       await transaction.rollback();
       console.error('Bulk delete notifications error:', error);
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ error: error.message });
     }
+
+    // После commit — удаляем файлы (purgeCloudinary батчит и различает raw/image по .pdf).
+    // Ошибки Cloudinary НЕ откатывают БД — только счётчик.
+    const cl = await purgeCloudinary(fileIds);
+
+    console.log('=== DELETE COMPLETE ===');
+    console.log(`Notifications: ${deletedCount}`);
+    console.log(`Documents: ${deletedDocumentsCount}`);
+    console.log(`Files: ${cl.deleted}`);
+
+    res.json({
+      success: true,
+      message: deleteDocuments
+        ? `Удалено:\n• Уведомлений: ${deletedCount}\n• Документов: ${deletedDocumentsCount}\n• Файлов: ${cl.deleted}`
+        : `Удалено уведомлений: ${deletedCount}`,
+      deletedCount,
+      deletedDocumentsCount,
+      deletedFilesCount: cl.deleted,
+      cloudinaryErrors: cl.errors
+    });
 });
 
 // роут ДЛЯ ОТЧЕТОВ эксель
@@ -4405,47 +4398,45 @@ app.post('/api/documents/delete-bulk',
     }
 
     const transaction = await sequelize.transaction();
+    const fileIds = [];
+    let deletedCount = 0;
 
     try {
-      // Получаем все записи для удаления
+      // Получаем все записи для удаления, СОБИРАЕМ public_id (файлы удалим после commit)
       const records = await CheckHistory.findAll({
         where: { id: { [Op.in]: ids } },
         transaction
       });
-      
-      // Удаляем все файлы из Cloudinary
       for (const record of records) {
-        if (record.attachments && record.attachments.length > 0) {
+        if (Array.isArray(record.attachments)) {
           for (const file of record.attachments) {
-            try {
-              await cloudinary.uploader.destroy(file.public_id);
-              console.log(`Deleted file from Cloudinary: ${file.public_id}`);
-            } catch (err) {
-              console.error('Error deleting file from Cloudinary:', err);
-            }
+            if (file && file.public_id) fileIds.push(file.public_id);
           }
         }
       }
-      
+
       // Удаляем записи из БД
-      const deletedCount = await CheckHistory.destroy({
+      deletedCount = await CheckHistory.destroy({
         where: { id: { [Op.in]: ids } },
         transaction
       });
-      
+
       await transaction.commit();
-      
-      res.json({
-        success: true,
-        message: `Удалено записей: ${deletedCount}`,
-        deletedCount
-      });
-      
     } catch (error) {
       await transaction.rollback();
       console.error('Bulk delete error:', error);
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ error: error.message });
     }
+
+    // После commit — удаляем файлы (purgeCloudinary сам батчит и различает raw/image
+    // по .pdf). Ошибки Cloudinary НЕ откатывают БД — только счётчик.
+    const cl = await purgeCloudinary(fileIds);
+    res.json({
+      success: true,
+      message: `Удалено записей: ${deletedCount}`,
+      deletedCount,
+      cloudinaryErrors: cl.errors
+    });
 });
 
 // =====================================================
