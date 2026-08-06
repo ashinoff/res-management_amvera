@@ -391,6 +391,20 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-08-06** — Мобильная версия, ЭТАП 2 («Ожидающие мероприятий»). Всё в
+  блоке `MOBILE (2026) · Этап 2` в конце `App.css` + минимальные правки JSX.
+  (1) Карточки уведомлений до 1024px: `.notification-narrow-content` в столбик,
+  ряды действий (`.notification-narrow-actions/-actions-row/-buttons`) и кнопки
+  (`.btn-complete-green/.btn-upload-orange`) во всю ширину, ≥48px; `.notification-tp`
+  крупнее. Тулбар/фильтры (`.notifications-controls`, `.notif-toolbar`, поиск,
+  Excel) — вертикально, во всю ширину. (2) Форма выполнения — блок вложений:
+  десктоп-инпут оставлен (`.attach-desktop`), на моб. (`.attach-mobile`) — две
+  крупные кнопки «Снять фото» (`capture="environment"`) и «Выбрать из галереи/
+  файл», превью-сетка 3-в-ряд (`.attach-grid/.attach-thumb`) с удалением по тапу
+  44px; файлы теперь ДОБАВляются (append, cap 5). (3) `FileViewer`: свайп
+  (`touchstart/touchend`, без библиотек) → onNext/onPrev; на моб. модалка на весь
+  экран (`.file-viewer-container` 100vw/100dvh), фото/canvas по ширине. Поллинг/
+  логика не тронуты. `npm run build` — ОК.
 - **2026-08-06** — Мобильная версия, ЭТАП 1 (каркас: меню/кнопка). Порог —
   `@media (max-width: 1024px)`, десктоп (>1024px) не тронут. Новый мобильный CSS
   одним блоком в конце `App.css` (`/* ===== MOBILE (2026) ===== */`). Из старого

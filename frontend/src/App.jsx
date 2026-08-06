@@ -3215,25 +3215,58 @@ const loadNotifications = useCallback(async () => {
               
               <div className="form-group">
                 <label>Прикрепить фото/документы (макс. 5 файлов по 10MB)</label>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*,application/pdf"
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files).slice(0, 5);
-                    setAttachedFiles(files);
-                  }}
-                />
-                {attachedFiles.length > 0 && (
-                  <div className="attached-files-list">
-                    <p>Выбрано файлов: {attachedFiles.length}</p>
-                    {attachedFiles.map((file, idx) => (
-                      <div key={idx} className="attached-file-item">
-                        {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
-                      </div>
-                    ))}
+
+                {/* Десктоп — как было (не трогаем) */}
+                <div className="attach-desktop">
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,application/pdf"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files).slice(0, 5);
+                      setAttachedFiles(files);
+                    }}
+                  />
+                  {attachedFiles.length > 0 && (
+                    <div className="attached-files-list">
+                      <p>Выбрано файлов: {attachedFiles.length}</p>
+                      {attachedFiles.map((file, idx) => (
+                        <div key={idx} className="attached-file-item">
+                          {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Мобильный — две крупные кнопки + превью-сетка (3 в ряд) */}
+                <div className="attach-mobile">
+                  <div className="attach-actions">
+                    <label className="attach-btn">
+                      Снять фото
+                      <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                        onChange={(e) => { const inc = Array.from(e.target.files || []); setAttachedFiles(prev => [...prev, ...inc].slice(0, 5)); e.target.value = ''; }} />
+                    </label>
+                    <label className="attach-btn">
+                      Выбрать из галереи/файл
+                      <input type="file" multiple accept="image/*,application/pdf" style={{ display: 'none' }}
+                        onChange={(e) => { const inc = Array.from(e.target.files || []); setAttachedFiles(prev => [...prev, ...inc].slice(0, 5)); e.target.value = ''; }} />
+                    </label>
                   </div>
-                )}
+                  {attachedFiles.length > 0 && (
+                    <div className="attach-grid">
+                      {attachedFiles.map((file, idx) => (
+                        <div key={idx} className="attach-thumb">
+                          {file.type && file.type.startsWith('image/')
+                            ? <img src={URL.createObjectURL(file)} alt="" />
+                            : <span className="attach-thumb-doc">PDF</span>}
+                          <button type="button" className="attach-remove" aria-label="Удалить"
+                            onClick={() => setAttachedFiles(attachedFiles.filter((_, i) => i !== idx))}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             
@@ -6640,6 +6673,17 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null); // { lost: bool }
 
+  // Свайп-навигация на мобильном (без библиотек): влево — следующий, вправо — предыдущий.
+  const touchStartX = useRef(null);
+  const handleTouchStart = (e) => { touchStartX.current = e.changedTouches[0].clientX; };
+  const handleTouchEnd = (e) => {
+    if (touchStartX.current == null || files.length < 2) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    touchStartX.current = null;
+    if (Math.abs(dx) < 50) return;      // короткий тап — не свайп
+    if (dx < 0) onNext(); else onPrev();
+  };
+
   useEffect(() => {
     let dead = false, obj = null;
     setBlobUrl(null); setPdfBlob(null); setError(null); setLoading(true);
@@ -6664,7 +6708,7 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
       className="file-viewer-container"
       onClose={onClose}
     >
-        <div className="file-viewer-content">
+        <div className="file-viewer-content" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
           {loading ? (
             <div className="file-viewer-status"><RossetiLoader /></div>
           ) : error ? (
