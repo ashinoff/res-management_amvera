@@ -391,6 +391,19 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-08-06** — Мобильная версия, ЭТАП 1 (каркас: меню/кнопка). Порог —
+  `@media (max-width: 1024px)`, десктоп (>1024px) не тронут. Новый мобильный CSS
+  одним блоком в конце `App.css` (`/* ===== MOBILE (2026) ===== */`). Из старого
+  `@media (max-width:768px)` УБРАНЫ `.app{flex-direction:column}` и
+  `.main-menu{width:100%}` (остальное оставлено). `MainMenu` (`App.jsx`): состояние
+  `menuOpen`; `<nav class="main-menu">` до 1024px — off-canvas (`translateX(-100%)`,
+  `z-index:1350` — ниже модалок 1400/1500), `.open` выезжает; тёмная подложка
+  `.menu-overlay` (тап — закрыть); выбор пункта закрывает меню. Плавающая кнопка
+  `.menu-fab` (56px, градиент меню, `fixed bottom/right 16px`, только ≤1024px) с
+  красной точкой `attention` (tech_pending+problem_vl+askue_pending+powerOverload>0
+  — те же `notificationCounts`, БЕЗ второго поллинга; статичная). Контент во всю
+  ширину + `padding-bottom:80px`; шапка/`PageHeader` компактнее (заголовок в одну
+  строку с многоточием). Осциллограмма/поллинг не тронуты. `npm run build` — ОК.
 - **2026-08-01** — «Загруженные документы»: переключатель вида **Таблица / Плитка**
   (`viewMode` в `UploadedDocuments`, выбор в localStorage `documentsViewMode`).
   Плитка — сетка карточек `.doc-card` с крупным предпросмотром: первая картинка-

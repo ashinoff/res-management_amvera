@@ -295,6 +295,8 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
   });
   // Тик «пробега» осциллограммы — инкремент по каждому успешному поллу counts.
   const [sweepTick, setSweepTick] = useState(0);
+  // Мобильное выезжающее меню (до 1024px). На десктопе класс .open ни на что не влияет.
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Загружаем количество уведомлений
   useEffect(() => {
@@ -359,8 +361,23 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
 
   const visibleItems = menuItems.filter(item => item.roles.includes(userRole) && (!item.superOnly || isSuper));
 
+  // Суммарный индикатор внимания для кнопки-бургера (переиспользуем те же counts —
+  // без второго поллинга): есть ли что-то требующее действия.
+  const attention =
+    (notificationCounts.tech_pending || 0) +
+    (notificationCounts.problem_vl || 0) +
+    (notificationCounts.askue_pending || 0) +
+    (notificationCounts.powerOverload || notificationCounts.power_overload || 0) > 0;
+
   return (
-    <nav className="main-menu">
+    <>
+      {/* Тёмная подложка под выехавшим меню (видна только на мобильном при .open) */}
+      <div
+        className={`menu-overlay ${menuOpen ? 'open' : ''}`}
+        onClick={() => setMenuOpen(false)}
+        aria-hidden="true"
+      />
+    <nav className={`main-menu ${menuOpen ? 'open' : ''}`}>
       <div className="monitor-head">
         <div className="monitor-brand">
           {/* Сетка осциллографа (тонкие белые квадраты), отцентрована по средней
@@ -388,7 +405,7 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
       {visibleItems.map(item => (
         <button
           key={item.id}
-          onClick={() => onSectionChange(item.id)}
+          onClick={() => { onSectionChange(item.id); setMenuOpen(false); }}
           className={`menu-item ${activeSection === item.id ? 'active' : ''}`}
         >
           <span className="menu-ico">{item.icon}</span>
@@ -399,6 +416,20 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
         </button>
       ))}
     </nav>
+
+      {/* Плавающая кнопка-бургер — только до 1024px (скрыта на десктопе через CSS) */}
+      <button
+        className="menu-fab"
+        onClick={() => setMenuOpen(o => !o)}
+        aria-label={menuOpen ? 'Закрыть меню' : 'Открыть меню'}
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+        {attention && <span className="menu-fab-dot" aria-hidden="true" />}
+      </button>
+    </>
   );
 }
 
