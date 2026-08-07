@@ -391,6 +391,16 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-08-07** — Фикс «белого экрана после деплоя» (кэш статики). `backend/
+  server.js`, раздача фронтенда: (1) `/assets/*` (хэшированные бандлы Vite) —
+  отдельный `express.static` с `{ maxAge:'1y', immutable:true }`; (2) прочая
+  статика dist — `express.static` с `setHeaders`, ставящим `Cache-Control:no-cache`
+  на `index.html`; (3) SPA-фолбэк ставит `no-cache` перед `sendFile(index.html)`,
+  а для `req.path` начинающегося с `/assets/` и не найденного — честный `404`
+  (не index.html), иначе браузер исполняет HTML как JS/CSS → белый экран, когда
+  закэшированный index.html ссылается на исчезнувшие бандлы. НЕ трогал `/uploads`,
+  `/api/*`, `Cache-Control 'private, max-age=3600'` вложений. Фронт не
+  пересобирается. `node --check` — ОК.
 - **2026-08-07** — Мобильная версия, ЭТАП 6 (FileUpload/Settings/Login + финал).
   Только CSS (блок `MOBILE (2026) · Этап 6`). LoginForm: поля/кнопка ≥44px и 16px
   (iOS без зума), `.login-box` `min(400px,92vw)`, фон `background-size:cover`.

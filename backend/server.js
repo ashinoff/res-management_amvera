@@ -6487,11 +6487,31 @@ app.post('/api/admin/restore', authenticateToken, checkRole(['admin']), requireP
 // =====================================================
 const FRONTEND_DIST = path.join(__dirname, '..', 'frontend', 'dist');
 if (fs.existsSync(FRONTEND_DIST)) {
-  app.use(express.static(FRONTEND_DIST));
+  // Хэшированные бандлы Vite (/assets/*) — имя содержит хэш, кэшируем вечно.
+  app.use('/assets', express.static(path.join(FRONTEND_DIST, 'assets'), {
+    maxAge: '1y',
+    immutable: true,
+  }));
+
+  // Прочая статика из dist (index.html, favicon и т.п.) — index.html без кэша,
+  // чтобы после редеплоя браузер не держал старый index.html со ссылками на
+  // исчезнувшие бандлы.
+  app.use(express.static(FRONTEND_DIST, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  }));
+
   // SPA-fallback: любой НЕ-API путь → index.html (клиентский роутинг).
   // ДОЛЖЕН быть последним middleware, после всех /api-роутов, иначе перехватит API.
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
+    // Запрос к ассету, которого уже нет (старый бандл после редеплоя) → честный
+    // 404, а НЕ index.html: иначе браузер выполнит HTML как JS/CSS → белый экран.
+    if (req.path.startsWith('/assets/')) return res.status(404).end();
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
   });
 }
