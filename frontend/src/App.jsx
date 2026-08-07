@@ -4524,7 +4524,7 @@ function ProblemTpModal({ tp, onClose, onViewFiles }) {
   const dt = (v) => v ? new Date(v).toLocaleString('ru-RU') : '—';
   return (
     <ModalShell title={`${tp.tpName} · СШ-${toRoman(tp.sectionNumber)} — история`}
-      icon={<IconAlertTriangle size={16} />} className="details-modal" onClose={onClose}>
+      icon={<IconAlertTriangle size={16} />} className="details-modal problem-tp-modal" onClose={onClose}>
       <div className="modal-body">
         <div className="detail-section">
           <div className="detail-row"><strong>РЭС:</strong> {tp.resName}</div>

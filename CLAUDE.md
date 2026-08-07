@@ -391,6 +391,19 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-08-07** — Мобильная версия, ЭТАП 5 (аналитика/сводные таблицы). Почти
+  всё CSS (блок `MOBILE (2026) · Этап 5`). Сводные таблицы (`.report-table`,
+  `.analytics-table`, обёртки) до 1024px: `overflow-x:auto` + `thead` `sticky top`
+  + 1-я колонка `sticky left` с фоном и тонкой правой тенью; `pm-matrix`
+  (PollMap/PowerAnalysis) уже имеет `.pm-sticky` слева — добавлен только
+  sticky-thead. Контролы (`.report-controls/.analytics-controls/.poll-controls/
+  .poll-topbar`) — в столбик во всю ширину, кнопки экспорта Excel ≥44px.
+  **PollMap** (изучено): это матрица покрытия `.pm-matrix` (не список) → оставлена
+  таблицей со sticky-скроллом + контролы в столбик, карточки не нужны.
+  PowerOverload/ProblemVL — УЖЕ карточные (`.notification-compact`/`.problem-card`),
+  добавлены: горизонтальный скролл вкладок `.po-tabs`, `.problem-info-row` в
+  столбик. `ProblemTpModal` — на моб. bottom-sheet (scoped-класс `problem-tp-modal`
+  переопределяет полноэкранный вид этапа 3). Десктоп не тронут. `npm run build` — ОК.
 - **2026-08-07** — Мобильная версия, ЭТАП 4 (Структура сети). До 1024px
   десктопная сетка `.structure-grouped` скрывается, показывается упрощённый
   мобильный вид `.ns-mobile` (новый блок в `NetworkStructure` + CSS): карточки ТП
