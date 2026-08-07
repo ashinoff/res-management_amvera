@@ -7872,3 +7872,54 @@ tr.selected:hover,
   .file-viewer-navigation { display: flex; }
   .file-viewer-navigation .nav-btn { flex: 1; min-height: 44px; justify-content: center; }
 }
+
+/* ===== MOBILE (2026) · Этап 3 — модальная система ===== */
+@media (max-width: 1024px) {
+  /* --- Обычные модалки (не confirm) → на весь экран --- */
+  .modal-backdrop { padding: 0; }
+  .modal-backdrop:not(.modal-backdrop--confirm) > .modal-content {
+    width: 100vw; max-width: 100vw;
+    height: 100dvh; max-height: 100dvh;
+    border-radius: 0;
+    display: flex; flex-direction: column;
+  }
+  .modal-backdrop:not(.modal-backdrop--confirm) > .modal-content .modal-shell-body {
+    flex: 1; overflow-y: auto;
+  }
+  /* Тело без собственного ограничения высоты — скроллит один контейнер */
+  .modal-backdrop:not(.modal-backdrop--confirm) .modal-body { max-height: none; }
+
+  /* Шапка закреплена, крест/сворачивание крупнее и всегда видны (на тач нет hover) */
+  .modal-shell-bar { position: sticky; top: 0; z-index: 2; flex: 0 0 auto; }
+  .tl { width: 40px; height: 40px; }
+  .tl > * { opacity: 1; }
+  .tl-ico { width: 20px; height: 20px; }
+  .tl-min { width: 16px; }
+  .tl-green { display: none; }            /* «во весь экран» на телефоне бессмысленно */
+
+  /* Кнопки действий формы — закреплены снизу, крупные */
+  .modal-footer {
+    position: sticky; bottom: 0; z-index: 2;
+    flex-wrap: wrap;
+  }
+  .modal-footer > button { flex: 1 1 auto; min-height: 44px; justify-content: center; }
+
+  /* --- Малые подтверждающие модалки (confirm) → bottom sheet --- */
+  .modal-backdrop--confirm { align-items: flex-end; }
+  .modal-backdrop--confirm > .modal-content {
+    width: 100%; max-width: 100%;
+    border-radius: 16px 16px 0 0;
+    max-height: 90dvh;
+  }
+
+  /* --- Поля внутри модалок: одна колонка, ≥44px, 16px (iOS без зума) --- */
+  .modal-shell input:not([type="checkbox"]):not([type="radio"]),
+  .modal-shell select,
+  .modal-shell textarea { font-size: 16px; min-height: 44px; }
+  .modal-shell textarea { min-height: 88px; }
+  .pu-edit-grid { grid-template-columns: 1fr; }
+
+  /* --- Док свёрнутых окон → полоса над плавающей кнопкой, чипы ≥40px --- */
+  .modal-dock { bottom: 84px; padding: 8px 12px; }
+  .modal-dock-chip { min-height: 40px; }
+}

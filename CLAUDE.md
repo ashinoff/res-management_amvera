@@ -391,6 +391,17 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-08-07** — Мобильная версия, ЭТАП 3 (модальная система). Только CSS
+  (блок `MOBILE (2026) · Этап 3`), JSX не трогал — `ModalShell` единый. До 1024px:
+  обычные модалки (`.modal-backdrop:not(--confirm) > .modal-content`) — на весь
+  экран (100vw/100dvh, без скруглений, flex-колонка); шапка `.modal-shell-bar`
+  `sticky top`, «светофор» крупнее (`.tl` 40px) и всегда видим (`opacity:1` — на
+  тач нет hover), зелёный fullscreen-кружок скрыт; `.modal-footer` `sticky bottom`,
+  кнопки ≥44px. Confirm-модалки (`.modal-backdrop--confirm`) — bottom-sheet
+  (`align-items:flex-end`, ширина 100%, скругление сверху, `max-height:90dvh`).
+  Поля в модалках — `font-size:16px`, `min-height:44px` (iOS без зума), `.pu-edit-grid`
+  в одну колонку. Док свёрнутых окон (`.modal-dock`) поднят над кнопкой-бургером
+  (`bottom:84px`), чипы ≥40px. `npm run build` — ОК.
 - **2026-08-06** — Мобильная версия, ЭТАП 2 («Ожидающие мероприятий»). Всё в
   блоке `MOBILE (2026) · Этап 2` в конце `App.css` + минимальные правки JSX.
   (1) Карточки уведомлений до 1024px: `.notification-narrow-content` в столбик,
