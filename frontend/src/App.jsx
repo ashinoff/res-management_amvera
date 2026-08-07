@@ -616,6 +616,7 @@ function NetworkStructure({ onSectionChange } = {}) {
   const [techCase, setTechCase] = useState(null);   // активный кейс секции (если есть)
   const [loading, setLoading] = useState(true);
   const [searchTp, setSearchTp] = useState('');
+  const [expandedTp, setExpandedTp] = useState(null); // раскрытая ТП в мобильном виде
   const { user, selectedRes } = useContext(AuthContext);
   const canEditStructure = hasPerm(user, 'structure_edit');   // секции/ВЛ/удаление/привязка
   const canClearChecks = hasPerm(user, 'checks_delete');      // очистка истории по ТП
@@ -1073,7 +1074,28 @@ const executeClearHistory = async () => {
       </div>
     );
   };
-  
+
+  // Крупная тапабельная ячейка позиции для мобильного вида (ТП → ВЛ → позиции).
+  // Переиспользует ту же логику клика/статуса, что и десктопная сетка.
+  const renderMobilePosCell = (item, position) => {
+    const puNumber = position === 'start' ? item.startPu :
+                     position === 'middle' ? item.middlePu : item.endPu;
+    const status = item.PuStatuses?.find(s => s.puNumber === puNumber && s.position === position)?.status || 'not_checked';
+    const posLabel = position === 'start' ? 'Начало' : position === 'middle' ? 'Середина' : 'Конец';
+    return (
+      <button
+        key={position}
+        type="button"
+        className={`ns-cell ${puNumber ? getStatusColor(status) : 'status-empty'}`}
+        onClick={() => { if (puNumber) handleCellClick(item, position); }}
+        onDoubleClick={() => { if (canEditPu) startEdit(item, position); }}
+      >
+        <span className="ns-cell-pos">{posLabel}</span>
+        <span className="ns-cell-num">{puNumber || '—'}</span>
+      </button>
+    );
+  };
+
   if (loading) return <LoadingSpinner message="Загрузка структуры сети..." submessage="Это может занять несколько секунд" />;
   
   const filteredData = networkData.filter(item => {
@@ -1542,6 +1564,37 @@ const executeClearHistory = async () => {
             );
           });
         })()}
+      </div>
+
+      {/* Мобильный вид структуры: ТП (тап раскрывает) → ВЛ → 3 позиции крупными ячейками */}
+      <div className="ns-mobile">
+        {uniqueTps.length === 0 && <div className="ns-empty">Нет данных</div>}
+        {uniqueTps.map(tp => {
+          const tpItems = filteredData.filter(i => i.tpName === tp);
+          const open = expandedTp === tp;
+          return (
+            <div key={tp} className="ns-tp">
+              <button type="button" className="ns-tp-head" onClick={() => setExpandedTp(open ? null : tp)}>
+                <span className="ns-tp-name">{tpItems[0]?.ResUnit?.name} · ТП {tp}</span>
+                <span className="ns-tp-count">{tpItems.length} ВЛ</span>
+              </button>
+              {open && (
+                <div className="ns-vls">
+                  {tpItems.map(item => (
+                    <div key={item.id} className="ns-vl">
+                      <div className="ns-vl-name">{item.vlName || 'ВЛ'}</div>
+                      <div className="ns-positions">
+                        {renderMobilePosCell(item, 'start')}
+                        {renderMobilePosCell(item, 'middle')}
+                        {renderMobilePosCell(item, 'end')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Сведения о техучёте секции */}

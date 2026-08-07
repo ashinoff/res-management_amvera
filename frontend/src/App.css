@@ -7923,3 +7923,48 @@ tr.selected:hover,
   .modal-dock { bottom: 84px; padding: 8px 12px; }
   .modal-dock-chip { min-height: 40px; }
 }
+
+/* ===== MOBILE (2026) · Этап 4 — Структура сети ===== */
+/* Мобильный вид структуры скрыт на десктопе (там — сетка .structure-grouped) */
+.ns-mobile { display: none; }
+
+@media (max-width: 1024px) {
+  /* Десктопную сетку прячем, показываем карточки ТП */
+  .structure-grouped { display: none; }
+  .ns-mobile { display: block; }
+
+  /* Поиск по ТП — закреплён сверху, во всю ширину */
+  .structure-controls {
+    flex-direction: column; align-items: stretch; gap: 10px;
+    position: sticky; top: 0; z-index: 5;
+    background: var(--bg); padding: 8px 0;
+  }
+  .structure-controls .search-box,
+  .structure-controls .search-input { width: 100%; }
+  .action-buttons-group { flex-wrap: wrap; gap: 8px; }
+
+  /* Карточка ТП */
+  .ns-tp { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); margin-bottom: 10px; overflow: hidden; }
+  .ns-tp-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    width: 100%; padding: 14px 16px; background: var(--surface); border: none;
+    cursor: pointer; text-align: left;
+  }
+  .ns-tp-name { font-weight: 700; color: var(--text); }
+  .ns-tp-count { flex: 0 0 auto; font-size: 13px; font-weight: 600; color: var(--navy); background: var(--surface-2); border-radius: 999px; padding: 2px 10px; }
+  .ns-vls { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+  .ns-vl-name { font-weight: 600; margin-bottom: 6px; }
+
+  /* Три позиции (начало/середина/конец) — крупные тапабельные ячейки, цвет = статус */
+  .ns-positions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .ns-cell {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; min-height: 56px; padding: 6px 4px;
+    border: 1px solid var(--border); border-radius: 10px;
+    color: #fff; font-weight: 600; cursor: pointer;
+  }
+  .ns-cell-pos { font-size: 10px; opacity: .85; }
+  .ns-cell-num { font-size: 14px; word-break: break-all; text-align: center; }
+  .ns-cell.status-empty { color: var(--text-muted); }
+  .ns-empty { text-align: center; color: var(--text-muted); padding: 24px; }
+}
