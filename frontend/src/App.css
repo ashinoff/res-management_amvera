@@ -7968,3 +7968,34 @@ tr.selected:hover,
   .ns-cell.status-empty { color: var(--text-muted); }
   .ns-empty { text-align: center; color: var(--text-muted); padding: 24px; }
 }
+
+/* ===== MOBILE (2026) · Этап 6 — FileUpload / Settings / Login ===== */
+@media (max-width: 1024px) {
+  /* LoginForm — по центру, поля/кнопка ≥44px и 16px (iOS без зума), фон кроется */
+  .login-box { width: min(400px, 92vw); }
+  .login-box input { font-size: 16px; min-height: 44px; }
+  .login-box button, .login-box .btn-default { min-height: 46px; font-size: 16px; }
+  .login-container, .login-container::before, .login-container::after { background-size: cover; background-position: center; }
+
+  /* Вкладки настроек — горизонтальный скролл */
+  .settings-tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .settings-tabs button { flex: 0 0 auto; }
+
+  /* Таблицы настроек/пользователей/диагностики — sticky-скролл */
+  .users-table-container { overflow-x: auto; }
+  .users-table thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); }
+  .users-table td:first-child, .users-table th:first-child {
+    position: sticky; left: 0; background: var(--surface); box-shadow: 1px 0 0 var(--border);
+  }
+  .users-table thead th:first-child { z-index: 3; background: var(--surface-2); }
+  /* Диагностические таблицы без обёртки — сам элемент делаем прокручиваемым */
+  .diag-table, .diagnose-table { display: block; overflow-x: auto; white-space: nowrap; max-width: 100%; }
+
+  /* FileUpload / StructureSettings — зоны загрузки во всю ширину */
+  .file-upload-container, .upload-area, .file-type-selection { width: 100%; }
+  .upload-area { flex-direction: column; align-items: stretch; gap: 10px; }
+  .upload-area .file-label { width: 100%; text-align: center; }
+  .fu-pick-btn, .fu-submit-btn, .upload-submit { width: 100%; min-height: 46px; justify-content: center; }
+  /* Выбранные файлы (чипы) — переносятся, не вылезают за экран */
+  .file-chips, .fu-files { flex-wrap: wrap; }
+}

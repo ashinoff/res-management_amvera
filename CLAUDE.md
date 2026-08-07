@@ -391,6 +391,20 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-08-07** — Мобильная версия, ЭТАП 6 (FileUpload/Settings/Login + финал).
+  Только CSS (блок `MOBILE (2026) · Этап 6`). LoginForm: поля/кнопка ≥44px и 16px
+  (iOS без зума), `.login-box` `min(400px,92vw)`, фон `background-size:cover`.
+  `.settings-tabs` — горизонтальный скролл. Таблицы `.users-table` (обёртка
+  `.users-table-container`) — sticky thead + sticky 1-я колонка; `.diag-table/
+  .diagnose-table` — `display:block; overflow-x:auto`. `PermissionsAdmin`
+  (`.perm-table-wrap/.perm-sticky`) — УЖЕ sticky-скролл, не трогал. Зоны загрузки
+  (`.file-upload-container/.upload-area/.file-type-selection`) — во всю ширину,
+  кнопки ≥46px, чипы файлов переносятся. FileUpload здесь — Excel-only, «Снять
+  фото» не нужен (фото-поток сделан в этапе 2). Финал-проверка: десктоп-диф без
+  изменений (все правила в `@media ≤1024px` + 3 базовых `display:none` для НОВЫХ
+  моб-элементов), поллинг бейджей цел, чипы дока (`bottom:84px`) не перекрывают
+  кнопку-бургер (`bottom:16px`). `npm run build` — ОК. **Мобильная версия
+  завершена (этапы 1–6).**
 - **2026-08-07** — Мобильная версия, ЭТАП 5 (аналитика/сводные таблицы). Почти
   всё CSS (блок `MOBILE (2026) · Этап 5`). Сводные таблицы (`.report-table`,
   `.analytics-table`, обёртки) до 1024px: `overflow-x:auto` + `thead` `sticky top`
