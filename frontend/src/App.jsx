@@ -6069,34 +6069,46 @@ function StructureSettings() {
     }
   };
 
-  const handleDownloadTemplate = async () => {
+  // Общий хелпер скачивания xlsx по blob-эндпоинту.
+  const downloadXlsx = async (url, filename) => {
     try {
-      const response = await api.get('/api/network/structure-template', { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const response = await api.get(url, { responseType: 'blob' });
+      const objUrl = window.URL.createObjectURL(new Blob([response.data]));
       const a = document.createElement('a');
-      a.href = url;
-      a.download = 'Шаблон_структуры_сети.xlsx';
+      a.href = objUrl;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(objUrl);
     } catch (error) {
-      alert('Ошибка скачивания шаблона: ' + (error.response?.data?.error || 'Неизвестная ошибка'));
+      alert('Ошибка скачивания: ' + (error.response?.data?.error || 'Неизвестная ошибка'));
     }
   };
+
+  const handleDownloadTemplate = () => downloadXlsx('/api/network/structure-template', 'Шаблон_структуры_сети.xlsx');
+  const handleExportStructure = () => downloadXlsx('/api/network/structure-export', 'Структура_сети.xlsx');
 
   return (
     <div className="settings-section">
       <h3>Загрузка структуры сети</h3>
       <p className="section-description">
-        Загрузите Excel файл со структурой сети. Формат: РЭС | ТП | Секция | Тип | Фидер | Начало | Середина | Конец.
-        «Тип» — ВЛ/КЛ/КВЛ/ВУ (пусто → ВЛ). «Секция» — номер секции шин ТП (пусто → линия без секции).
+        Формат: РЭС | ТП | Секция | Sном, кВА | Тип | Фидер | Начало | Середина | Конец.
+        «Тип» — ВЛ/КЛ/КВЛ/ВУ. «Секция» — номер секции шин ТП. «Sном, кВА» — номинал
+        трансформатора секции. Загрузка работает как <strong>слияние</strong>: пустые
+        ячейки НЕ затирают существующее — обновляется только заполненное (можно
+        выгрузить текущую структуру, поправить нужное в Excel и залить обратно).
         Старые файлы из 6 колонок тоже загружаются.
       </p>
 
-      <button onClick={handleDownloadTemplate} className="secondary-btn" style={{ marginBottom: 12 }}>
-        <IconDownload className="ico" /> Скачать шаблон
-      </button>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+        <button onClick={handleDownloadTemplate} className="secondary-btn">
+          <IconDownload className="ico" /> Скачать шаблон
+        </button>
+        <button onClick={handleExportStructure} className="secondary-btn">
+          <IconDownload className="ico" /> Выгрузить текущую структуру
+        </button>
+      </div>
 
       <div className="upload-area">
         <input 
