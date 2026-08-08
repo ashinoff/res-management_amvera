@@ -2581,6 +2581,9 @@ app.post('/api/network/upload-full-structure',
 
       // Кэш секций ТП в рамках загрузки: key "resId|tpName|sectionNumber" -> instance.
       const sectionCache = new Map();
+      // Тех.учёт, заявленный в файле по секции (key секции -> номер ПУ). Нужен для
+      // проверки: у одной секции шин тех.учёт должен быть ОДИН, даже если линий много.
+      const techBySection = new Map();
       const LINE_TYPES = ['ВЛ', 'КЛ', 'КВЛ', 'ВУ'];
       const has = (v) => v !== undefined && v !== null && String(v).trim() !== '';
 
@@ -2637,14 +2640,28 @@ app.post('/api/network/upload-full-structure',
               }
               sectionId = section.id; sectionProvided = true;
 
-              // Номинал трансформатора секции (кВА). Пусто → не трогаем.
+              // Параметры секции — обновляем ТОЛЬКО заполненные (merge). Пусто → не трогаем.
+              const secUpd = {};
               const kvaRaw = row['Sном, кВА'] ?? row['Sном'];
               if (has(kvaRaw)) {
                 const kva = parseFloat(String(kvaRaw).replace(',', '.'));
-                if (!Number.isNaN(kva) && section.tnKva !== kva) {
-                  await section.update({ tnKva: kva }, { transaction });
+                if (!Number.isNaN(kva) && section.tnKva !== kva) secUpd.tnKva = kva;
+              }
+              const techRaw = row['Тех.учёт ПУ'];
+              if (has(techRaw)) {
+                const tech = String(techRaw).trim();
+                // Одна секция шин = один тех.учёт. Если по этой же секции в файле
+                // уже встречался ДРУГОЙ тех.учёт (много линий на секции) — это ошибка,
+                // такой тех.учёт не пишем. Разные тех.учёты допустимы лишь на разных СШ.
+                const prevTech = techBySection.get(cacheKey);
+                if (prevTech !== undefined && prevTech !== tech) {
+                  errors.push(`Разные тех.учёты на одной секции СШ-${sectionNumber} (${tpName}): «${prevTech}» и «${tech}» — тех.учёт не изменён`);
+                } else {
+                  techBySection.set(cacheKey, tech);
+                  if (section.techPuNumber !== tech) secUpd.techPuNumber = tech;
                 }
               }
+              if (Object.keys(secUpd).length > 0) await section.update(secUpd, { transaction });
             }
           }
 
@@ -2733,8 +2750,8 @@ app.post('/api/network/upload-full-structure',
 });
 
 // Единый порядок колонок формата структуры (шаблон = выгрузка = формат загрузки).
-const STRUCTURE_COLS = ['РЭС', 'ТП', 'Секция', 'Sном, кВА', 'Тип', 'Фидер', 'Начало', 'Середина', 'Конец'];
-const STRUCTURE_COL_WIDTHS = [{ wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 8 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+const STRUCTURE_COLS = ['РЭС', 'ТП', 'Секция', 'Sном, кВА', 'Тех.учёт ПУ', 'Тип', 'Фидер', 'Начало', 'Середина', 'Конец'];
+const STRUCTURE_COL_WIDTHS = [{ wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
 
 // Шаблон Excel для загрузки структуры (формат с типом линии, секцией и Sном
 // трансформатора). Отдаётся через уже подключённый XLSX. Право — structure_upload.
@@ -2745,9 +2762,9 @@ app.get('/api/network/structure-template',
     try {
       const rows = [
         STRUCTURE_COLS,
-        ['Центральный РЭС', 'ТП-101', 1, 400, 'ВЛ', 'Фабрициуса', '12345678', '', '23456789'],
-        ['Центральный РЭС', 'ТП-101', 2, 250, 'КЛ', 'Ленина', '34567890', '45678901', ''],
-        ['Центральный РЭС', 'ТП-205', '', '', 'ВУ', 'Ввод-1', '56789012', '', ''],
+        ['Центральный РЭС', 'ТП-101', 1, 400, '99887766', 'ВЛ', 'Фабрициуса', '12345678', '', '23456789'],
+        ['Центральный РЭС', 'ТП-101', 2, 250, '', 'КЛ', 'Ленина', '34567890', '45678901', ''],
+        ['Центральный РЭС', 'ТП-205', '', '', '', 'ВУ', 'Ввод-1', '56789012', '', ''],
       ];
       const ws = XLSX.utils.aoa_to_sheet(rows);
       ws['!cols'] = STRUCTURE_COL_WIDTHS;
@@ -2776,7 +2793,7 @@ app.get('/api/network/structure-export', authenticateToken, async (req, res) => 
     const lines = await NetworkStructure.findAll({
       where,
       include: [
-        { model: TpSection, as: 'section', required: false, attributes: ['sectionNumber', 'tnKva'] },
+        { model: TpSection, as: 'section', required: false, attributes: ['sectionNumber', 'tnKva', 'techPuNumber'] },
         { model: ResUnit, attributes: ['name'] }
       ],
       order: [['tpName', 'ASC'], ['vlName', 'ASC']]
@@ -2788,6 +2805,7 @@ app.get('/api/network/structure-export', authenticateToken, async (req, res) => 
         l.tpName || '',
         l.section?.sectionNumber ?? '',
         l.section?.tnKva ?? '',
+        l.section?.techPuNumber ?? '',
         l.lineType || 'ВЛ',
         l.vlName || '',
         l.startPu || '',

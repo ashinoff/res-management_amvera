@@ -1519,7 +1519,7 @@ const executeClearHistory = async () => {
             return (
               <div key={tp} className="tp-card">
                 <div className="tp-card-head">
-                  <span className="tp-card-title">{tpItems[0]?.ResUnit?.name} · ТП {tp}</span>
+                  <span className="tp-card-title">{tpItems[0]?.ResUnit?.name} · {tp}</span>
                   {canEditStructure && (
                     <button className="section-add-btn" onClick={() => openSectionModal(tp, resId)}>
                       <IconLayers className="ico" /> Добавить секцию
@@ -1611,7 +1611,7 @@ const executeClearHistory = async () => {
           return (
             <div key={tp} className="ns-tp">
               <button type="button" className="ns-tp-head" onClick={() => setExpandedTp(open ? null : tp)}>
-                <span className="ns-tp-name">{tpItems[0]?.ResUnit?.name} · ТП {tp}</span>
+                <span className="ns-tp-name">{tpItems[0]?.ResUnit?.name} · {tp}</span>
                 <span className="ns-tp-count">{tpItems.length} ВЛ</span>
               </button>
               {open && (
@@ -6093,9 +6093,11 @@ function StructureSettings() {
     <div className="settings-section">
       <h3>Загрузка структуры сети</h3>
       <p className="section-description">
-        Формат: РЭС | ТП | Секция | Sном, кВА | Тип | Фидер | Начало | Середина | Конец.
+        Формат: РЭС | ТП | Секция | Sном, кВА | Тех.учёт ПУ | Тип | Фидер | Начало | Середина | Конец.
         «Тип» — ВЛ/КЛ/КВЛ/ВУ. «Секция» — номер секции шин ТП. «Sном, кВА» — номинал
-        трансформатора секции. Загрузка работает как <strong>слияние</strong>: пустые
+        трансформатора секции. «Тех.учёт ПУ» — № ПУ техучёта секции (один на секцию:
+        разные значения на одной секции не примутся). Загрузка работает как
+        <strong>слияние</strong>: пустые
         ячейки НЕ затирают существующее — обновляется только заполненное (можно
         выгрузить текущую структуру, поправить нужное в Excel и залить обратно).
         Старые файлы из 6 колонок тоже загружаются.
