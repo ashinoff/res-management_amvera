@@ -644,6 +644,7 @@ function NetworkStructure({ onSectionChange } = {}) {
   // Для редактирования ПУ (mac-модалка: { item, position, oldValue })
   const [puEdit, setPuEdit] = useState(null);
   const [editValue, setEditValue] = useState('');
+  const [editLineType, setEditLineType] = useState('ВЛ'); // тип линии (только полная правка)
   
   // Для выбора и удаления
   const [selectedIds, setSelectedIds] = useState([]);
@@ -899,6 +900,7 @@ function NetworkStructure({ onSectionChange } = {}) {
                         item.endPu;
     setPuEdit({ item, position, oldValue: currentValue || '' });
     setEditValue(currentValue || '');
+    setEditLineType(item.lineType || 'ВЛ');
   };
 
   // Сохранить изменения ПУ из модалки
@@ -914,6 +916,10 @@ function NetworkStructure({ onSectionChange } = {}) {
       if (position === 'start') updateData.startPu = editValue || null;
       if (position === 'middle') updateData.middlePu = editValue || null;
       if (position === 'end') updateData.endPu = editValue || null;
+
+      // Тип линии шлём ТОЛЬКО при полной правке (иначе сервер вернёт 403 для
+      // structure_edit_pu). Для обычной правки ПУ поле не отправляем.
+      if (canEditStructure) updateData.lineType = editLineType;
 
       await api.put(`/api/network/structure/${item.id}`, updateData);
       await loadNetworkStructure();
@@ -1388,7 +1394,7 @@ const executeClearHistory = async () => {
                     />
                   )}
                 </div>
-                <span className="vl-name" title={item.vlName}>{item.vlName}</span>
+                <span className="vl-name" title={`${item.lineType || 'ВЛ'} ${item.vlName}`}><span className="line-type-badge">{item.lineType || 'ВЛ'}</span> {item.vlName}</span>
                 {askueCells || <><span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" /></>}
                 {renderPuCell(item, 'start')}
                 {renderPuCell(item, 'middle')}
@@ -1554,7 +1560,7 @@ const executeClearHistory = async () => {
                 {/* ВЛ без секции */}
                 {unassigned.length > 0 && (
                   <div className="section-block section-block--none">
-                    {colHeader(<span className="section-title muted">ВЛ без секции ({unassigned.length})</span>, null)}
+                    {colHeader(<span className="section-title muted">Линии без секции ({unassigned.length})</span>, null)}
                     <div className="section-lines">
                       {unassigned.map(item => renderVlRow(item, true))}
                     </div>
@@ -1582,7 +1588,7 @@ const executeClearHistory = async () => {
                 <div className="ns-vls">
                   {tpItems.map(item => (
                     <div key={item.id} className="ns-vl">
-                      <div className="ns-vl-name">{item.vlName || 'ВЛ'}</div>
+                      <div className="ns-vl-name"><span className="line-type-badge">{item.lineType || 'ВЛ'}</span> {item.vlName || ''}</div>
                       <div className="ns-positions">
                         {renderMobilePosCell(item, 'start')}
                         {renderMobilePosCell(item, 'middle')}
@@ -1755,11 +1761,23 @@ const executeClearHistory = async () => {
                     placeholder="Пусто — убрать ПУ из позиции" />
                 </div>
               </div>
+              {/* Тип линии — только при полной правке структуры (structure_edit/супер) */}
+              {canEditStructure && (
+                <div className="form-group">
+                  <label>Тип линии</label>
+                  <select value={editLineType} onChange={(e) => setEditLineType(e.target.value)}>
+                    <option value="ВЛ">ВЛ — воздушная линия</option>
+                    <option value="КЛ">КЛ — кабельная линия</option>
+                    <option value="КВЛ">КВЛ — кабельно-воздушная</option>
+                    <option value="ВУ">ВУ — вводное устройство</option>
+                  </select>
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="cancel-btn" onClick={cancelEdit}>Отмена</button>
               <button className="confirm-btn" onClick={saveEdit}
-                disabled={editValue === (puEdit.oldValue || '')}>Сохранить</button>
+                disabled={editValue === (puEdit.oldValue || '') && (!canEditStructure || editLineType === (puEdit.item.lineType || 'ВЛ'))}>Сохранить</button>
             </div>
         </ModalShell>
       )}
@@ -5992,14 +6010,36 @@ function StructureSettings() {
       setUploading(false);
     }
   };
-  
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const response = await api.get('/api/network/structure-template', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Шаблон_структуры_сети.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      alert('Ошибка скачивания шаблона: ' + (error.response?.data?.error || 'Неизвестная ошибка'));
+    }
+  };
+
   return (
     <div className="settings-section">
       <h3>Загрузка структуры сети</h3>
       <p className="section-description">
-        Загрузите Excel файл со структурой сети. Формат: РЭС | ТП | Фидер | Начало | Середина | Конец
+        Загрузите Excel файл со структурой сети. Формат: РЭС | ТП | Секция | Тип | Фидер | Начало | Середина | Конец.
+        «Тип» — ВЛ/КЛ/КВЛ/ВУ (пусто → ВЛ). «Секция» — номер секции шин ТП (пусто → линия без секции).
+        Старые файлы из 6 колонок тоже загружаются.
       </p>
-      
+
+      <button onClick={handleDownloadTemplate} className="secondary-btn" style={{ marginBottom: 12 }}>
+        <IconDownload className="ico" /> Скачать шаблон
+      </button>
+
       <div className="upload-area">
         <input 
           type="file" 

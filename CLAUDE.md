@@ -391,6 +391,24 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-08-08** — Тип линии (ВЛ/КЛ/КВЛ/ВУ) в структуре сети. **Backend**
+  (`server.js`): `NetworkStructure.lineType` (STRING, NOT NULL, default 'ВЛ',
+  validate isIn 4 значений) + миграция `ADD COLUMN IF NOT EXISTS … NOT NULL
+  DEFAULT 'ВЛ'` (старые записи → 'ВЛ'). `PUT /api/network/structure/:id` принимает
+  `lineType` только при полной правке (structure_edit/супер), валидирует;
+  structure_edit_pu → 403 (на сервере). Текст права `structure_edit` обновлён
+  («…ПУ, ВЛ/КЛ/КВЛ/ВУ, секции…»). `upload-full-structure`: новый формат
+  РЭС|ТП|Секция|Тип|Фидер|Начало|Середина|Конец — «Тип» пусто/нет колонки → 'ВЛ'
+  (старые 6-колоночные файлы грузятся), недопустимый → в errors + строку пропуск;
+  «Секция» пусто → null, есть → привязать, нет → создать `TpSection` (кэш секций
+  в рамках загрузки). Новый `GET /api/network/structure-template`
+  (`requirePerm('structure_upload')`) — .xlsx с новой шапкой и примерами.
+  **Frontend** (`App.jsx`): бейдж `.line-type-badge` с типом перед названием
+  фидера — в десктоп-таблице (`renderVlRow`) и мобильных карточках (`ns-vl-name`,
+  этап 4 не сломан); «ВЛ без секции» → «Линии без секции»; в модалке правки ПУ —
+  select типа линии (только при `canEditStructure`, шлём `lineType` лишь тогда);
+  StructureSettings — обновлена подсказка формата + кнопка «Скачать шаблон».
+  `node --check` + `npm run build` — ОК.
 - **2026-08-07** — Мобильная версия, ЭТАП 6 (FileUpload/Settings/Login + финал).
   Только CSS (блок `MOBILE (2026) · Этап 6`). LoginForm: поля/кнопка ≥44px и 16px
   (iOS без зума), `.login-box` `min(400px,92vw)`, фон `background-size:cover`.
