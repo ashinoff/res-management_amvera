@@ -2579,18 +2579,25 @@ app.post('/api/network/upload-full-structure',
       // findOrCreate; существующие в БД не трогаем.
       const puToCreate = new Map(); // puNumber -> { networkStructureId, position, status }
 
-      // Кэш секций ТП в рамках загрузки: key "resId|tpName|sectionNumber" -> id.
-      // Ищем/создаём секцию один раз, чтобы не плодить дубли и не ловить unique-индекс.
+      // Кэш секций ТП в рамках загрузки: key "resId|tpName|sectionNumber" -> instance.
       const sectionCache = new Map();
       const LINE_TYPES = ['ВЛ', 'КЛ', 'КВЛ', 'ВУ'];
+      const has = (v) => v !== undefined && v !== null && String(v).trim() !== '';
+
+      // MERGE: предзагружаем существующие линии РЭСов из файла. Пустые ячейки НЕ
+      // затирают существующие значения — обновляется только заполненное. Новые
+      // линии создаются; пропущенные поля → дефолты (тип 'ВЛ', ПУ/секция пусто).
+      const fileResIds = [...new Set(data.map(r => resByName.get(r['РЭС'])?.id).filter(Boolean))];
+      const existingLines = fileResIds.length
+        ? await NetworkStructure.findAll({ where: { resId: fileResIds }, transaction })
+        : [];
+      const lineByKey = new Map(existingLines.map(l => [`${l.resId}|${l.tpName}|${l.vlName}`, l]));
 
       // Обрабатываем каждую строку
       for (const row of data) {
         try {
-          // Ищем РЭС по полному имени из Excel
           const resName = row['РЭС'];
           const resUnit = resByName.get(resName);
-
           if (!resUnit) {
             errors.push(`Неизвестный РЭС: ${resName}`);
             continue;
@@ -2599,88 +2606,93 @@ app.post('/api/network/upload-full-structure',
           const tpName = row['ТП'] || '';
           const vlName = row['Фидер'] || '';
 
-          // Тип линии: пусто / нет колонки → 'ВЛ' (старые 6-колоночные файлы грузятся
-          // как есть); недопустимое значение → в errors, строку пропускаем (не роняем).
-          let lineType = 'ВЛ';
-          const typeRaw = row['Тип'];
-          if (typeRaw !== undefined && typeRaw !== null && String(typeRaw).trim() !== '') {
-            const t = String(typeRaw).trim();
+          // Тип линии: задан → проверяем (недопустимый → в errors, строку пропуск);
+          // пусто/нет колонки → НЕ трогаем (у существующей сохранится, у новой 'ВЛ').
+          let lineType = null, lineTypeProvided = false;
+          if (has(row['Тип'])) {
+            const t = String(row['Тип']).trim();
             if (!LINE_TYPES.includes(t)) {
               errors.push(`Недопустимый тип линии "${t}" (${tpName} · ${vlName}) — строка пропущена`);
               continue;
             }
-            lineType = t;
+            lineType = t; lineTypeProvided = true;
           }
 
-          // Секция шин: пусто → линия без секции (null). Есть у ТП → привязать;
-          // нет → создать TpSection (Sном и ПУ тех.учёта заполнят позже через UI).
-          let sectionId = null;
-          const secRaw = row['Секция'];
-          if (secRaw !== undefined && secRaw !== null && String(secRaw).trim() !== '') {
-            const sectionNumber = parseInt(String(secRaw).trim(), 10);
+          // Секция шин + номинал трансформатора (Sном, кВА). Пусто → секцию не
+          // трогаем. Задана → привязать/создать; при наличии Sном — записать на секцию.
+          let sectionId = null, sectionProvided = false;
+          if (has(row['Секция'])) {
+            const sectionNumber = parseInt(String(row['Секция']).trim(), 10);
             if (Number.isNaN(sectionNumber)) {
-              errors.push(`Некорректный номер секции "${secRaw}" (${tpName} · ${vlName}) — линия без секции`);
+              errors.push(`Некорректный номер секции "${row['Секция']}" (${tpName} · ${vlName}) — секция не изменена`);
             } else {
               const cacheKey = `${resUnit.id}|${tpName}|${sectionNumber}`;
-              if (sectionCache.has(cacheKey)) {
-                sectionId = sectionCache.get(cacheKey);
-              } else {
-                let section = await TpSection.findOne({
-                  where: { resId: resUnit.id, tpName, sectionNumber },
-                  transaction
-                });
+              let section = sectionCache.get(cacheKey);
+              if (!section) {
+                section = await TpSection.findOne({ where: { resId: resUnit.id, tpName, sectionNumber }, transaction });
                 if (!section) {
-                  section = await TpSection.create(
-                    { resId: resUnit.id, tpName, sectionNumber },
-                    { transaction }
-                  );
+                  section = await TpSection.create({ resId: resUnit.id, tpName, sectionNumber }, { transaction });
                 }
-                sectionId = section.id;
-                sectionCache.set(cacheKey, sectionId);
+                sectionCache.set(cacheKey, section);
+              }
+              sectionId = section.id; sectionProvided = true;
+
+              // Номинал трансформатора секции (кВА). Пусто → не трогаем.
+              const kvaRaw = row['Sном, кВА'] ?? row['Sном'];
+              if (has(kvaRaw)) {
+                const kva = parseFloat(String(kvaRaw).replace(',', '.'));
+                if (!Number.isNaN(kva) && section.tnKva !== kva) {
+                  await section.update({ tnKva: kva }, { transaction });
+                }
               }
             }
           }
 
-          // Создаём/обновляем запись; id берём из returning — без повторного findOne
-          const [structure] = await NetworkStructure.upsert({
-            resId: resUnit.id,
-            tpName,
-            vlName,
-            startPu: row['Начало'] ? String(row['Начало']) : null,
-            endPu: row['Конец'] ? String(row['Конец']) : null,
-            middlePu: row['Середина'] ? String(row['Середина']) : null,
-            sectionId,
-            lineType
-          }, {
-            returning: true,
-            conflictFields: ['resId', 'tpName', 'vlName'],
-            transaction
-          });
+          // Merge линии: у существующей обновляем ТОЛЬКО заполненные поля; новую создаём.
+          const key = `${resUnit.id}|${tpName}|${vlName}`;
+          let structureId;
+          const existing = lineByKey.get(key);
+          if (existing) {
+            const upd = {};
+            if (has(row['Начало'])) upd.startPu = String(row['Начало']);
+            if (has(row['Середина'])) upd.middlePu = String(row['Середина']);
+            if (has(row['Конец'])) upd.endPu = String(row['Конец']);
+            if (lineTypeProvided) upd.lineType = lineType;
+            if (sectionProvided) upd.sectionId = sectionId;
+            if (Object.keys(upd).length > 0) {
+              upd.lastUpdate = new Date();
+              await existing.update(upd, { transaction });
+            }
+            structureId = existing.id;
+          } else {
+            const created = await NetworkStructure.create({
+              resId: resUnit.id, tpName, vlName,
+              startPu: has(row['Начало']) ? String(row['Начало']) : null,
+              middlePu: has(row['Середина']) ? String(row['Середина']) : null,
+              endPu: has(row['Конец']) ? String(row['Конец']) : null,
+              lineType: lineTypeProvided ? lineType : 'ВЛ',
+              sectionId: sectionProvided ? sectionId : null
+            }, { transaction });
+            lineByKey.set(key, created);
+            structureId = created.id;
+          }
 
           processed++;
 
-          const structureId = structure?.id;
-
-          // Копим статусы для новых ПУ (первое вхождение выигрывает)
+          // Статусы только для ЗАПОЛНЕННЫХ ПУ (первое вхождение выигрывает).
           const positions = [
             { pu: row['Начало'], pos: 'start' },
             { pu: row['Конец'], pos: 'end' },
             { pu: row['Середина'], pos: 'middle' }
           ];
           for (const { pu, pos } of positions) {
-            if (pu) {
-              const key = String(pu);
-              if (!puToCreate.has(key)) {
-                puToCreate.set(key, {
-                  puNumber: key,
-                  networkStructureId: structureId,
-                  position: pos,
-                  status: 'not_checked'
-                });
+            if (has(pu)) {
+              const k = String(pu);
+              if (!puToCreate.has(k)) {
+                puToCreate.set(k, { puNumber: k, networkStructureId: structureId, position: pos, status: 'not_checked' });
               }
             }
           }
-
         } catch (err) {
           errors.push(`Ошибка в строке ${row['ТП']}-${row['Фидер']}: ${err.message}`);
         }
@@ -2720,21 +2732,25 @@ app.post('/api/network/upload-full-structure',
     }
 });
 
-// Шаблон Excel для загрузки структуры (новый формат: 8 колонок с типом линии
-// и секцией). Отдаётся через уже подключённый XLSX. Право — structure_upload.
+// Единый порядок колонок формата структуры (шаблон = выгрузка = формат загрузки).
+const STRUCTURE_COLS = ['РЭС', 'ТП', 'Секция', 'Sном, кВА', 'Тип', 'Фидер', 'Начало', 'Середина', 'Конец'];
+const STRUCTURE_COL_WIDTHS = [{ wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 8 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+
+// Шаблон Excel для загрузки структуры (формат с типом линии, секцией и Sном
+// трансформатора). Отдаётся через уже подключённый XLSX. Право — structure_upload.
 app.get('/api/network/structure-template',
   authenticateToken,
   requirePerm('structure_upload'),
   (req, res) => {
     try {
       const rows = [
-        ['РЭС', 'ТП', 'Секция', 'Тип', 'Фидер', 'Начало', 'Середина', 'Конец'],
-        ['Центральный РЭС', 'ТП-101', 1, 'ВЛ', 'Фабрициуса', '12345678', '', '23456789'],
-        ['Центральный РЭС', 'ТП-101', 2, 'КЛ', 'Ленина', '34567890', '45678901', ''],
-        ['Центральный РЭС', 'ТП-205', '', 'ВУ', 'Ввод-1', '56789012', '', ''],
+        STRUCTURE_COLS,
+        ['Центральный РЭС', 'ТП-101', 1, 400, 'ВЛ', 'Фабрициуса', '12345678', '', '23456789'],
+        ['Центральный РЭС', 'ТП-101', 2, 250, 'КЛ', 'Ленина', '34567890', '45678901', ''],
+        ['Центральный РЭС', 'ТП-205', '', '', 'ВУ', 'Ввод-1', '56789012', '', ''],
       ];
       const ws = XLSX.utils.aoa_to_sheet(rows);
-      ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+      ws['!cols'] = STRUCTURE_COL_WIDTHS;
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Структура');
       const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -2744,6 +2760,52 @@ app.get('/api/network/structure-template',
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
+});
+
+// Выгрузка ТЕКУЩЕЙ структуры сети в том же формате, что и шаблон загрузки.
+// Правишь в Excel и заливаешь обратно — загрузка merge'ит: пустые ячейки не
+// затирают, обновляется только заполненное. Просмотровый роут (по роли/РЭС).
+app.get('/api/network/structure-export', authenticateToken, async (req, res) => {
+  try {
+    const resId = req.user.role === 'admin' ? (req.query.resId || null) : req.user.resId;
+    if (req.user.role !== 'admin' && req.query.resId && req.query.resId != req.user.resId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const where = {};
+    if (resId) where.resId = resId;
+    const lines = await NetworkStructure.findAll({
+      where,
+      include: [
+        { model: TpSection, as: 'section', required: false, attributes: ['sectionNumber', 'tnKva'] },
+        { model: ResUnit, attributes: ['name'] }
+      ],
+      order: [['tpName', 'ASC'], ['vlName', 'ASC']]
+    });
+    const rows = [STRUCTURE_COLS];
+    for (const l of lines) {
+      rows.push([
+        l.ResUnit?.name || '',
+        l.tpName || '',
+        l.section?.sectionNumber ?? '',
+        l.section?.tnKva ?? '',
+        l.lineType || 'ВЛ',
+        l.vlName || '',
+        l.startPu || '',
+        l.middlePu || '',
+        l.endPu || ''
+      ]);
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = STRUCTURE_COL_WIDTHS;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Структура');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="structure-export.xlsx"');
+    res.send(buf);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // 7. ПОЛУЧЕНИЕ УВЕДОМЛЕНИЙ
