@@ -385,6 +385,16 @@ const NetworkStructure = sequelize.define('NetworkStructure', {
     type: DataTypes.INTEGER,
     allowNull: true
   },
+  // Тип линии: ВЛ (воздушная), КЛ (кабельная), КВЛ (комбинированная), ВУ (вводное
+  // устройство). Старые записи и файлы без типа → 'ВЛ'. Валидируется на сервере.
+  lineType: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'ВЛ',
+    validate: {
+      isIn: [['ВЛ', 'КЛ', 'КВЛ', 'ВУ']]
+    }
+  },
   lastUpdate: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW
@@ -6574,6 +6584,9 @@ async function initializeDatabase() {
       // доезжает без DB_ALTER (Postgres-safe). Старые ВЛ остаются с NULL.
       `ALTER TABLE "NetworkStructures" ADD COLUMN IF NOT EXISTS "sectionId" INTEGER`,
       `CREATE INDEX IF NOT EXISTS idx_netstruct_section ON "NetworkStructures" ("sectionId")`,
+      // Тип линии (ВЛ/КЛ/КВЛ/ВУ). NOT NULL DEFAULT 'ВЛ' → все существующие
+      // записи автоматически получают 'ВЛ', данные не теряются (Postgres-safe).
+      `ALTER TABLE "NetworkStructures" ADD COLUMN IF NOT EXISTS "lineType" VARCHAR(8) NOT NULL DEFAULT 'ВЛ'`,
       `CREATE INDEX IF NOT EXISTS idx_tpsection_res ON "TpSections" ("resId")`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_tpsection_unique ON "TpSections" ("resId", "tpName", "sectionNumber")`,
       // Случаи перегрузки секции (этап 3)
