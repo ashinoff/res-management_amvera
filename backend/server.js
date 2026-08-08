@@ -1070,7 +1070,7 @@ const checkRole = (roles) => {
 // опасное право добавляется ЗДЕСЬ, затем requirePerm(ключ) на роут и скрытие в UI.
 const PERMISSIONS = {
   structure_upload:     'Загрузка/обновление структуры сети',
-  structure_edit:       'Редактирование структуры (ПУ, ВЛ, секции, тех.учёты, добавление/удаление)',
+  structure_edit:       'Редактирование структуры (ПУ, ВЛ/КЛ/КВЛ/ВУ, секции, тех.учёты, добавление/удаление)',
   structure_edit_pu:    'Изменение номеров ПУ в структуре (без секций/удаления)',
   checks_delete:        'Удаление карточек проверок и истории',
   notifications_delete: 'Удаление уведомлений',
@@ -1833,6 +1833,20 @@ app.put('/api/network/structure/:id',
         }
       }
 
+      // Тип линии (ВЛ/КЛ/КВЛ/ВУ) — менять может ТОЛЬКО полная правка
+      // (structure_edit / суперадмин). Обладателю structure_edit_pu — запрещено
+      // (проверка на СЕРВЕРЕ, не только скрытие в UI).
+      if ('lineType' in req.body) {
+        if (!fullEdit) {
+          return res.status(403).json({ error: 'Менять тип линии может только полная правка структуры (structure_edit)' });
+        }
+        const LINE_TYPES = ['ВЛ', 'КЛ', 'КВЛ', 'ВУ'];
+        if (!LINE_TYPES.includes(req.body.lineType)) {
+          return res.status(400).json({ error: 'Недопустимый тип линии (ВЛ/КЛ/КВЛ/ВУ)' });
+        }
+        updates.lineType = req.body.lineType;
+      }
+
       await structure.update(updates);
 
       res.json({ success: true, message: 'Структура обновлена' });
@@ -2565,6 +2579,11 @@ app.post('/api/network/upload-full-structure',
       // findOrCreate; существующие в БД не трогаем.
       const puToCreate = new Map(); // puNumber -> { networkStructureId, position, status }
 
+      // Кэш секций ТП в рамках загрузки: key "resId|tpName|sectionNumber" -> id.
+      // Ищем/создаём секцию один раз, чтобы не плодить дубли и не ловить unique-индекс.
+      const sectionCache = new Map();
+      const LINE_TYPES = ['ВЛ', 'КЛ', 'КВЛ', 'ВУ'];
+
       // Обрабатываем каждую строку
       for (const row of data) {
         try {
@@ -2577,14 +2596,61 @@ app.post('/api/network/upload-full-structure',
             continue;
           }
 
+          const tpName = row['ТП'] || '';
+          const vlName = row['Фидер'] || '';
+
+          // Тип линии: пусто / нет колонки → 'ВЛ' (старые 6-колоночные файлы грузятся
+          // как есть); недопустимое значение → в errors, строку пропускаем (не роняем).
+          let lineType = 'ВЛ';
+          const typeRaw = row['Тип'];
+          if (typeRaw !== undefined && typeRaw !== null && String(typeRaw).trim() !== '') {
+            const t = String(typeRaw).trim();
+            if (!LINE_TYPES.includes(t)) {
+              errors.push(`Недопустимый тип линии "${t}" (${tpName} · ${vlName}) — строка пропущена`);
+              continue;
+            }
+            lineType = t;
+          }
+
+          // Секция шин: пусто → линия без секции (null). Есть у ТП → привязать;
+          // нет → создать TpSection (Sном и ПУ тех.учёта заполнят позже через UI).
+          let sectionId = null;
+          const secRaw = row['Секция'];
+          if (secRaw !== undefined && secRaw !== null && String(secRaw).trim() !== '') {
+            const sectionNumber = parseInt(String(secRaw).trim(), 10);
+            if (Number.isNaN(sectionNumber)) {
+              errors.push(`Некорректный номер секции "${secRaw}" (${tpName} · ${vlName}) — линия без секции`);
+            } else {
+              const cacheKey = `${resUnit.id}|${tpName}|${sectionNumber}`;
+              if (sectionCache.has(cacheKey)) {
+                sectionId = sectionCache.get(cacheKey);
+              } else {
+                let section = await TpSection.findOne({
+                  where: { resId: resUnit.id, tpName, sectionNumber },
+                  transaction
+                });
+                if (!section) {
+                  section = await TpSection.create(
+                    { resId: resUnit.id, tpName, sectionNumber },
+                    { transaction }
+                  );
+                }
+                sectionId = section.id;
+                sectionCache.set(cacheKey, sectionId);
+              }
+            }
+          }
+
           // Создаём/обновляем запись; id берём из returning — без повторного findOne
           const [structure] = await NetworkStructure.upsert({
             resId: resUnit.id,
-            tpName: row['ТП'] || '',
-            vlName: row['Фидер'] || '',
+            tpName,
+            vlName,
             startPu: row['Начало'] ? String(row['Начало']) : null,
             endPu: row['Конец'] ? String(row['Конец']) : null,
-            middlePu: row['Середина'] ? String(row['Середина']) : null
+            middlePu: row['Середина'] ? String(row['Середина']) : null,
+            sectionId,
+            lineType
           }, {
             returning: true,
             conflictFields: ['resId', 'tpName', 'vlName'],
@@ -2650,6 +2716,32 @@ app.post('/api/network/upload-full-structure',
       
     } catch (error) {
       await transaction.rollback();
+      res.status(500).json({ error: error.message });
+    }
+});
+
+// Шаблон Excel для загрузки структуры (новый формат: 8 колонок с типом линии
+// и секцией). Отдаётся через уже подключённый XLSX. Право — structure_upload.
+app.get('/api/network/structure-template',
+  authenticateToken,
+  requirePerm('structure_upload'),
+  (req, res) => {
+    try {
+      const rows = [
+        ['РЭС', 'ТП', 'Секция', 'Тип', 'Фидер', 'Начало', 'Середина', 'Конец'],
+        ['Центральный РЭС', 'ТП-101', 1, 'ВЛ', 'Фабрициуса', '12345678', '', '23456789'],
+        ['Центральный РЭС', 'ТП-101', 2, 'КЛ', 'Ленина', '34567890', '45678901', ''],
+        ['Центральный РЭС', 'ТП-205', '', 'ВУ', 'Ввод-1', '56789012', '', ''],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Структура');
+      const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="structure-template.xlsx"');
+      res.send(buf);
+    } catch (error) {
       res.status(500).json({ error: error.message });
     }
 });
