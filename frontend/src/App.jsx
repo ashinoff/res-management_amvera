@@ -644,7 +644,9 @@ function NetworkStructure({ onSectionChange } = {}) {
   // Для редактирования ПУ (mac-модалка: { item, position, oldValue })
   const [puEdit, setPuEdit] = useState(null);
   const [editValue, setEditValue] = useState('');
-  const [editLineType, setEditLineType] = useState('ВЛ'); // тип линии (только полная правка)
+  const [lineEdit, setLineEdit] = useState(null);          // правка линии (тип + секция)
+  const [editLineType, setEditLineType] = useState('ВЛ');  // тип линии (только полная правка)
+  const [editSection, setEditSection] = useState('');      // секция шин линии (id или '')
   
   // Для выбора и удаления
   const [selectedIds, setSelectedIds] = useState([]);
@@ -917,14 +919,38 @@ function NetworkStructure({ onSectionChange } = {}) {
       if (position === 'middle') updateData.middlePu = editValue || null;
       if (position === 'end') updateData.endPu = editValue || null;
 
-      // Тип линии шлём ТОЛЬКО при полной правке (иначе сервер вернёт 403 для
-      // structure_edit_pu). Для обычной правки ПУ поле не отправляем.
-      if (canEditStructure) updateData.lineType = editLineType;
-
       await api.put(`/api/network/structure/${item.id}`, updateData);
       await loadNetworkStructure();
       setPuEdit(null);
       setEditValue('');
+    } catch (error) {
+      showToast(error.response?.data?.error || 'Ошибка при сохранении');
+    }
+  };
+
+  // Правка линии (тип + секция) — открывается двойным кликом по бейджам.
+  // Только полная правка (structure_edit/супер); сервер это же и проверяет.
+  const openLineEdit = (item) => {
+    setLineEdit(item);
+    setEditLineType(item.lineType || 'ВЛ');
+    setEditSection(item.sectionId ?? '');
+  };
+
+  const saveLineEdit = async () => {
+    if (!lineEdit) return;
+    const item = lineEdit;
+    const sectionId = editSection === '' ? null : parseInt(editSection, 10);
+    try {
+      await api.put(`/api/network/structure/${item.id}`, {
+        // ПУ передаём текущие — иначе сервер занулит их (updates.startPu = body||null).
+        startPu: item.startPu,
+        middlePu: item.middlePu,
+        endPu: item.endPu,
+        lineType: editLineType,
+        sectionId
+      });
+      await loadNetworkStructure();
+      setLineEdit(null);
     } catch (error) {
       showToast(error.response?.data?.error || 'Ошибка при сохранении');
     }
@@ -1099,6 +1125,26 @@ const executeClearHistory = async () => {
         <span className="ns-cell-pos">{posLabel}</span>
         <span className="ns-cell-num">{puNumber || '—'}</span>
       </button>
+    );
+  };
+
+  // Бейджи «тип линии» + «секция шин» перед названием фидера. Одинаково в
+  // десктоп-таблице и в мобильных карточках. Двойной клик по любому — правка
+  // линии (только полная правка структуры; сервер это же проверяет).
+  const renderLineBadges = (item) => {
+    const sec = item.section || sections.find(s => s.id === item.sectionId);
+    const secLabel = sec ? `СШ-${toRoman(sec.sectionNumber)}` : '—';
+    const editable = canEditStructure;
+    const onEdit = (e) => { e.stopPropagation(); if (editable) openLineEdit(item); };
+    return (
+      <>
+        <span className={`line-type-badge${editable ? ' editable' : ''}`}
+          title={editable ? 'Тип линии — двойной клик, чтобы изменить' : 'Тип линии'}
+          onDoubleClick={onEdit}>{item.lineType || 'ВЛ'}</span>
+        <span className={`section-badge${editable ? ' editable' : ''}`}
+          title={editable ? 'Секция шин — двойной клик, чтобы изменить' : 'Секция шин'}
+          onDoubleClick={onEdit}>{secLabel}</span>
+      </>
     );
   };
 
@@ -1394,30 +1440,14 @@ const executeClearHistory = async () => {
                     />
                   )}
                 </div>
-                <span className="vl-name" title={`${item.lineType || 'ВЛ'} ${item.vlName}`}><span className="line-type-badge">{item.lineType || 'ВЛ'}</span> {item.vlName}</span>
+                <span className="vl-name" title={`${item.lineType || 'ВЛ'} ${item.vlName}`}>{renderLineBadges(item)} {item.vlName}</span>
                 {askueCells || <><span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" /><span className="askue-cell" /></>}
                 {renderPuCell(item, 'start')}
                 {renderPuCell(item, 'middle')}
                 {renderPuCell(item, 'end')}
-                <div className="col-section">
-                  {canEditStructure && (
-                    <select
-                      className="vl-section-select"
-                      value={item.sectionId ?? ''}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => { e.stopPropagation(); assignSection(item, e.target.value); }}
-                      disabled={tpSections.length === 0}
-                      title={tpSections.length === 0 ? 'Сначала добавьте секцию этой ТП' : 'Секция ВЛ'}
-                    >
-                      {/* value="" — плейсхолдер «Секция…» у непривязанной ВЛ,
-                          либо пункт «— Без секции» (отвязать) у привязанной. */}
-                      <option value="">{item.sectionId ? '— Без секции' : 'Секция…'}</option>
-                      {tpSections.map(s => (
-                        <option key={s.id} value={s.id}>СШ-{toRoman(s.sectionNumber)}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                {/* Секция теперь — бейдж в названии линии (двойной клик — правка).
+                    Колонка оставлена пустой для выравнивания сетки net-grid. */}
+                <div className="col-section"></div>
                 <div className="col-actions"></div>
               </div>
             );
@@ -1588,7 +1618,7 @@ const executeClearHistory = async () => {
                 <div className="ns-vls">
                   {tpItems.map(item => (
                     <div key={item.id} className="ns-vl">
-                      <div className="ns-vl-name"><span className="line-type-badge">{item.lineType || 'ВЛ'}</span> {item.vlName || ''}</div>
+                      <div className="ns-vl-name">{renderLineBadges(item)} {item.vlName || ''}</div>
                       <div className="ns-positions">
                         {renderMobilePosCell(item, 'start')}
                         {renderMobilePosCell(item, 'middle')}
@@ -1761,23 +1791,51 @@ const executeClearHistory = async () => {
                     placeholder="Пусто — убрать ПУ из позиции" />
                 </div>
               </div>
-              {/* Тип линии — только при полной правке структуры (structure_edit/супер) */}
-              {canEditStructure && (
-                <div className="form-group">
-                  <label>Тип линии</label>
-                  <select value={editLineType} onChange={(e) => setEditLineType(e.target.value)}>
-                    <option value="ВЛ">ВЛ — воздушная линия</option>
-                    <option value="КЛ">КЛ — кабельная линия</option>
-                    <option value="КВЛ">КВЛ — кабельно-воздушная</option>
-                    <option value="ВУ">ВУ — вводное устройство</option>
-                  </select>
-                </div>
-              )}
             </div>
             <div className="modal-footer">
               <button className="cancel-btn" onClick={cancelEdit}>Отмена</button>
               <button className="confirm-btn" onClick={saveEdit}
-                disabled={editValue === (puEdit.oldValue || '') && (!canEditStructure || editLineType === (puEdit.item.lineType || 'ВЛ'))}>Сохранить</button>
+                disabled={editValue === (puEdit.oldValue || '')}>Сохранить</button>
+            </div>
+        </ModalShell>
+      )}
+
+      {/* Правка линии: тип (ВЛ/КЛ/КВЛ/ВУ) + секция шин. Открывается двойным
+          кликом по бейджам «тип»/«секция». Только полная правка структуры. */}
+      {lineEdit && (
+        <ModalShell
+          title="Редактирование линии"
+          dockTitle={`Линия · ${lineEdit.tpName}`}
+          icon={<IconEdit size={16} />}
+          className="pu-edit-modal"
+          onClose={() => setLineEdit(null)}
+        >
+            <div className="modal-body">
+              <div className="modal-info">
+                <p><strong>ТП:</strong> {lineEdit.tpName} · <strong>Линия:</strong> {lineEdit.lineType || 'ВЛ'} {lineEdit.vlName}</p>
+              </div>
+              <div className="form-group">
+                <label>Тип линии</label>
+                <select value={editLineType} onChange={(e) => setEditLineType(e.target.value)}>
+                  <option value="ВЛ">ВЛ — воздушная линия</option>
+                  <option value="КЛ">КЛ — кабельная линия</option>
+                  <option value="КВЛ">КВЛ — кабельно-воздушная</option>
+                  <option value="ВУ">ВУ — вводное устройство</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Секция шин</label>
+                <select value={editSection} onChange={(e) => setEditSection(e.target.value)}>
+                  <option value="">Без секции</option>
+                  {sections.filter(s => s.tpName === lineEdit.tpName).map(s => (
+                    <option key={s.id} value={s.id}>СШ-{toRoman(s.sectionNumber)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="cancel-btn" onClick={() => setLineEdit(null)}>Отмена</button>
+              <button className="confirm-btn" onClick={saveLineEdit}>Сохранить</button>
             </div>
         </ModalShell>
       )}
