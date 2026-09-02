@@ -9995,6 +9995,19 @@ function DeepWorkAnalysis() {
     XLSX.writeFile(wb, `Глубокий_анализ_работ_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
   };
 
+  // Один блок = одна проблема: заголовок, счётчик, пояснение и перечень ТП.
+  const ProblemBlock = ({ title, count, note, tone, children }) => (
+    <div className={`da-problem da-problem--${tone || 'red'}`}>
+      <div className="da-problem-head">
+        <span className="da-problem-title">{title}</span>
+        {count != null && <span className="da-problem-count">{count}</span>}
+      </div>
+      {note && <div className="da-problem-note">{note}</div>}
+      {children}
+    </div>
+  );
+  const tpsTail = (arr, total) => total > (arr || []).length ? ` … (+${total - (arr || []).length})` : '';
+
   return (
     <div className="deep-analysis">
       <PageHeader icon={<IconSearch size={24} />} title="Глубокий анализ работ" />
@@ -10060,6 +10073,14 @@ function DeepWorkAnalysis() {
           {data.rows.map(r => {
             const open = !!expanded[r.resId];
             const ratioTxt = r.capacity.ratio > 1 ? ` — превышение в ${r.capacity.ratio.toFixed(1)} раза` : '';
+            const fastThr = r.fast?.days ?? data.params.fastDays;
+            const sTp = r.suspectTp || [];
+            const fastTps = sTp.filter(t => t.fast > 0);
+            const batchTps = sTp.filter(t => t.batch > 0);
+            const nightTps = sTp.filter(t => t.night > 0);
+            const recheckTps = sTp.filter(t => t.recheckError > 0);
+            const hasAny = fastTps.length || batchTps.length || nightTps.length || recheckTps.length
+              || (r.templateComments || []).length || (r.duplicatePhotos || []).length;
             return (
               <div key={r.resId} className="problem-card">
                 <div className="problem-header">
@@ -10080,95 +10101,115 @@ function DeepWorkAnalysis() {
                 </button>
                 {open && (
                   <div className="da-details">
-                    <div className="detail-section">
-                      <h5>Причины оценки</h5>
-                      {r.reasons.length ? (
-                        <ul className="da-reasons">{r.reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul>
-                      ) : <div className="detail-row">Признаков формального закрытия не обнаружено.</div>}
-                    </div>
+                    {r.reasons.length > 0 && (
+                      <div className="da-summary">
+                        <span className="da-summary-title">Итог по РЭС:</span> {r.reasons.join(' · ')}
+                      </div>
+                    )}
 
-                    <div className="detail-section">
-                      <h5>ТП для ручной проверки ({r.suspectTp.length})</h5>
-                      <div className="detail-row da-hint">Для каждого ТП: дата проверки → дата «мероприятий» и сколько дней прошло. Красным — закрытия в течение ≤{r.fast?.days ?? data.params.fastDays} дн. (мгновенно, для выезда невыполнимо) — это и считаем фикцией.</div>
-                      {r.suspectTp.length ? (
-                        <table className="diag-table">
-                          <thead><tr><th>ТП</th><th>Закр.</th><th>Проверка → мероприятия (дней)</th><th>Почему считаем фикцией</th></tr></thead>
-                          <tbody>
-                            {r.suspectTp.map((t, i) => (
-                              <tr key={i}>
-                                <td style={{ textAlign: 'left' }}>{t.tpName}</td>
-                                <td>{t.closedCount}</td>
-                                <td style={{ textAlign: 'left' }}>
-                                  {t.records.map((rec, k) => {
-                                    const fast = rec.days != null && rec.days >= 0 && rec.days <= (r.fast?.days ?? data.params.fastDays);
-                                    return (
-                                      <div key={k} className={fast ? 'da-fast' : ''}>
-                                        {rec.puNumber ? `${rec.puNumber}: ` : ''}{dd(rec.checkDate)} → {dd(rec.workDate)} ({daysWord(rec.days)})
-                                      </div>
-                                    );
-                                  })}
-                                </td>
-                                <td style={{ textAlign: 'left' }}>
-                                  <ul className="da-reasons" style={{ margin: 0 }}>
-                                    {t.problems.map((p, k) => <li key={k}>{p}</li>)}
-                                  </ul>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : <div className="detail-row">Подозрительных ТП не выявлено.</div>}
-                    </div>
+                    {!hasAny && (
+                      <div className="detail-row">Признаков формального закрытия не обнаружено.</div>
+                    )}
 
-                    <div className="detail-section">
-                      <h5>Пакетные закрытия ({r.batches.length})</h5>
-                      {r.batches.length ? (
-                        <table className="diag-table">
-                          <thead><tr><th>Начало</th><th>Конец</th><th>Закрытий</th><th>Уник. ТП</th><th>Длит., мин</th></tr></thead>
-                          <tbody>
-                            {r.batches.map((b, i) => (
-                              <tr key={i}><td>{dt(b.start)}</td><td>{dt(b.end)}</td><td>{b.count}</td><td>{b.uniqueTp}</td><td>{b.durationMin}</td></tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : <div className="detail-row">Нет.</div>}
-                    </div>
+                    {batchTps.length > 0 && (
+                      <ProblemBlock
+                        title="Пакетное закрытие"
+                        count={`${batchTps.length} ТП`}
+                        note="Мероприятия закрыты «пачкой» — несколько ТП за считанные минуты. Столько выездов подряд бригада физически не выполняет, закрытие формальное."
+                      >
+                        <ul className="da-problem-tps">
+                          {batchTps.map((t, i) => <li key={i}><b>{t.tpName}</b> — {t.batch} закрыт. в пачке</li>)}
+                        </ul>
+                        {r.batches.length > 0 && (
+                          <div className="da-problem-sub">
+                            Кластеры: {r.batches.map(b => `${dt(b.start)}–${dt(b.end)} (${b.count} закр., ${b.uniqueTp} ТП, ${b.durationMin} мин)`).join('; ')}
+                          </div>
+                        )}
+                      </ProblemBlock>
+                    )}
 
-                    <div className="detail-section">
-                      <h5>Шаблонные комментарии ({r.templateComments.length})</h5>
-                      {r.templateComments.length ? (
+                    {(r.duplicatePhotos || []).length > 0 && (
+                      <ProblemBlock
+                        title="Одинаковое фото"
+                        count={`${r.duplicatePhotos.length} файл(ов)`}
+                        note="Одно и то же фото (совпадают имя и размер файла) приложено к разным ТП. Фотоотчёт не уникален — работы, скорее всего, не выполнялись."
+                      >
+                        <div className="da-tmpl-list">
+                          {r.duplicatePhotos.map((p, i) => (
+                            <div key={i} className="da-tmpl">
+                              <div className="da-tmpl-head"><b>{p.name}</b> — на {p.tpCount} ТП</div>
+                              <div className="da-tmpl-tps">ТП: {(p.tps || []).join(', ')}{tpsTail(p.tps, p.tpCount)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </ProblemBlock>
+                    )}
+
+                    {(r.templateComments || []).length > 0 && (
+                      <ProblemBlock
+                        title="Шаблонный комментарий"
+                        count={`${r.templateComments.length}`}
+                        note="Один и тот же текст комментария проставлен разным ТП — отписка вместо реального отчёта."
+                      >
                         <div className="da-tmpl-list">
                           {r.templateComments.map((c, i) => (
                             <div key={i} className="da-tmpl">
                               <div className="da-tmpl-head">«{c.text}» — повторов: <b>{c.count}</b>, на <b>{c.tpCount}</b> ТП</div>
-                              <div className="da-tmpl-tps">
-                                {(c.tps || []).join(', ')}{c.tpCount > (c.tps || []).length ? ` … (+${c.tpCount - (c.tps || []).length})` : ''}
-                              </div>
+                              <div className="da-tmpl-tps">ТП: {(c.tps || []).join(', ')}{tpsTail(c.tps, c.tpCount)}</div>
                             </div>
                           ))}
                         </div>
-                      ) : <div className="detail-row">Нет.</div>}
-                    </div>
+                      </ProblemBlock>
+                    )}
 
-                    <div className="detail-section">
-                      <h5>Дубли фото ({r.duplicatePhotos.length})</h5>
-                      {r.duplicatePhotos.length ? (
-                        <table className="diag-table">
-                          <thead><tr><th>Файл</th><th>Встречен на ТП</th></tr></thead>
-                          <tbody>
-                            {r.duplicatePhotos.map((p, i) => (
-                              <tr key={i}><td style={{ textAlign: 'left' }}>{p.name}</td><td>{p.tpCount}</td></tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : <div className="detail-row">Нет.</div>}
-                    </div>
+                    {fastTps.length > 0 && (
+                      <ProblemBlock
+                        title="Мгновенное закрытие"
+                        count={`${fastTps.length} ТП`}
+                        note={`Мероприятия закрыты в течение ≤${fastThr} дн. после проверки — для выездных работ такой срок невыполним.`}
+                      >
+                        <ul className="da-problem-tps">
+                          {fastTps.map((t, i) => (
+                            <li key={i}>
+                              <b>{t.tpName}</b> — {t.minDays === 0 ? 'в день проверки' : `через ${t.minDays} дн.`} ({t.fast} из {t.closedCount})
+                              <div className="da-tp-recs">
+                                {t.records.filter(rec => rec.days != null && rec.days >= 0 && rec.days <= fastThr).map((rec, k) => (
+                                  <div key={k} className="da-fast">{rec.puNumber ? `${rec.puNumber}: ` : ''}{dd(rec.checkDate)} → {dd(rec.workDate)} ({daysWord(rec.days)})</div>
+                                ))}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </ProblemBlock>
+                    )}
 
-                    <div className="detail-section">
-                      <h5>Перепроверки</h5>
-                      <div className="detail-row">
-                        Перепроверено: <b>{r.recheck.checked}</b> · провалов: <b>{r.recheck.failed}</b> ({pct(r.recheck.failShare)}) · ночных закрытий: <b>{pct(r.afterHoursShare)}</b>
-                      </div>
+                    {nightTps.length > 0 && (
+                      <ProblemBlock
+                        title="Закрытия в нерабочее время"
+                        count={`${nightTps.length} ТП`}
+                        tone="yellow"
+                        note="Мероприятия закрыты до 7:00 или после 21:00 — нехарактерно для выездных работ."
+                      >
+                        <ul className="da-problem-tps">
+                          {nightTps.map((t, i) => <li key={i}><b>{t.tpName}</b> — {t.night} закр.</li>)}
+                        </ul>
+                      </ProblemBlock>
+                    )}
+
+                    {recheckTps.length > 0 && (
+                      <ProblemBlock
+                        title="Провал перепроверки"
+                        count={`${recheckTps.length} ТП`}
+                        note="После «мероприятий» повторная проверка снова показала ошибку — проблема не устранена."
+                      >
+                        <ul className="da-problem-tps">
+                          {recheckTps.map((t, i) => <li key={i}><b>{t.tpName}</b> — {t.recheckError} повтор ошибки</li>)}
+                        </ul>
+                      </ProblemBlock>
+                    )}
+
+                    <div className="da-problem-foot">
+                      Перепроверено: <b>{r.recheck.checked}</b> · провалов: <b>{r.recheck.failed}</b> ({pct(r.recheck.failShare)}) · ночных закрытий: <b>{pct(r.afterHoursShare)}</b>
                     </div>
                   </div>
                 )}

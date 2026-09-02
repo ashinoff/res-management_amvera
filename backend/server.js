@@ -8688,7 +8688,10 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       }
       const duplicatePhotos = [];
       for (const e of photoMap.values()) {
-        if (e.tps.size >= 2) duplicatePhotos.push({ name: e.name, tpCount: e.tps.size });
+        if (e.tps.size >= 2) {
+          const tps = [...e.tps].sort((a, b) => a.localeCompare(b, 'ru'));
+          duplicatePhotos.push({ name: e.name, tpCount: tps.length, tps: tps.slice(0, 50) });
+        }
       }
       duplicatePhotos.sort((a, b) => b.tpCount - a.tpCount);
 
@@ -8747,7 +8750,12 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         if (e.recheckError > 0) problems.push(`Провал перепроверки: ${e.recheckError} — после «мероприятий» ошибка повторилась`);
         if (problems.length) {
           const recs = e.records.slice().sort((a, b) => new Date(a.workDate) - new Date(b.workDate));
-          suspectTp.push({ tpName: e.tpName, closedCount: e.closedCount, minDays, fast: e.fast, problems, records: recs });
+          suspectTp.push({
+            tpName: e.tpName, closedCount: e.closedCount, minDays, fast: e.fast,
+            batch: e.batch, night: e.night, recheckError: e.recheckError,
+            templates: e.templates.slice(0, 3), photos: e.photos.slice(0, 3),
+            problems, records: recs
+          });
         }
       }
       suspectTp.sort((a, b) => b.problems.length - a.problems.length || b.closedCount - a.closedCount || a.tpName.localeCompare(b.tpName, 'ru'));

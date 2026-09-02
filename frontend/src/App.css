@@ -2927,6 +2927,25 @@ tr.selected {
 .da-tmpl-head { color: var(--text); font-size: 13px; }
 .da-tmpl-tps { margin-top: 4px; color: var(--text-muted); font-size: 12.5px; }
 
+/* Глубокий анализ — разбивка по проблемам (одна проблема = один блок) */
+.da-summary { padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-size: 12.5px; }
+.da-summary-title { color: var(--text); font-weight: 600; }
+.da-problem { border: 1px solid var(--border); border-left: 4px solid var(--red); border-radius: 8px; padding: 10px 14px; background: var(--surface); }
+.da-problem--yellow { border-left-color: #B45309; }
+.da-problem--green { border-left-color: #15803D; }
+.da-problem-head { display: flex; align-items: center; gap: 10px; }
+.da-problem-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.da-problem-count { margin-left: auto; font-size: 12px; font-weight: 700; color: #fff; background: var(--red); border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+.da-problem--yellow .da-problem-count { background: #B45309; }
+.da-problem--green .da-problem-count { background: #15803D; }
+.da-problem-note { margin-top: 6px; color: var(--text-muted); font-size: 12.5px; }
+.da-problem-tps { margin: 8px 0 0; padding-left: 20px; }
+.da-problem-tps li { margin-bottom: 6px; color: var(--text); font-size: 13px; }
+.da-problem-sub { margin-top: 8px; color: var(--text-muted); font-size: 12px; }
+.da-tp-recs { margin-top: 2px; }
+.da-tp-recs .da-fast { font-size: 12.5px; font-weight: 600; }
+.da-problem-foot { color: var(--text-muted); font-size: 12.5px; border-top: 1px dashed var(--border); padding-top: 8px; }
+
 /* Компактная карточка проблемной ВЛ */
 .problem-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .problem-meta {
