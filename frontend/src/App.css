@@ -2930,9 +2930,8 @@ tr.selected {
 /* Глубокий анализ — разбивка по проблемам (одна проблема = один блок) */
 .da-summary { padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-size: 12.5px; }
 .da-summary-title { color: var(--text); font-weight: 600; }
-.da-problem { border: 1px solid var(--border); border-left: 4px solid var(--red); border-radius: 8px; padding: 10px 14px; background: var(--surface); }
-.da-problem--yellow { border-left-color: #B45309; }
-.da-problem--green { border-left-color: #15803D; }
+/* Блок проблемы — чистая карточка (без цветной чёрточки слева), как везде */
+.da-problem { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface); }
 .da-problem-head { display: flex; align-items: center; gap: 10px; }
 .da-problem-title { font-size: 15px; font-weight: 700; color: var(--text); }
 .da-problem-count { margin-left: auto; font-size: 12px; font-weight: 700; color: #fff; background: var(--red); border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
@@ -2945,6 +2944,28 @@ tr.selected {
 .da-tp-recs { margin-top: 2px; }
 .da-tp-recs .da-fast { font-size: 12.5px; font-weight: 600; }
 .da-problem-foot { color: var(--text-muted); font-size: 12.5px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.da-fast { color: var(--red); font-weight: 700; }
+
+/* Реестр внутри блока проблемы */
+.da-reg-group { margin-top: 10px; }
+.da-reg-group + .da-reg-group { margin-top: 14px; }
+.da-reg-title { font-size: 13px; color: var(--text); margin-bottom: 6px; }
+.da-reg-title--row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.da-view-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 12.5px; font-weight: 600; color: var(--accent, #0B4DA2); background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.da-view-btn:hover { background: var(--bg); }
+.da-reg { width: 100%; }
+.da-reg th.l, .da-reg td.l { text-align: left; }
+.da-reg .da-reg-err { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.da-reg-pu, .da-reg-pos { color: var(--text-muted); font-weight: 400; font-size: 11.5px; }
+.da-reg-filter { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 12.5px; color: var(--text-muted); }
+.da-reg-filter input { width: 64px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; }
+
+/* Статус-ячейка: SVG-значок с подсветкой (svg-frame) + текст */
+.da-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.da-state .svg-frame { width: 22px; height: 22px; border-radius: 6px; display: inline-grid; place-items: center; }
+.da-state--ok .svg-frame { background: var(--green-bg, #dcfce7); color: #15803D; }
+.da-state--warn .svg-frame { background: var(--amber-bg, #fef3c7); color: #B45309; }
+.da-state--bad .svg-frame { background: var(--red-bg, #fee2e2); color: var(--red); }
 
 /* Компактная карточка проблемной ВЛ */
 .problem-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

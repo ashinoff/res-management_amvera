@@ -9863,6 +9863,9 @@ function PermissionsAdmin() {
 // здесь только UI. Роль admin, работает по кнопке (без поллинга).
 const DA_LEVEL_COLOR = { red: '#B91C1C', yellow: '#B45309', green: '#15803D' };
 const DA_LEVEL_LABEL = { red: 'Высокий риск', yellow: 'Средний риск', green: 'Норма' };
+const DA_STATUS_LABEL = { awaiting_work: 'Ожидает работ', awaiting_recheck: 'Ожидает перепроверки', completed: 'Завершено' };
+const DA_RECHECK_LABEL = { ok: 'перепроверка ОК', error: 'перепроверка: ошибка', pending: '' };
+const DA_POS_LABEL = { start: 'начало', middle: 'середина', end: 'конец' };
 const DA_DEFAULTS = { resId: '', dateFrom: '', dateTo: '', windowDays: 4, brigades: 3, perBrigade: 5, fastDays: 1 };
 
 function DeepWorkAnalysis() {
@@ -9877,6 +9880,8 @@ function DeepWorkAnalysis() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState({});
+  const [photoView, setPhotoView] = useState(null); // { files:[att], index } — превью через FileViewer
+  const [fastRange, setFastRange] = useState({});    // resId -> { from, to } (фильтр «дней от/до»)
 
   useEffect(() => {
     api.get('/api/res/list').then(r => setResList(r.data)).catch(e => console.error('Error loading RES list:', e));
@@ -10008,6 +10013,49 @@ function DeepWorkAnalysis() {
   );
   const tpsTail = (arr, total) => total > (arr || []).length ? ` … (+${total - (arr || []).length})` : '';
 
+  // Ячейка «Состояние»: SVG-значок с подсветкой + текст (статус + итог перепроверки).
+  const stateCell = (r) => {
+    let tone = 'ok', Icon = IconClock;
+    if (r.recheck === 'error') { tone = 'bad'; Icon = IconAlertTriangle; }
+    else if (r.status === 'completed' && r.recheck === 'ok') { tone = 'ok'; Icon = IconCheck; }
+    else if (r.status === 'completed') { tone = 'ok'; Icon = IconCheck; }
+    else { tone = 'warn'; Icon = IconClock; }
+    const rc = DA_RECHECK_LABEL[r.recheck] || '';
+    return (
+      <span className={`da-state da-state--${tone}`}>
+        <span className="svg-frame"><Icon size={14} /></span>
+        <span>{DA_STATUS_LABEL[r.status] || r.status || '—'}{rc ? ` · ${rc}` : ''}</span>
+      </span>
+    );
+  };
+
+  // Реестр записей (как таблицы в «Анализе»): ТП, ВЛ, ошибка, даты, [дней], состояние.
+  const RegisterTable = ({ records, showDays, fastThr }) => (
+    <table className="diag-table da-reg">
+      <thead>
+        <tr>
+          <th className="l">ТП</th><th className="l">ВЛ</th><th className="l">Ошибка</th>
+          <th>Дата ошибки</th><th>Дата закрытия</th>{showDays && <th>Дней</th>}<th className="l">Состояние</th>
+        </tr>
+      </thead>
+      <tbody>
+        {records.map((r, i) => (
+          <tr key={i}>
+            <td className="l"><b>{r.tpName}</b>{r.puNumber ? <span className="da-reg-pu"> · ПУ {r.puNumber}</span> : ''}</td>
+            <td className="l">{r.vlName || '—'}{r.position ? <span className="da-reg-pos"> ({DA_POS_LABEL[r.position] || r.position})</span> : ''}</td>
+            <td className="l da-reg-err" title={r.error}>{r.error || '—'}</td>
+            <td>{dd(r.checkDate)}</td>
+            <td>{dd(r.closeDate)}</td>
+            {showDays && <td className={r.days != null && r.days >= 0 && r.days <= fastThr ? 'da-fast' : ''}>{daysWord(r.days)}</td>}
+            <td className="l">{stateCell(r)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
+  const openPhoto = (att) => { if (att) setPhotoView({ files: [att], index: 0 }); };
+
   return (
     <div className="deep-analysis">
       <PageHeader icon={<IconSearch size={24} />} title="Глубокий анализ работ" />
@@ -10075,12 +10123,17 @@ function DeepWorkAnalysis() {
             const ratioTxt = r.capacity.ratio > 1 ? ` — превышение в ${r.capacity.ratio.toFixed(1)} раза` : '';
             const fastThr = r.fast?.days ?? data.params.fastDays;
             const sTp = r.suspectTp || [];
-            const fastTps = sTp.filter(t => t.fast > 0);
-            const batchTps = sTp.filter(t => t.batch > 0);
             const nightTps = sTp.filter(t => t.night > 0);
-            const recheckTps = sTp.filter(t => t.recheckError > 0);
-            const hasAny = fastTps.length || batchTps.length || nightTps.length || recheckTps.length
-              || (r.templateComments || []).length || (r.duplicatePhotos || []).length;
+            const fr = fastRange[r.resId] || { from: 0, to: fastThr };
+            const fastRows = (r.fastList || []).filter(x => {
+              const lo = fr.from === '' ? 0 : Number(fr.from);
+              const hi = fr.to === '' ? 9999 : Number(fr.to);
+              return x.days != null && x.days >= lo && x.days <= hi;
+            });
+            const setFR = (patch) => setFastRange(prev => ({ ...prev, [r.resId]: { ...(prev[r.resId] || { from: 0, to: fastThr }), ...patch } }));
+            const hasAny = (r.batches || []).length || (r.duplicatePhotos || []).length
+              || (r.templateComments || []).length || (r.fastList || []).length
+              || (r.recheckFailList || []).length || nightTps.length;
             return (
               <div key={r.resId} className="problem-card">
                 <div className="problem-header">
@@ -10111,20 +10164,20 @@ function DeepWorkAnalysis() {
                       <div className="detail-row">Признаков формального закрытия не обнаружено.</div>
                     )}
 
-                    {batchTps.length > 0 && (
+                    {(r.batches || []).length > 0 && (
                       <ProblemBlock
                         title="Пакетное закрытие"
-                        count={`${batchTps.length} ТП`}
-                        note="Мероприятия закрыты «пачкой» — несколько ТП за считанные минуты. Столько выездов подряд бригада физически не выполняет, закрытие формальное."
+                        count={`${r.batches.length} дн.`}
+                        note="Мероприятия закрыты «пачкой» за один день — больше, чем бригады успевают физически. Ниже реестр по каждому дню: у всех ТП пакета одна дата закрытия."
                       >
-                        <ul className="da-problem-tps">
-                          {batchTps.map((t, i) => <li key={i}><b>{t.tpName}</b> — {t.batch} закрыт. в пачке</li>)}
-                        </ul>
-                        {r.batches.length > 0 && (
-                          <div className="da-problem-sub">
-                            Кластеры: {r.batches.map(b => `${dt(b.start)}–${dt(b.end)} (${b.count} закр., ${b.uniqueTp} ТП, ${b.durationMin} мин)`).join('; ')}
+                        {r.batches.map((b, i) => (
+                          <div key={i} className="da-reg-group">
+                            <div className="da-reg-title">
+                              Пакет за <b>{dd(b.day)}</b> — закрыто <b>{b.count}</b> (норма дня ≤{b.dailyCap}), уникальных ТП: <b>{b.uniqueTp}</b>
+                            </div>
+                            <RegisterTable records={b.records} />
                           </div>
-                        )}
+                        ))}
                       </ProblemBlock>
                     )}
 
@@ -10132,16 +10185,21 @@ function DeepWorkAnalysis() {
                       <ProblemBlock
                         title="Одинаковое фото"
                         count={`${r.duplicatePhotos.length} файл(ов)`}
-                        note="Одно и то же фото (совпадают имя и размер файла) приложено к разным ТП. Фотоотчёт не уникален — работы, скорее всего, не выполнялись."
+                        note="Один и тот же файл (совпадают имя и размер) приложен к разным ТП. Фотоотчёт не уникален — работы, скорее всего, не выполнялись. Нажмите «Посмотреть», чтобы открыть файл."
                       >
-                        <div className="da-tmpl-list">
-                          {r.duplicatePhotos.map((p, i) => (
-                            <div key={i} className="da-tmpl">
-                              <div className="da-tmpl-head"><b>{p.name}</b> — на {p.tpCount} ТП</div>
-                              <div className="da-tmpl-tps">ТП: {(p.tps || []).join(', ')}{tpsTail(p.tps, p.tpCount)}</div>
+                        {r.duplicatePhotos.map((p, i) => (
+                          <div key={i} className="da-reg-group">
+                            <div className="da-reg-title da-reg-title--row">
+                              <span><span className="svg-frame">{p.isPdf ? <IconFileText size={14} /> : <IconEye size={14} />}</span> <b>{p.name}</b> — на <b>{p.tpCount}</b> ТП</span>
+                              {p.sample && (
+                                <button type="button" className="da-view-btn" onClick={() => openPhoto(p.sample)}>
+                                  <IconEye size={14} /> Посмотреть
+                                </button>
+                              )}
                             </div>
-                          ))}
-                        </div>
+                            <RegisterTable records={p.records} />
+                          </div>
+                        ))}
                       </ProblemBlock>
                     )}
 
@@ -10162,24 +10220,20 @@ function DeepWorkAnalysis() {
                       </ProblemBlock>
                     )}
 
-                    {fastTps.length > 0 && (
+                    {(r.fastList || []).length > 0 && (
                       <ProblemBlock
                         title="Мгновенное закрытие"
-                        count={`${fastTps.length} ТП`}
-                        note={`Мероприятия закрыты в течение ≤${fastThr} дн. после проверки — для выездных работ такой срок невыполним.`}
+                        count={`${fastRows.length} из ${r.fastList.length}`}
+                        note={`Мероприятия закрыты слишком быстро после проверки — для выездных работ невыполнимо. Фильтр по зазору «проверка → закрытие» (дней от/до), по умолчанию 0–${fastThr}.`}
                       >
-                        <ul className="da-problem-tps">
-                          {fastTps.map((t, i) => (
-                            <li key={i}>
-                              <b>{t.tpName}</b> — {t.minDays === 0 ? 'в день проверки' : `через ${t.minDays} дн.`} ({t.fast} из {t.closedCount})
-                              <div className="da-tp-recs">
-                                {t.records.filter(rec => rec.days != null && rec.days >= 0 && rec.days <= fastThr).map((rec, k) => (
-                                  <div key={k} className="da-fast">{rec.puNumber ? `${rec.puNumber}: ` : ''}{dd(rec.checkDate)} → {dd(rec.workDate)} ({daysWord(rec.days)})</div>
-                                ))}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
+                        <div className="da-reg-filter">
+                          <span>Дней: от</span>
+                          <input type="number" min="0" max="30" value={fr.from} onChange={e => setFR({ from: e.target.value })} />
+                          <span>до</span>
+                          <input type="number" min="0" max="30" value={fr.to} onChange={e => setFR({ to: e.target.value })} />
+                        </div>
+                        {fastRows.length ? <RegisterTable records={fastRows} showDays fastThr={fastThr} />
+                          : <div className="detail-row">В выбранном диапазоне дней записей нет.</div>}
                       </ProblemBlock>
                     )}
 
@@ -10196,15 +10250,13 @@ function DeepWorkAnalysis() {
                       </ProblemBlock>
                     )}
 
-                    {recheckTps.length > 0 && (
+                    {(r.recheckFailList || []).length > 0 && (
                       <ProblemBlock
                         title="Провал перепроверки"
-                        count={`${recheckTps.length} ТП`}
-                        note="После «мероприятий» повторная проверка снова показала ошибку — проблема не устранена."
+                        count={`${r.recheckFailList.length}`}
+                        note="После «мероприятий» повторная проверка снова показала ошибку — проблема не устранена. ВЛ и текущее состояние — в реестре."
                       >
-                        <ul className="da-problem-tps">
-                          {recheckTps.map((t, i) => <li key={i}><b>{t.tpName}</b> — {t.recheckError} повтор ошибки</li>)}
-                        </ul>
+                        <RegisterTable records={r.recheckFailList} />
                       </ProblemBlock>
                     )}
 
@@ -10217,6 +10269,16 @@ function DeepWorkAnalysis() {
             );
           })}
         </div>
+      )}
+
+      {photoView && (
+        <FileViewer
+          files={photoView.files}
+          currentIndex={photoView.index}
+          onClose={() => setPhotoView(null)}
+          onNext={() => setPhotoView(p => ({ ...p, index: (p.index + 1) % p.files.length }))}
+          onPrev={() => setPhotoView(p => ({ ...p, index: (p.index - 1 + p.files.length) % p.files.length }))}
+        />
       )}
     </div>
   );

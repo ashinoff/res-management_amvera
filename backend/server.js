@@ -8602,6 +8602,16 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       const d = new Date(dt);
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
+    const dayDiff2 = (a, b) => (a && b) ? Math.round((new Date(b) - new Date(a)) / 86400000) : null;
+    // Единая строка реестра для всех блоков проблем: ТП, ВЛ, ПУ, позиция, текст
+    // ошибки, дата ошибки → дата закрытия, дней, текущее состояние (status + перепроверка).
+    const recOf = (x) => ({
+      tpName: x.tpName, vlName: x.vlName, puNumber: x.puNumber, position: x.position,
+      error: String(x.initialError || '').trim().slice(0, 300),
+      checkDate: x.initialCheckDate, closeDate: x.workCompletedDate,
+      days: dayDiff2(x.initialCheckDate, x.workCompletedDate),
+      status: x.status, recheck: x.recheckResult,
+    });
 
     const rows = [];
     for (const g of byRes.values()) {
@@ -8624,31 +8634,32 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       }
       const ratio = capacityLimit > 0 ? maxTpInWindow / capacityLimit : 0;
 
-      // 2) batches — непересекающиеся кластеры >= batchCount закрытий в batchMinutes минут.
-      const batches = [];
-      const batchTpCount = new Map(); // tpName -> сколько закрытий этого ТП попало в пачки
-      const winMs = batchMinutes * 60000;
-      const n = closes.length;
-      let j = 0;
-      while (j < n) {
-        let k = j;
-        while (k < n && (closes[k].t - closes[j].t) <= winMs) k++;
-        const cnt = k - j;
-        if (cnt >= batchCount) {
-          const seg = closes.slice(j, k);
-          for (const s of seg) batchTpCount.set(s.tp, (batchTpCount.get(s.tp) || 0) + 1);
-          batches.push({
-            start: seg[0].t.toISOString(),
-            end: seg[seg.length - 1].t.toISOString(),
-            count: cnt,
-            uniqueTp: new Set(seg.map(s => s.tp)).size,
-            durationMin: Math.round((seg[seg.length - 1].t - seg[0].t) / 60000)
-          });
-          j = k;
-        } else {
-          j++;
-        }
+      // 2) batches — ПАКЕТ = КАЛЕНДАРНЫЙ ДЕНЬ закрытия. Пакетным (подозрительным)
+      //    считаем день, в который закрыто больше дневной ёмкости РЭС
+      //    (dailyCap = бригады × план ТП/бригаду). Внутри — реестр ТП с ВЛ,
+      //    датой ошибки, датой закрытия и текущим состоянием.
+      const dailyCap = Math.max(1, brigades * perBrigade);
+      const byDay = new Map(); // dayKey -> item[]
+      for (const x of items) {
+        const key = dayKey(x.workCompletedDate);
+        if (!byDay.has(key)) byDay.set(key, []);
+        byDay.get(key).push(x);
       }
+      const batches = [];
+      const batchTpCount = new Map(); // tpName -> сколько закрытий этого ТП попало в пакетные дни
+      for (const [day, dayItems] of [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        if (dayItems.length <= dailyCap) continue; // норма для дня — не пакет
+        for (const x of dayItems) batchTpCount.set(x.tpName, (batchTpCount.get(x.tpName) || 0) + 1);
+        const recs = dayItems.map(recOf).sort((a, b) => a.tpName.localeCompare(b.tpName, 'ru'));
+        batches.push({
+          day,
+          count: dayItems.length,
+          uniqueTp: new Set(dayItems.map(x => x.tpName)).size,
+          dailyCap,
+          records: recs,
+        });
+      }
+      batches.sort((a, b) => b.count - a.count);
 
       // 3) afterHours — доля закрытий с локальным часом <7 или >=21 (TZ Europe/Moscow).
       let afterCnt = 0;
@@ -8675,6 +8686,8 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       templateComments.sort((a, b) => b.count - a.count);
 
       // 5) duplicatePhotos — ключ original_name|size, встречается на РАЗНЫХ ТП.
+      //    Несём пример вложения (для превью через FileViewer) и реестр записей
+      //    (ТП/ВЛ/даты/состояние), где этот файл приложен.
       const photoMap = new Map();
       for (const x of items) {
         for (const att of parseAtt(x.attachments)) {
@@ -8682,15 +8695,26 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
           const size = att && att.size;
           if (!name || size == null) continue;
           const key = `${name}|${size}`;
-          if (!photoMap.has(key)) photoMap.set(key, { name, tps: new Set() });
-          photoMap.get(key).tps.add(x.tpName);
+          if (!photoMap.has(key)) photoMap.set(key, { name, size, tps: new Set(), records: [], sample: null });
+          const e = photoMap.get(key);
+          e.tps.add(x.tpName);
+          e.records.push(recOf(x));
+          if (!e.sample && att.url && att.public_id) {
+            e.sample = { url: att.url, public_id: att.public_id, original_name: att.original_name, mime_type: att.mime_type };
+          }
         }
       }
       const duplicatePhotos = [];
       for (const e of photoMap.values()) {
         if (e.tps.size >= 2) {
-          const tps = [...e.tps].sort((a, b) => a.localeCompare(b, 'ru'));
-          duplicatePhotos.push({ name: e.name, tpCount: tps.length, tps: tps.slice(0, 50) });
+          const recs = e.records.sort((a, b) => a.tpName.localeCompare(b.tpName, 'ru'));
+          duplicatePhotos.push({
+            name: e.name,
+            tpCount: e.tps.size,
+            isPdf: /\.pdf$/i.test(e.name || '') || (e.sample && /\.pdf$/i.test(e.sample.public_id || '')),
+            sample: e.sample,
+            records: recs.slice(0, 100),
+          });
         }
       }
       duplicatePhotos.sort((a, b) => b.tpCount - a.tpCount);
@@ -8772,7 +8796,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       }
       if (batches.length > 0) {
         score += Math.min(30, batches.length * 10);
-        reasons.push(`Пакетные закрытия: ${batches.length} кластер(ов) по ≥${batchCount} закрытий в пределах ${batchMinutes} мин`);
+        reasons.push(`Пакетные закрытия: ${batches.length} дн., где закрыто больше дневной ёмкости (>${dailyCap} ТП/день)`);
       }
       if (afterHoursShare > 0.3) {
         score += 10;
@@ -8797,6 +8821,18 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       score = Math.min(100, score);
       const level = score >= 60 ? 'red' : score >= 30 ? 'yellow' : 'green';
 
+      // Реестр «Мгновенное закрытие»: все закрытия с зазором проверка→закрытие
+      // 0..30 дн. (фронт фильтрует ползунками «от/до дней», дефолт 0..fastDays).
+      const fastList = items
+        .map(recOf)
+        .filter(r => r.days != null && r.days >= 0 && r.days <= 30)
+        .sort((a, b) => a.days - b.days || a.tpName.localeCompare(b.tpName, 'ru'));
+      // Реестр «Провал перепроверки»: записи с recheckResult === 'error'.
+      const recheckFailList = items
+        .filter(x => x.recheckResult === 'error')
+        .map(recOf)
+        .sort((a, b) => a.tpName.localeCompare(b.tpName, 'ru'));
+
       rows.push({
         resId: g.resId, resName: g.resName,
         totalClosed, uniqueTp, periodDays,
@@ -8804,6 +8840,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         batches, afterHoursShare, templateComments, duplicatePhotos,
         recheck: { checked, failed, failShare },
         fast: { count: fastCount, share: fastShare, days: fastDays },
+        fastList, recheckFailList,
         suspectTp,
         score, level, reasons
       });
