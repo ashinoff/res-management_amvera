@@ -7468,12 +7468,32 @@ initializeDatabase().then(() => {
 });
 
 // API для получения истории загрузок по конкретному ПУ
-app.get('/api/history/uploads/:puNumber', 
-  authenticateToken, 
+// Текущий статус ПУ (для модалки «Структуры сети», вызываемой из глубокого
+// анализа) — фактическая ошибка по состоянию: status + errorDetails + lastCheck.
+app.get('/api/pu-status/:puNumber',
+  authenticateToken,
   async (req, res) => {
     try {
       const { puNumber } = req.params;
-      
+      const st = await PuStatus.findOne({ where: { puNumber } });
+      if (!st) return res.json(null);
+      res.json({
+        puNumber: st.puNumber, position: st.position, status: st.status,
+        errorDetails: st.errorDetails, lastCheck: st.lastCheck,
+        networkStructureId: st.networkStructureId,
+      });
+    } catch (error) {
+      console.error('Get pu-status error:', error);
+      res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/history/uploads/:puNumber',
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { puNumber } = req.params;
+
       const uploads = await PuUploadHistory.findAll({
         where: { puNumber },
         include: [{

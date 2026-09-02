@@ -9900,7 +9900,13 @@ function DeepWorkAnalysis() {
   const [expanded, setExpanded] = useState({});
   const [photoView, setPhotoView] = useState(null); // { files:[att], index } — превью через FileViewer
   const [fastRange, setFastRange] = useState({});    // resId -> { from, to } (фильтр «дней от/до»)
-  const [daState, setDaState] = useState(null);      // запись для модалки «состояние/ошибка»
+  // Модалка ПУ из «Структуры сети» (фактическая ошибка по состоянию + истории)
+  const [selectedPuData, setSelectedPuData] = useState(null);
+  const [uploadHistory, setUploadHistory] = useState([]);
+  const [checkHistory, setCheckHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [puTab, setPuTab] = useState('current');
+  const [showScrollTop, setShowScrollTop] = useState(false);
 
   useEffect(() => {
     api.get('/api/res/list').then(r => setResList(r.data)).catch(e => console.error('Error loading RES list:', e));
@@ -10071,7 +10077,7 @@ function DeepWorkAnalysis() {
               <td>{dd(r.closeDate)}</td>
               {showDays && <td className={r.days != null && r.days >= 0 && r.days <= fastThr ? 'da-fast' : ''}>{daysWord(r.days)}</td>}
               <td className="l">
-                <button type="button" className="da-state-btn" onClick={() => setDaState(r)} title="Открыть ошибку и состояние">
+                <button type="button" className="da-state-btn" onClick={() => openPuState(r)} title="Открыть карточку ПУ (ошибка и состояние)">
                   {stateCell(r)}
                 </button>
               </td>
@@ -10083,6 +10089,46 @@ function DeepWorkAnalysis() {
   };
 
   const openPhoto = (att) => { if (att) setPhotoView({ files: [att], index: 0 }); };
+
+  // Открыть модалку ПУ из «Структуры сети»: тянем фактический текущий статус
+  // (ошибку по состоянию) + истории загрузок/проверок по номеру ПУ.
+  const openPuState = async (rec) => {
+    if (!rec || !rec.puNumber) return;
+    setPuTab('current');
+    setUploadHistory([]); setCheckHistory([]); setHistoryLoading(true);
+    // Предварительно — из записи анализа (мгновенно), уточним статус запросом.
+    setSelectedPuData({
+      puNumber: rec.puNumber, position: rec.position,
+      tpName: rec.tpName, vlName: rec.vlName, resName: rec.resName || '',
+      status: { status: 'checked_error', errorDetails: rec.error || '', lastCheck: rec.closeDate },
+    });
+    try {
+      const [stRes, upRes, chRes] = await Promise.all([
+        api.get(`/api/pu-status/${encodeURIComponent(rec.puNumber)}`).catch(() => ({ data: null })),
+        api.get(`/api/history/uploads/${encodeURIComponent(rec.puNumber)}`).catch(() => ({ data: [] })),
+        api.get(`/api/history/checks/${encodeURIComponent(rec.puNumber)}`).catch(() => ({ data: [] })),
+      ]);
+      if (stRes.data) {
+        setSelectedPuData(prev => prev ? { ...prev, status: stRes.data, position: stRes.data.position || prev.position } : prev);
+      }
+      setUploadHistory(upRes.data || []);
+      setCheckHistory(chRes.data || []);
+    } catch (e) {
+      console.error('openPuState error:', e);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // Кнопка «наверх» (как в структуре): показываем при прокрутке .content.
+  useEffect(() => {
+    const el = document.querySelector('.content');
+    if (!el) return;
+    const onScroll = () => setShowScrollTop(el.scrollTop > 300);
+    el.addEventListener('scroll', onScroll);
+    onScroll();
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
 
   return (
     <div className="deep-analysis">
@@ -10174,12 +10220,7 @@ function DeepWorkAnalysis() {
                 <div className="problem-meta">
                   <span>Закрыто <b>{r.totalClosed}</b> мероприятий по <b>{r.uniqueTp}</b> ТП; пик: <b>{r.capacity.maxTpInWindow}</b> ТП за {settings.windowDays} дн. при ёмкости {r.capacity.capacityLimit}{ratioTxt}</span>
                 </div>
-                <button className="da-toggle" onClick={() => setExpanded(prev => ({ ...prev, [r.resId]: !open }))}>
-                  {open ? 'Свернуть детали' : 'Показать детали'}
-                  <IconArrowDown size={14} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .12s ease' }} />
-                </button>
-                {open && (
-                  <div className="da-details">
+                <div className="da-details">
                     {r.reasons.length > 0 && (
                       <div className="da-summary">
                         <span className="da-summary-title">Итог по РЭС:</span> {r.reasons.join(' · ')}
@@ -10319,40 +10360,24 @@ function DeepWorkAnalysis() {
                       Перепроверено: <b>{r.recheck.checked}</b> · провалов: <b>{r.recheck.failed}</b> ({pct(r.recheck.failShare)}) · ночных закрытий: <b>{pct(r.afterHoursShare)}</b>
                     </div>
                   </div>
-                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {daState && (
-        <ModalShell
-          title={`${daState.tpName} · ${daState.vlName || '—'}`}
-          dockTitle={`ПУ ${daState.puNumber || ''}`}
-          icon={<IconAlertCircle size={16} />}
-          onClose={() => setDaState(null)}
-        >
-          <div className="da-state-modal">
-            <div className="pu-location-info">
-              <p><strong>ТП:</strong> {daState.tpName}</p>
-              <p><strong>Фидер (ВЛ):</strong> {daState.vlName || '—'}{daState.position ? ` (${DA_POS_LABEL[daState.position] || daState.position})` : ''}</p>
-              <p><strong>ПУ:</strong> {daState.puNumber || '—'}</p>
-              <p><strong>Состояние:</strong> {DA_STATUS_LABEL[daState.status] || daState.status || '—'}{DA_RECHECK_LABEL[daState.recheck] ? ` · ${DA_RECHECK_LABEL[daState.recheck]}` : ''}</p>
-              <p><strong>Проверка → закрытие:</strong> {dd(daState.checkDate)} → {dd(daState.closeDate)} ({daysWord(daState.days)})</p>
-              {daState.failureCount > 1 && <p><strong>Повторов до отработки:</strong> ×{daState.failureCount}</p>}
-            </div>
-            <div className="phase-indicators-large">
-              {['A', 'B', 'C'].map(ph => (
-                <div key={ph} className={`phase-indicator ${new RegExp(`Фаза ${ph}`).test(daState.error || '') ? 'phase-error' : ''}`}>{ph}</div>
-              ))}
-            </div>
-            <div className="error-details-box">
-              <h4>Обнаруженные отклонения:</h4>
-              <div className="error-text">{daState.error || '—'}</div>
-            </div>
-          </div>
-        </ModalShell>
+      {selectedPuData && (
+        <ExtendedPuModal
+          isOpen={true}
+          onClose={() => { setSelectedPuData(null); setUploadHistory([]); setCheckHistory([]); }}
+          puData={selectedPuData}
+          activeTab={puTab}
+          setActiveTab={setPuTab}
+          uploadHistory={uploadHistory}
+          checkHistory={checkHistory}
+          loading={historyLoading}
+          handleClearPuHistory={() => alert('Очистка истории — в разделе «Структура сети».')}
+        />
       )}
 
       {photoView && (
@@ -10363,6 +10388,16 @@ function DeepWorkAnalysis() {
           onNext={() => setPhotoView(p => ({ ...p, index: (p.index + 1) % p.files.length }))}
           onPrev={() => setPhotoView(p => ({ ...p, index: (p.index - 1 + p.files.length) % p.files.length }))}
         />
+      )}
+
+      {showScrollTop && (
+        <button
+          className="scroll-to-top"
+          onClick={() => { const el = document.querySelector('.content'); if (el) el.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          title="Наверх"
+        >
+          <IconArrowUp className="ico" />
+        </button>
       )}
     </div>
   );
