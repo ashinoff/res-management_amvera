@@ -10157,7 +10157,7 @@ function DeepWorkAnalysis() {
               return x.days != null && x.days >= lo && x.days <= hi;
             });
             const setFR = (patch) => setFastRange(prev => ({ ...prev, [r.resId]: { ...(prev[r.resId] || { from: 0, to: fastThr }), ...patch } }));
-            const hasAny = (r.batches || []).length || (r.duplicatePhotos || []).length
+            const hasAny = (r.batches || []).length || (r.duplicatePhotos || []).length || (r.visualDuplicates || []).length
               || (r.templateComments || []).length || (r.fastList || []).length
               || (r.recheckFailList || []).length || (r.repeatList || []).length || (r.nightList || []).length;
             return (
@@ -10217,6 +10217,28 @@ function DeepWorkAnalysis() {
                           <div key={i} className="da-reg-group">
                             <div className="da-reg-title da-reg-title--row">
                               <span><span className="svg-frame">{p.isPdf ? <IconFileText size={14} /> : <IconEye size={14} />}</span> <b>{p.name}</b> — на <b>{p.tpCount}</b> ТП</span>
+                              {p.sample && (
+                                <button type="button" className="da-view-btn" onClick={() => openPhoto(p.sample)}>
+                                  <IconEye size={14} /> Посмотреть
+                                </button>
+                              )}
+                            </div>
+                            <RegisterTable records={p.records} />
+                          </div>
+                        ))}
+                      </ProblemBlock>
+                    )}
+
+                    {(r.visualDuplicates || []).length > 0 && (
+                      <ProblemBlock
+                        title="Похожее фото (по изображению)"
+                        count={`${r.visualDuplicates.length} групп(ы)`}
+                        note="Визуально одно и то же фото/скан на разных ТП — даже при другом имени/размере файла или внутри PDF (сравнение по перцептивному хешу). Нажмите «Посмотреть», чтобы открыть образец."
+                      >
+                        {r.visualDuplicates.map((p, i) => (
+                          <div key={i} className="da-reg-group">
+                            <div className="da-reg-title da-reg-title--row">
+                              <span><span className="svg-frame">{p.isPdf ? <IconFileText size={14} /> : <IconEye size={14} />}</span> Группа {i + 1} — визуально одинаково на <b>{p.tpCount}</b> ТП</span>
                               {p.sample && (
                                 <button type="button" className="da-view-btn" onClick={() => openPhoto(p.sample)}>
                                   <IconEye size={14} /> Посмотреть

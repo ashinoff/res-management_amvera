@@ -129,11 +129,45 @@ const upload = multer({
   }
 });
 
+// Перцептивный хеш (pHash) буфера через analyzers/phash.py — для поиска
+// ВИЗУАЛЬНО одинаковых фото/сканов (разные имена/размеры, кадр внутри PDF).
+// Полностью защищено: любая ошибка → [] (загрузка/анализ не ломаются).
+function computePhashes(buffer, mime) {
+  return new Promise((resolve) => {
+    try {
+      if (!buffer || !buffer.length) return resolve([]);
+      const os = require('os');
+      const tmp = path.join(os.tmpdir(), `ph_${Date.now()}_${Math.round(Math.random() * 1e9)}`);
+      fs.writeFile(tmp, buffer, (werr) => {
+        if (werr) { console.error('[phash] tmp write:', werr.message); return resolve([]); }
+        const scriptPath = path.join(__dirname, 'analyzers', 'phash.py');
+        let out = '', done = false;
+        const finish = (arr) => { if (done) return; done = true; fs.unlink(tmp, () => {}); resolve(arr); };
+        const timer = setTimeout(() => finish([]), 20000); // предохранитель
+        const tryRun = (cmd, isFallback) => {
+          const child = spawn(cmd, [scriptPath, tmp, mime || '']);
+          child.stdout.on('data', d => { out += d.toString(); });
+          child.stderr.on('data', () => {});
+          child.on('error', () => { if (!isFallback) tryRun('python', true); else { clearTimeout(timer); finish([]); } });
+          child.on('close', () => {
+            clearTimeout(timer);
+            try { const j = JSON.parse(out.trim()); finish(j && j.ok && Array.isArray(j.phashes) ? j.phashes : []); }
+            catch { finish([]); }
+          });
+        };
+        tryRun('python3', false);
+      });
+    } catch (e) { console.error('[phash]', e.message); resolve([]); }
+  });
+}
+
 // Функция загрузки в Cloudinary
 async function uploadToCloudinary(file, type = 'doc') {
   const isPdf = file.mimetype === 'application/pdf';
-  
-  return new Promise((resolve, reject) => {
+  // Считаем pHash параллельно с заливкой — не удлиняем загрузку последовательно.
+  const phashesPromise = computePhashes(file.buffer, file.mimetype);
+
+  const uploaded = await new Promise((resolve, reject) => {
     const timestamp = Date.now();
     
     // ИСПРАВЛЕНО: сохраняем оригинальное имя в UTF-8 СРАЗУ
@@ -196,6 +230,10 @@ async function uploadToCloudinary(file, type = 'doc') {
     const bufferStream = require('stream').Readable.from(file.buffer);
     bufferStream.pipe(uploadStream);
   });
+
+  let phashes = [];
+  try { phashes = await phashesPromise; } catch { phashes = []; }
+  return { ...uploaded, phashes };
 }
 
 // Хелпер для очистки уже загруженных файлов из Cloudinary при ошибке
@@ -8719,6 +8757,53 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       }
       duplicatePhotos.sort((a, b) => b.tpCount - a.tpCount);
 
+      // 5b) visualDuplicates — ВИЗУАЛЬНЫЕ дубли по перцептивному хешу (pHash):
+      //     тот же кадр даже при другом имени/размере или внутри PDF. Кластеризуем
+      //     по расстоянию Хэмминга; группа на ≥2 РАЗНЫХ ТП — подозрительна.
+      const PHASH_THRESHOLD = 6; // из 64 бит
+      const hamHex = (a, b) => {
+        let x;
+        try { x = BigInt('0x' + a) ^ BigInt('0x' + b); } catch { return 64; }
+        let c = 0; while (x) { c += Number(x & 1n); x >>= 1n; }
+        return c;
+      };
+      const phEntries = [];
+      for (const x of items) {
+        for (const att of parseAtt(x.attachments)) {
+          const phs = Array.isArray(att.phashes) ? att.phashes : [];
+          for (const ph of phs) {
+            if (typeof ph === 'string' && ph.length >= 8) phEntries.push({ ph, tpName: x.tpName, rec: recOf(x), att });
+          }
+        }
+        if (phEntries.length > 4000) break; // предохранитель от тяжёлой кластеризации
+      }
+      const phClusters = [];
+      for (const e of phEntries) {
+        let cl = null;
+        for (const c of phClusters) { if (hamHex(c.rep, e.ph) <= PHASH_THRESHOLD) { cl = c; break; } }
+        if (!cl) { cl = { rep: e.ph, tps: new Set(), records: [], sample: null, isPdf: false }; phClusters.push(cl); }
+        cl.tps.add(e.tpName);
+        cl.records.push(e.rec);
+        if (!cl.sample && e.att && e.att.url && e.att.public_id) {
+          cl.sample = { url: e.att.url, public_id: e.att.public_id, original_name: e.att.original_name, mime_type: e.att.mime_type };
+          cl.isPdf = /\.pdf$/i.test(e.att.original_name || '') || /\.pdf$/i.test(e.att.public_id || '');
+        }
+      }
+      const visualDuplicates = [];
+      for (const c of phClusters) {
+        if (c.tps.size >= 2) {
+          const seen = new Set();
+          const recs = [];
+          for (const r of c.records) {
+            const k = `${r.tpName}|${r.puNumber}|${r.closeDate}`;
+            if (!seen.has(k)) { seen.add(k); recs.push(r); }
+          }
+          recs.sort((a, b) => a.tpName.localeCompare(b.tpName, 'ru'));
+          visualDuplicates.push({ tpCount: c.tps.size, count: recs.length, isPdf: c.isPdf, sample: c.sample, records: recs.slice(0, 100) });
+        }
+      }
+      visualDuplicates.sort((a, b) => b.tpCount - a.tpCount);
+
       // 6) recheckFail — доля error среди перепроверенных (ok/error).
       const rechecked = items.filter(x => x.recheckResult === 'ok' || x.recheckResult === 'error');
       const checked = rechecked.length;
@@ -8810,6 +8895,10 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         score += Math.min(30, duplicatePhotos.length * 10);
         reasons.push(`Дубли фото: ${duplicatePhotos.length} файл(ов) встречаются на разных ТП`);
       }
+      if (visualDuplicates.length > 0) {
+        score += Math.min(20, visualDuplicates.length * 10);
+        reasons.push(`Визуально одинаковые фото/сканы: ${visualDuplicates.length} групп(ы) на разных ТП`);
+      }
       if (recheckFailFlag) {
         score += 20;
         reasons.push(`Провалы перепроверки: ${Math.round(failShare * 100)}% из ${checked} перепроверенных`);
@@ -8848,7 +8937,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         resId: g.resId, resName: g.resName,
         totalClosed, uniqueTp, periodDays,
         capacity: { maxTpInWindow, windowStart: windowStart ? windowStart.toISOString() : null, capacityLimit, ratio },
-        batches, afterHoursShare, templateComments, duplicatePhotos,
+        batches, afterHoursShare, templateComments, duplicatePhotos, visualDuplicates,
         recheck: { checked, failed, failShare },
         fast: { count: fastCount, share: fastShare, days: fastDays },
         fastList, recheckFailList, repeatList, nightList,
@@ -8861,6 +8950,65 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
     res.json({ params, rows });
   } catch (error) {
     console.error('work-quality error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Бэкфилл pHash для УЖЕ загруженных вложений (визуальные дубли в анализе видят
+// только вложения с phashes). Обрабатываем партиями — админ вызывает повторно,
+// пока remaining>0. Best-effort: ошибка по файлу пропускается.
+app.post('/api/admin/backfill-phash', authenticateToken, checkRole(['admin']), async (req, res) => {
+  const https = require('https');
+  const downloadBuffer = (url) => new Promise((resolve, reject) => {
+    https.get(url, (r) => {
+      if (r.statusCode !== 200) { r.resume(); return reject(new Error('HTTP ' + r.statusCode)); }
+      const chunks = [];
+      r.on('data', c => chunks.push(c));
+      r.on('end', () => resolve(Buffer.concat(chunks)));
+    }).on('error', reject);
+  });
+  try {
+    const limit = Math.min(100, Math.max(1, parseInt(req.body?.limit, 10) || 30));
+    // Кандидаты: записи с непустыми attachments. Фильтр «нужен phash» — в коде.
+    const records = await CheckHistory.findAll({
+      where: { attachments: { [Op.ne]: null } },
+      order: [['id', 'ASC']],
+      limit: 3000,
+    });
+    let scanned = 0, updated = 0, filesHashed = 0, remaining = 0;
+    for (const rec of records) {
+      const atts = Array.isArray(rec.attachments) ? rec.attachments : [];
+      const needs = atts.some(a => a && a.url && !Array.isArray(a.phashes));
+      if (!needs) continue;
+      remaining++;
+      if (scanned >= limit) continue; // за этот вызов не обрабатываем — вернём в remaining
+      scanned++;
+      let changed = false;
+      for (const a of atts) {
+        if (!a || !a.url || Array.isArray(a.phashes)) continue;
+        try {
+          const buf = await downloadBuffer(a.url);
+          const mime = a.mime_type || (/\.pdf$/i.test(a.url) ? 'application/pdf' : 'image/jpeg');
+          a.phashes = await computePhashes(buf, mime);
+          filesHashed++;
+          changed = true;
+        } catch (e) {
+          a.phashes = []; // помечаем обработанным, чтобы не зациклиться на битом файле
+          changed = true;
+          console.error('[backfill-phash] file:', e.message);
+        }
+      }
+      if (changed) {
+        rec.set('attachments', atts);
+        rec.changed('attachments', true);
+        await rec.save();
+        updated++;
+      }
+    }
+    remaining = Math.max(0, remaining - scanned);
+    res.json({ scannedRecords: scanned, updatedRecords: updated, filesHashed, remaining });
+  } catch (error) {
+    console.error('backfill-phash error:', error);
     res.status(500).json({ error: error.message });
   }
 });
