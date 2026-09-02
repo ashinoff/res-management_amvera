@@ -9866,6 +9866,24 @@ const DA_LEVEL_LABEL = { red: 'Высокий риск', yellow: 'Средний
 const DA_STATUS_LABEL = { awaiting_work: 'Ожидает работ', awaiting_recheck: 'Ожидает перепроверки', completed: 'Завершено' };
 const DA_RECHECK_LABEL = { ok: 'перепроверка ОК', error: 'перепроверка: ошибка', pending: '' };
 const DA_POS_LABEL = { start: 'начало', middle: 'середина', end: 'конец' };
+
+// Блок проблемы = сворачиваемая «уведомляшка»: клик по шапке раскрывает.
+// Модульный уровень (не пересоздаётся при рендере родителя) — состояние
+// свёрнут/раскрыт не сбрасывается. По умолчанию свёрнут: видно список проблем,
+// раскрываем только нужную, не листая всю страницу.
+function ProblemBlock({ title, count, note, tone, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`da-problem da-problem--${tone || 'red'} ${open ? 'is-open' : ''}`}>
+      <button type="button" className="da-problem-head" onClick={() => setOpen(o => !o)}>
+        <span className="da-problem-title">{title}</span>
+        {count != null && <span className="da-problem-count">{count}</span>}
+        <IconArrowDown size={16} className="da-problem-chev" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .12s ease' }} />
+      </button>
+      {open && <div className="da-problem-body">{note && <div className="da-problem-note">{note}</div>}{children}</div>}
+    </div>
+  );
+}
 const DA_DEFAULTS = { resId: '', dateFrom: '', dateTo: '', windowDays: 4, brigades: 3, perBrigade: 5, fastDays: 1 };
 
 function DeepWorkAnalysis() {
@@ -9882,6 +9900,7 @@ function DeepWorkAnalysis() {
   const [expanded, setExpanded] = useState({});
   const [photoView, setPhotoView] = useState(null); // { files:[att], index } — превью через FileViewer
   const [fastRange, setFastRange] = useState({});    // resId -> { from, to } (фильтр «дней от/до»)
+  const [daState, setDaState] = useState(null);      // запись для модалки «состояние/ошибка»
 
   useEffect(() => {
     api.get('/api/res/list').then(r => setResList(r.data)).catch(e => console.error('Error loading RES list:', e));
@@ -10000,18 +10019,6 @@ function DeepWorkAnalysis() {
     XLSX.writeFile(wb, `Глубокий_анализ_работ_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
   };
 
-  // Один блок = одна проблема: заголовок, счётчик, пояснение и перечень ТП.
-  const ProblemBlock = ({ title, count, note, tone, children }) => (
-    <div className={`da-problem da-problem--${tone || 'red'}`}>
-      <div className="da-problem-head">
-        <span className="da-problem-title">{title}</span>
-        {count != null && <span className="da-problem-count">{count}</span>}
-      </div>
-      {note && <div className="da-problem-note">{note}</div>}
-      {children}
-    </div>
-  );
-  const tpsTail = (arr, total) => total > (arr || []).length ? ` … (+${total - (arr || []).length})` : '';
 
   // Ячейка «Состояние»: SVG-значок с подсветкой + текст (статус + итог перепроверки).
   const stateCell = (r) => {
@@ -10029,30 +10036,51 @@ function DeepWorkAnalysis() {
     );
   };
 
-  // Реестр записей (как таблицы в «Анализе»): ТП, ВЛ, ошибка, даты, [дней], состояние.
-  const RegisterTable = ({ records, showDays, fastThr }) => (
-    <table className="diag-table da-reg">
-      <thead>
-        <tr>
-          <th className="l">ТП</th><th className="l">ВЛ</th><th className="l">Ошибка</th>
-          <th>Дата ошибки</th><th>Дата закрытия</th>{showDays && <th>Дней</th>}<th className="l">Состояние</th>
-        </tr>
-      </thead>
-      <tbody>
-        {records.map((r, i) => (
-          <tr key={i}>
-            <td className="l"><b>{r.tpName}</b>{r.puNumber ? <span className="da-reg-pu"> · ПУ {r.puNumber}</span> : ''}{r.failureCount > 1 ? <span className="da-reg-repeat"> · повтор ×{r.failureCount}</span> : ''}</td>
-            <td className="l">{r.vlName || '—'}{r.position ? <span className="da-reg-pos"> ({DA_POS_LABEL[r.position] || r.position})</span> : ''}</td>
-            <td className="l da-reg-err" title={r.error}>{r.error || '—'}</td>
-            <td>{dd(r.checkDate)}</td>
-            <td>{dd(r.closeDate)}</td>
-            {showDays && <td className={r.days != null && r.days >= 0 && r.days <= fastThr ? 'da-fast' : ''}>{daysWord(r.days)}</td>}
-            <td className="l">{stateCell(r)}</td>
+  // Реестр записей: строки ОБЪЕДИНЕНЫ по ТП (одна и та же ТП — один блок строк
+  // с rowSpan), ВЛ/позиция и ПУ — раздельно по строкам. «Состояние» кликабельно
+  // и открывает модалку с ошибкой (как в структуре сети).
+  const RegisterTable = ({ records, showDays, fastThr }) => {
+    const groups = [];
+    const idx = new Map();
+    for (const r of records) {
+      if (!idx.has(r.tpName)) { idx.set(r.tpName, groups.length); groups.push({ tp: r.tpName, rows: [] }); }
+      groups[idx.get(r.tpName)].rows.push(r);
+    }
+    return (
+      <table className="diag-table da-reg">
+        <thead>
+          <tr>
+            <th className="l">ТП</th><th className="l">ВЛ · ПУ</th>
+            <th>Дата ошибки</th><th>Дата закрытия</th>{showDays && <th>Дней</th>}<th className="l">Состояние</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+        </thead>
+        <tbody>
+          {groups.map((g, gi) => g.rows.map((r, ri) => (
+            <tr key={`${gi}-${ri}`}>
+              {ri === 0 && (
+                <td className="l da-reg-tp" rowSpan={g.rows.length}>
+                  <b>{g.tp}</b><span className="da-reg-cnt"> · {g.rows.length}</span>
+                </td>
+              )}
+              <td className="l">
+                <b>{r.vlName || '—'}</b>{r.position ? <span className="da-reg-pos"> ({DA_POS_LABEL[r.position] || r.position})</span> : ''}
+                {r.puNumber ? <span className="da-reg-pu"> · ПУ {r.puNumber}</span> : ''}
+                {r.failureCount > 1 ? <span className="da-reg-repeat"> · повтор ×{r.failureCount}</span> : ''}
+              </td>
+              <td>{dd(r.checkDate)}</td>
+              <td>{dd(r.closeDate)}</td>
+              {showDays && <td className={r.days != null && r.days >= 0 && r.days <= fastThr ? 'da-fast' : ''}>{daysWord(r.days)}</td>}
+              <td className="l">
+                <button type="button" className="da-state-btn" onClick={() => setDaState(r)} title="Открыть ошибку и состояние">
+                  {stateCell(r)}
+                </button>
+              </td>
+            </tr>
+          )))}
+        </tbody>
+      </table>
+    );
+  };
 
   const openPhoto = (att) => { if (att) setPhotoView({ files: [att], index: 0 }); };
 
@@ -10122,8 +10150,6 @@ function DeepWorkAnalysis() {
             const open = !!expanded[r.resId];
             const ratioTxt = r.capacity.ratio > 1 ? ` — превышение в ${r.capacity.ratio.toFixed(1)} раза` : '';
             const fastThr = r.fast?.days ?? data.params.fastDays;
-            const sTp = r.suspectTp || [];
-            const nightTps = sTp.filter(t => t.night > 0);
             const fr = fastRange[r.resId] || { from: 0, to: fastThr };
             const fastRows = (r.fastList || []).filter(x => {
               const lo = fr.from === '' ? 0 : Number(fr.from);
@@ -10133,7 +10159,7 @@ function DeepWorkAnalysis() {
             const setFR = (patch) => setFastRange(prev => ({ ...prev, [r.resId]: { ...(prev[r.resId] || { from: 0, to: fastThr }), ...patch } }));
             const hasAny = (r.batches || []).length || (r.duplicatePhotos || []).length
               || (r.templateComments || []).length || (r.fastList || []).length
-              || (r.recheckFailList || []).length || (r.repeatList || []).length || nightTps.length;
+              || (r.recheckFailList || []).length || (r.repeatList || []).length || (r.nightList || []).length;
             return (
               <div key={r.resId} className="problem-card">
                 <div className="problem-header">
@@ -10207,16 +10233,14 @@ function DeepWorkAnalysis() {
                       <ProblemBlock
                         title="Шаблонный комментарий"
                         count={`${r.templateComments.length}`}
-                        note="Один и тот же текст комментария проставлен разным ТП — отписка вместо реального отчёта."
+                        note="Один и тот же текст комментария проставлен разным ТП — отписка вместо реального отчёта. ТП объединены, ВЛ/позиция раздельно; «Состояние» открывает ошибку."
                       >
-                        <div className="da-tmpl-list">
-                          {r.templateComments.map((c, i) => (
-                            <div key={i} className="da-tmpl">
-                              <div className="da-tmpl-head">«{c.text}» — повторов: <b>{c.count}</b>, на <b>{c.tpCount}</b> ТП</div>
-                              <div className="da-tmpl-tps">ТП: {(c.tps || []).join(', ')}{tpsTail(c.tps, c.tpCount)}</div>
-                            </div>
-                          ))}
-                        </div>
+                        {r.templateComments.map((c, i) => (
+                          <div key={i} className="da-reg-group">
+                            <div className="da-reg-title">«{c.text}» — повторов: <b>{c.count}</b>, на <b>{c.tpCount}</b> ТП</div>
+                            <RegisterTable records={c.records || []} />
+                          </div>
+                        ))}
                       </ProblemBlock>
                     )}
 
@@ -10237,16 +10261,14 @@ function DeepWorkAnalysis() {
                       </ProblemBlock>
                     )}
 
-                    {nightTps.length > 0 && (
+                    {(r.nightList || []).length > 0 && (
                       <ProblemBlock
                         title="Закрытия в нерабочее время"
-                        count={`${nightTps.length} ТП`}
+                        count={`${r.nightList.length}`}
                         tone="yellow"
                         note="Мероприятия закрыты до 7:00 или после 21:00 — нехарактерно для выездных работ."
                       >
-                        <ul className="da-problem-tps">
-                          {nightTps.map((t, i) => <li key={i}><b>{t.tpName}</b> — {t.night} закр.</li>)}
-                        </ul>
+                        <RegisterTable records={r.nightList} />
                       </ProblemBlock>
                     )}
 
@@ -10280,6 +10302,35 @@ function DeepWorkAnalysis() {
             );
           })}
         </div>
+      )}
+
+      {daState && (
+        <ModalShell
+          title={`${daState.tpName} · ${daState.vlName || '—'}`}
+          dockTitle={`ПУ ${daState.puNumber || ''}`}
+          icon={<IconAlertCircle size={16} />}
+          onClose={() => setDaState(null)}
+        >
+          <div className="da-state-modal">
+            <div className="pu-location-info">
+              <p><strong>ТП:</strong> {daState.tpName}</p>
+              <p><strong>Фидер (ВЛ):</strong> {daState.vlName || '—'}{daState.position ? ` (${DA_POS_LABEL[daState.position] || daState.position})` : ''}</p>
+              <p><strong>ПУ:</strong> {daState.puNumber || '—'}</p>
+              <p><strong>Состояние:</strong> {DA_STATUS_LABEL[daState.status] || daState.status || '—'}{DA_RECHECK_LABEL[daState.recheck] ? ` · ${DA_RECHECK_LABEL[daState.recheck]}` : ''}</p>
+              <p><strong>Проверка → закрытие:</strong> {dd(daState.checkDate)} → {dd(daState.closeDate)} ({daysWord(daState.days)})</p>
+              {daState.failureCount > 1 && <p><strong>Повторов до отработки:</strong> ×{daState.failureCount}</p>}
+            </div>
+            <div className="phase-indicators-large">
+              {['A', 'B', 'C'].map(ph => (
+                <div key={ph} className={`phase-indicator ${new RegExp(`Фаза ${ph}`).test(daState.error || '') ? 'phase-error' : ''}`}>{ph}</div>
+              ))}
+            </div>
+            <div className="error-details-box">
+              <h4>Обнаруженные отклонения:</h4>
+              <div className="error-text">{daState.error || '—'}</div>
+            </div>
+          </div>
+        </ModalShell>
       )}
 
       {photoView && (

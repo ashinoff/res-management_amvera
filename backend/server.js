@@ -8670,16 +8670,17 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       for (const x of items) {
         const norm = normComment(x.resComment);
         if (!norm) continue;
-        if (!commentMap.has(norm)) commentMap.set(norm, { text: String(x.resComment || '').trim(), tps: new Set(), count: 0 });
-        const e = commentMap.get(norm); e.count++; e.tps.add(x.tpName);
+        if (!commentMap.has(norm)) commentMap.set(norm, { text: String(x.resComment || '').trim(), tps: new Set(), count: 0, records: [] });
+        const e = commentMap.get(norm); e.count++; e.tps.add(x.tpName); e.records.push(recOf(x));
       }
-      // Шаблонный коммент группируем по ГРУППЕ ТП — сразу видно, каким ТП поставили
-      // один и тот же текст (список ТП, до 50 имён).
+      // Шаблонный коммент группируем по ГРУППЕ ТП: несём реестр записей (ТП/ВЛ/
+      // позиция/даты/состояние) — фронт объединит по ТП, ВЛ покажет раздельно.
       const templateComments = [];
       for (const e of commentMap.values()) {
         if (e.count >= 5 && e.tps.size >= 2) {
           const tps = [...e.tps].sort((a, b) => a.localeCompare(b, 'ru'));
-          templateComments.push({ text: e.text.slice(0, 200), count: e.count, tpCount: tps.length, tps: tps.slice(0, 50) });
+          const recs = e.records.sort((a, b) => a.tpName.localeCompare(b.tpName, 'ru'));
+          templateComments.push({ text: e.text.slice(0, 200), count: e.count, tpCount: tps.length, tps: tps.slice(0, 50), records: recs.slice(0, 100) });
         }
       }
       templateComments.sort((a, b) => b.count - a.count);
@@ -8837,6 +8838,11 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         .filter(x => (x.failureCount || 1) >= 2)
         .map(recOf)
         .sort((a, b) => b.failureCount - a.failureCount || a.tpName.localeCompare(b.tpName, 'ru'));
+      // Реестр «Закрытия в нерабочее время»: локальный час закрытия <7 или ≥21.
+      const nightList = items
+        .filter(x => { const h = new Date(x.workCompletedDate).getHours(); return h < 7 || h >= 21; })
+        .map(recOf)
+        .sort((a, b) => a.tpName.localeCompare(b.tpName, 'ru'));
 
       rows.push({
         resId: g.resId, resName: g.resName,
@@ -8845,7 +8851,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         batches, afterHoursShare, templateComments, duplicatePhotos,
         recheck: { checked, failed, failShare },
         fast: { count: fastCount, share: fastShare, days: fastDays },
-        fastList, recheckFailList, repeatList,
+        fastList, recheckFailList, repeatList, nightList,
         suspectTp,
         score, level, reasons
       });
