@@ -3021,6 +3021,9 @@ app.post('/api/notifications/:id/complete-work',
           workCompletedDate: new Date(),
           checkFromDate: checkFromDate ? new Date(checkFromDate) : new Date(),
           status: 'awaiting_recheck',
+          // Сколько раз ошибка приходила ДО отработки (повторные съёмы без
+          // рассмотрения РЭСом) — для признака «отработали только после N-го съёма».
+          failureCount: errorData.repeatCount || 1,
           attachments: attachments
         }, { transaction });
         
@@ -5172,44 +5175,16 @@ if (result.has_errors) {
             } else {
               // НЕ ПЕРЕПРОВЕРКА - обычная проверка или повторная проверка
               
-              // ✅ ИСПРАВЛЕНИЕ: Удаляем старые уведомления для этого ПУ с теми же фазами
-              const newPhaseKey = getPhaseSignature(JSON.stringify({
-                errorDetails: result.summary,
-                details: result.details
-              }));
-              
-              const oldNotifs = await Notification.findAll({
-                where: {
-                  type: 'error',
-                  message: {
-                    [Op.like]: `%"puNumber":"${fileName}"%`
-                  }
-                }
+              // ЕДИНОЕ открытое error-уведомление на ПУ (тот же номер = та же ВЛ и
+              // позиция). Пока РЭС не рассмотрел ошибку, повторные съёмы НЕ плодят
+              // новые уведомления с разными датами (их одновременное закрытие давало
+              // «пакет» и дубли в истории), а ОБНОВЛЯЮТ существующее: свежие детали,
+              // счётчик repeatCount, исходная дата firstReportDate сохраняется.
+              const openErrorNotifs = await Notification.findAll({
+                where: { type: 'error', message: { [Op.like]: `%"puNumber":"${fileName}"%` } },
+                order: [['createdAt', 'ASC']]
               });
-              
-              let deletedOldNotifs = 0;
-              for (const oldNotif of oldNotifs) {
-                const oldPhaseKey = getPhaseSignature(oldNotif.message);
-                if (oldPhaseKey === newPhaseKey) {
-                  await oldNotif.destroy();
-                  deletedOldNotifs++;
-                }
-              }
-              
-              if (deletedOldNotifs > 0) {
-              }
-              
-              // Если ошибок НЕТ — удаляем ВСЕ старые error-уведомления для этого ПУ
-              if (!result.has_errors && oldNotifs.length > deletedOldNotifs) {
-                const remaining = oldNotifs.length - deletedOldNotifs;
-                await Notification.destroy({
-                  where: {
-                    type: 'error',
-                    message: { [Op.like]: `%"puNumber":"${fileName}"%` }
-                  }
-                });
-              }
-              
+
               // Обновляем статус ПУ
               await PuStatus.upsert({
                 puNumber: fileName,
@@ -5220,17 +5195,40 @@ if (result.has_errors) {
                 lastCheck: new Date()
               });
 
-              // Успешная проверка (без ошибок) — автоматически снимаем ВЛ с
-              // проблемных (даже если ранее было 2+ неудачных проверок).
               if (!result.has_errors) {
+                // Ошибок нет — снимаем все открытые error-уведомления этого ПУ и
+                // автоматически решаем проблемную ВЛ (даже если было 2+ ошибки).
+                if (openErrorNotifs.length > 0) {
+                  await Notification.destroy({
+                    where: { type: 'error', message: { [Op.like]: `%"puNumber":"${fileName}"%` } }
+                  });
+                }
                 await ProblemVL.update(
                   { status: 'resolved' },
                   { where: { puNumber: fileName, status: 'active' } }
                 );
-              }
-
-              // Если есть ошибки - добавляем для создания уведомлений
-              if (result.has_errors) {
+              } else if (openErrorNotifs.length > 0) {
+                // Ошибка по этому ПУ уже висит — ОБНОВЛЯЕМ её (та же ВЛ/номер),
+                // не создаём новое; лишние дубликаты (если накопились ранее) удаляем.
+                const keep = openErrorNotifs[0];
+                let prev = {};
+                try { prev = JSON.parse(keep.message) || {}; } catch { prev = {}; }
+                const repeatCount = (prev.repeatCount || 1) + 1;
+                const firstReportDate = prev.firstReportDate || keep.createdAt;
+                await keep.update({
+                  message: JSON.stringify({
+                    puNumber: fileName, position,
+                    tpName: networkStructure.tpName, vlName: networkStructure.vlName,
+                    resName: networkStructure.ResUnit.name,
+                    errorDetails: result.summary, details: result.details,
+                    repeatCount, firstReportDate
+                  }),
+                  isRead: false
+                });
+                for (const dup of openErrorNotifs.slice(1)) await dup.destroy();
+                console.log(`↻ ПУ ${fileName}: обновлена открытая ошибка (повтор №${repeatCount}), новое уведомление не создаём`);
+              } else {
+                // Первая ошибка по этому ПУ — уведомление создаст createNotifications.
                 errors.push({
                   puNumber: fileName,
                   error: result.summary,
@@ -8571,7 +8569,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       where,
       attributes: ['id', 'resId', 'puNumber', 'tpName', 'vlName', 'resComment',
         'attachments', 'initialCheckDate', 'workCompletedDate', 'recheckDate',
-        'recheckResult', 'status'],
+        'recheckResult', 'status', 'failureCount'],
       include: [{ model: ResUnit, attributes: ['id', 'name'] }]
     });
 
@@ -8611,6 +8609,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
       checkDate: x.initialCheckDate, closeDate: x.workCompletedDate,
       days: dayDiff2(x.initialCheckDate, x.workCompletedDate),
       status: x.status, recheck: x.recheckResult,
+      failureCount: x.failureCount || 1,
     });
 
     const rows = [];
@@ -8832,6 +8831,12 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         .filter(x => x.recheckResult === 'error')
         .map(recOf)
         .sort((a, b) => a.tpName.localeCompare(b.tpName, 'ru'));
+      // Реестр «Отработка только после повторных съёмов»: ошибка приходила ≥2 раз
+      // до отработки (repeatCount перенесён в failureCount при закрытии).
+      const repeatList = items
+        .filter(x => (x.failureCount || 1) >= 2)
+        .map(recOf)
+        .sort((a, b) => b.failureCount - a.failureCount || a.tpName.localeCompare(b.tpName, 'ru'));
 
       rows.push({
         resId: g.resId, resName: g.resName,
@@ -8840,7 +8845,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
         batches, afterHoursShare, templateComments, duplicatePhotos,
         recheck: { checked, failed, failShare },
         fast: { count: fastCount, share: fastShare, days: fastDays },
-        fastList, recheckFailList,
+        fastList, recheckFailList, repeatList,
         suspectTp,
         score, level, reasons
       });

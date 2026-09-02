@@ -10041,7 +10041,7 @@ function DeepWorkAnalysis() {
       <tbody>
         {records.map((r, i) => (
           <tr key={i}>
-            <td className="l"><b>{r.tpName}</b>{r.puNumber ? <span className="da-reg-pu"> · ПУ {r.puNumber}</span> : ''}</td>
+            <td className="l"><b>{r.tpName}</b>{r.puNumber ? <span className="da-reg-pu"> · ПУ {r.puNumber}</span> : ''}{r.failureCount > 1 ? <span className="da-reg-repeat"> · повтор ×{r.failureCount}</span> : ''}</td>
             <td className="l">{r.vlName || '—'}{r.position ? <span className="da-reg-pos"> ({DA_POS_LABEL[r.position] || r.position})</span> : ''}</td>
             <td className="l da-reg-err" title={r.error}>{r.error || '—'}</td>
             <td>{dd(r.checkDate)}</td>
@@ -10133,7 +10133,7 @@ function DeepWorkAnalysis() {
             const setFR = (patch) => setFastRange(prev => ({ ...prev, [r.resId]: { ...(prev[r.resId] || { from: 0, to: fastThr }), ...patch } }));
             const hasAny = (r.batches || []).length || (r.duplicatePhotos || []).length
               || (r.templateComments || []).length || (r.fastList || []).length
-              || (r.recheckFailList || []).length || nightTps.length;
+              || (r.recheckFailList || []).length || (r.repeatList || []).length || nightTps.length;
             return (
               <div key={r.resId} className="problem-card">
                 <div className="problem-header">
@@ -10257,6 +10257,17 @@ function DeepWorkAnalysis() {
                         note="После «мероприятий» повторная проверка снова показала ошибку — проблема не устранена. ВЛ и текущее состояние — в реестре."
                       >
                         <RegisterTable records={r.recheckFailList} />
+                      </ProblemBlock>
+                    )}
+
+                    {(r.repeatList || []).length > 0 && (
+                      <ProblemBlock
+                        title="Отработка только после повторных съёмов"
+                        count={`${r.repeatList.length}`}
+                        tone="yellow"
+                        note="Ошибка по ПУ приходила несколько раз (новые съёмы по той же ВЛ), и только потом её отработали — значит вовремя не рассмотрели. «повтор ×N» — сколько раз ошибка появлялась до отработки."
+                      >
+                        <RegisterTable records={r.repeatList} />
                       </ProblemBlock>
                     )}
 
