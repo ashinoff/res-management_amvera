@@ -9,12 +9,12 @@ const jwt = require('jsonwebtoken');
 const jwksClient = require('jwks-rsa');
 
 const PLATFORM_SSO = ['1', 'true', 'yes'].includes(String(process.env.PLATFORM_SSO || 'false').toLowerCase());
-const KEYCLOAK_URL = (process.env.KEYCLOAK_URL || 'https://keycloak-ashinoff.amvera.io').replace(/\/+$/, '');
+const KEYCLOAK_URL = (process.env.KEYCLOAK_URL || 'https://keycloak-waw-ashinoff.waw0.amvera.tech').replace(/\/+$/, '');
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || 'platform';
 const KEYCLOAK_AZP = process.env.KEYCLOAK_AZP || 'web-desktop';
 // Одна realm-роль доступа к приложению (паттерн платформы: <app>-user).
 const ACCESS_ROLE = process.env.ACCESS_ROLE || 'resm-user';
-const PLATFORM_ORIGIN = process.env.PLATFORM_ORIGIN || 'https://sue-system-ashinoff.amvera.io';
+const PLATFORM_ORIGIN = process.env.PLATFORM_ORIGIN || 'https://sue-system-2-ashinoff.waw0.amvera.tech';
 
 const ISSUER = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`;
 const JWKS_URI = `${ISSUER}/protocol/openid-connect/certs`;

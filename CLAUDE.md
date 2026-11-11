@@ -391,6 +391,16 @@ env + сторона платформы + Keycloak + сквозная прове
 - grep: Keycloak-токен нигде не логируется/не сохраняется.
 
 ## Журнал изменений (Claude Code ведёт сам)
+- **2026-11-12** — Переезд после падения региона amvera.io: приложение теперь в
+  Amvera **Москва-1** (`res-management`, `res-management-ashinoff.msk1.amvera.tech`),
+  БД `res-management-db` (данные уцелели). Внутренний хост БД в новых регионах —
+  `cnpg-res-management-db-rw` (не `amvera-ashinoff-cnpg-…-rw`), `DB_SSL=false`.
+  Платформа и Keycloak переехали в Варшаву: значения по умолчанию обновлены —
+  `PLATFORM_ORIGIN` (фронт `VITE_PLATFORM_ORIGIN` в `App.jsx` и бэк
+  `keycloakPlatform.js`) = `https://sue-system-2-ashinoff.waw0.amvera.tech`,
+  `KEYCLOAK_URL` = `https://keycloak-waw-ashinoff.waw0.amvera.tech`. Старый адрес
+  платформы во фронте молча отбрасывал токен (`event.origin`), и вход через
+  платформу не работал, хотя бейдж работал.
 - **2026-09-02** (6) — «Глубокий анализ», доводка по фидбеку: (1) убрана кнопка
   «Показать детали» — реестры проблем показываются сразу (блоки-«уведомляшки»
   остаются сворачиваемыми). (2) «Состояние» теперь открывает **настоящую модалку

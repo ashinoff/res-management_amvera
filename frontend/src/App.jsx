@@ -115,7 +115,7 @@ const styleExportSheet = (ws, colorFns = {}, cellColor = null) => {
 };
 
 // Единый вход через платформу (SSO): origin платформы и признак встраивания в iframe.
-const PLATFORM_ORIGIN = import.meta.env.VITE_PLATFORM_ORIGIN || 'https://sue-system-ashinoff.amvera.io';
+const PLATFORM_ORIGIN = import.meta.env.VITE_PLATFORM_ORIGIN || 'https://sue-system-2-ashinoff.waw0.amvera.tech';
 const EMBEDDED = typeof window !== 'undefined' && window.self !== window.top;
 
 const api = axios.create({
