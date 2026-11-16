@@ -10,7 +10,7 @@ import './App.css';
 // xlsx-js-style — drop-in форк SheetJS (тот же API, включая utils/read), плюс стили
 // ячеек. Один импорт вместо двух ('xlsx' удалён из зависимостей — был дубль).
 import * as XLSX from 'xlsx-js-style';
-import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo, IconMeter, IconUpload, IconSettings, IconUsers, IconGauge, IconGavel } from './icons.jsx';
+import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo, IconMeter, IconUpload, IconSettings, IconUsers, IconGauge, IconGavel, IconMinus, IconMaximize, IconMinimize } from './icons.jsx';
 import RossetiLoader from './RossetiLoader.jsx';
 
 // =====================================================
@@ -574,13 +574,14 @@ function ModalShell({ title, dockTitle, titleExtra, icon, onClose, onBackdrop, v
       <div className={`modal-backdrop ${isConfirm ? 'modal-backdrop--confirm' : ''}`} onClick={handleBackdrop}>
         <div className={`modal-content modal-shell ${fullscreen ? 'modal-shell--fs' : ''} ${className}`} onClick={(e) => e.stopPropagation()}>
           <div className={`modal-shell-bar ${headerClassName}`}>
-            <div className="traffic-lights">
-              <button className="tl tl-red" title="Закрыть" onClick={() => onCloseRef.current && onCloseRef.current()}><IconX className="tl-ico" /></button>
-              {!isConfirm && <button className="tl tl-yellow" title="Свернуть в док" onClick={minimize}><span className="tl-min" /></button>}
-              {!isConfirm && <button className="tl tl-green" title={fullscreen ? 'Обычный размер' : 'Во весь экран'} onClick={() => setFullscreen(f => !f)}><span className="tl-fs" /></button>}
-            </div>
+            {icon && <span className="modal-shell-icon">{icon}</span>}
             <div className="modal-shell-title">{title}</div>
             {titleExtra && <div className="modal-shell-extra">{titleExtra}</div>}
+            <div className="modal-shell-ctrls">
+              {!isConfirm && <button type="button" className="msc" title="Свернуть в док" aria-label="Свернуть" onClick={minimize}><IconMinus size={18} /></button>}
+              {!isConfirm && <button type="button" className="msc" title={fullscreen ? 'Обычный размер' : 'Во весь экран'} aria-label="Размер окна" onClick={() => setFullscreen(f => !f)}>{fullscreen ? <IconMinimize size={17} /> : <IconMaximize size={17} />}</button>}
+              <button type="button" className="msc msc--close" title="Закрыть (Esc)" aria-label="Закрыть" onClick={() => onCloseRef.current && onCloseRef.current()}><IconX size={20} /></button>
+            </div>
           </div>
           <div className="modal-shell-body">{children}</div>
         </div>
@@ -4689,6 +4690,7 @@ function ProblemTpModal({ tp, onClose, onViewFiles }) {
 }
 
 function ProblemVL({ selectedRes }) {
+  const openPu = usePuPanel();
   const [problemVLs, setProblemVLs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -4809,8 +4811,8 @@ const handleSendEmail = async () => {
             <div
               key={problem.id}
               className="problem-card"
-              onClick={() => { setDetailsProblem(problem); setShowDetailsModal(true); }}
-              title="Открыть подробности"
+              onClick={() => openPu(problem.puNumber)}
+              title="Открыть карточку ПУ"
             >
               <div className="problem-header">
                 <div className="problem-title">
@@ -6913,62 +6915,55 @@ function FileViewer({ files, currentIndex, onClose, onNext, onPrev }) {
     // eslint-disable-next-line
   }, [currentFile.public_id]);
 
+  // Клавиатура: Esc — закрыть, ← → — листать.
+  useEffect(() => {
+    const h = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+      else if (e.key === 'ArrowRight' && files.length > 1) onNext();
+      else if (e.key === 'ArrowLeft' && files.length > 1) onPrev();
+    };
+    window.addEventListener('keydown', h, true);
+    return () => window.removeEventListener('keydown', h, true);
+  }, [files.length, onClose, onNext, onPrev]);
+
+  // Просмотрщик в стиле Сферы: затемнение, сверху имя и «N из M», по бокам стрелки.
   return (
-    <ModalShell
-      title={`Просмотр файлов (${currentIndex + 1} из ${files.length})`}
-      dockTitle={currentFile.original_name}
-      icon={<IconFolder size={16} />}
-      className="file-viewer-container"
-      onClose={onClose}
-    >
-        <div className="file-viewer-content" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-          {loading ? (
-            <div className="file-viewer-status"><RossetiLoader /></div>
-          ) : error ? (
-            <div className="file-not-supported">
-              {error.lost
-                ? <div className="file-lost-badge"><IconAlertTriangle className="ico" /> Файл утерян в хранилище</div>
-                : <p style={{ color: 'var(--red)' }}>Не удалось загрузить файл</p>}
-              <a href={fileProxyUrl(currentFile)} download={currentFile.original_name} className="download-link">
-                Попробовать скачать
-              </a>
-            </div>
-          ) : isImage ? (
-            <div className="image-viewer-wrap">
-              <img src={blobUrl} alt={currentFile.original_name} className="file-viewer-image" />
-              <a href={fileProxyUrl(currentFile)} download={currentFile.original_name} className="btn-download-pdf image-download-btn">
-                <span><IconDownload className="ico" /></span>
-                Скачать {currentFile.original_name}
-              </a>
-            </div>
-          ) : isPdf && pdfBlob ? (
-            <PdfCanvas blob={pdfBlob} downloadHref={fileProxyUrl(currentFile)} downloadName={currentFile.original_name} />
-          ) : (
-            <div className="file-not-supported">
-              <p>Предпросмотр недоступен</p>
-              <a href={fileProxyUrl(currentFile)} download={currentFile.original_name} className="download-link">
-                Скачать файл
-              </a>
-            </div>
-          )}
+    <div className="fv" role="dialog" aria-label="Просмотр файла" onClick={onClose}>
+      <div className="fv__bar" onClick={(e) => e.stopPropagation()}>
+        <span className="fv__icon">{isPdf ? <IconFileText size={20} /> : <IconFolder size={20} />}</span>
+        <div className="fv__title">
+          <b title={currentFile.original_name}>{currentFile.original_name || 'Файл'}</b>
+          <span>{files.length > 1 ? `${currentIndex + 1} из ${files.length} · ` : ''}{currentFile.uploaded_at ? `загружен ${new Date(currentFile.uploaded_at).toLocaleString('ru-RU')}` : ''}</span>
         </div>
-
-        <div className="file-viewer-info">
-          <p><strong>Имя файла:</strong> {currentFile.original_name}</p>
-          <p><strong>Загружен:</strong> {currentFile.uploaded_at ? new Date(currentFile.uploaded_at).toLocaleString('ru-RU') : '—'}</p>
-        </div>
-
-        {files.length > 1 && (
-          <div className="file-viewer-navigation">
-            <button onClick={onPrev} className="nav-btn">
-              <IconArrowLeft className="ico" /> Предыдущий
-            </button>
-            <button onClick={onNext} className="nav-btn">
-              Следующий <IconArrowRight className="ico" />
-            </button>
+        <a className="ui-btn fv__btn" href={fileProxyUrl(currentFile)} download={currentFile.original_name}><IconDownload size={18} />Скачать</a>
+        <button type="button" className="fv__close" onClick={onClose} title="Закрыть (Esc)" aria-label="Закрыть"><IconX size={22} /></button>
+      </div>
+      <div className="fv__stage" onClick={(e) => e.stopPropagation()} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        {loading ? (
+          <div className="fv__msg"><RossetiLoader /></div>
+        ) : error ? (
+          <div className="fv__msg">
+            <b>{error.lost ? 'Файл утерян в хранилище' : 'Не удалось загрузить файл'}</b>
+            <a className="ui-btn" href={fileProxyUrl(currentFile)} download={currentFile.original_name}><IconDownload size={18} />Попробовать скачать</a>
+          </div>
+        ) : isImage ? (
+          <img src={blobUrl} alt={currentFile.original_name} className="fv__img" />
+        ) : isPdf && pdfBlob ? (
+          <div className="fv__pdf"><PdfCanvas blob={pdfBlob} downloadHref={fileProxyUrl(currentFile)} downloadName={currentFile.original_name} /></div>
+        ) : (
+          <div className="fv__msg">
+            <b>Предпросмотр недоступен</b>
+            <a className="ui-btn" href={fileProxyUrl(currentFile)} download={currentFile.original_name}><IconDownload size={18} />Скачать файл</a>
           </div>
         )}
-    </ModalShell>
+      </div>
+      {files.length > 1 && (
+        <>
+          <button type="button" className="fv__nav fv__nav--prev" onClick={(e) => { e.stopPropagation(); onPrev(); }} title="Предыдущий (←)" aria-label="Предыдущий"><IconArrowLeft size={26} /></button>
+          <button type="button" className="fv__nav fv__nav--next" onClick={(e) => { e.stopPropagation(); onNext(); }} title="Следующий (→)" aria-label="Следующий"><IconArrowRight size={26} /></button>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -10047,7 +10042,6 @@ function PuPanel({ puNumber, onClose, onOpen, onSectionChange }) {
 
   return (
     <div className="pu-panel" role="dialog" aria-label={`Карточка ПУ ${puNumber}`}>
-      <div className="pu-panel__scrim" onClick={onClose} />
       <div className="pu-panel__sheet">
         <header className="pu-panel__head">
           <span className="pu-panel__icon"><IconMeter size={24} /></span>
@@ -10089,21 +10083,38 @@ function PuPanel({ puNumber, onClose, onOpen, onSectionChange }) {
                   </div>
                 </div>
 
-                {data.pu.openNotification && (
-                  <div className={`ui-card pu-open pu-open--${data.pu.openNotification.type}`}>
-                    <div>
-                      <b>{data.pu.openNotification.type === 'error' ? 'Ждёт мероприятий РЭС' : 'Ждёт проверки АСКУЭ'}</b>
-                      <span className="muted"> · с {fmtD(data.pu.openNotification.firstReportDate || data.pu.openNotification.createdAt)}
-                        {data.pu.openNotification.repeatCount > 1 ? ` · повтор ×${data.pu.openNotification.repeatCount}` : ''}</span>
-                      {data.pu.openNotification.completedComment && <p>РЭС: «{data.pu.openNotification.completedComment}»</p>}
+                {data.pu.openNotification && (() => {
+                  const n = data.pu.openNotification;
+                  const isErr = n.type === 'error';
+                  return (
+                    <div className={`pu-note pu-note--${isErr ? 'warn' : 'info'}`}>
+                      <span className="pu-note__icon">{isErr ? <IconWrench size={20} /> : <IconClipboard size={20} />}</span>
+                      <div className="pu-note__text">
+                        <b>{isErr ? 'Ждёт мероприятий РЭС' : 'Ждёт проверки АСКУЭ'}</b>
+                        <span>с {fmtD(n.firstReportDate || n.createdAt)}{n.repeatCount > 1 ? ` · ошибка пришла ${n.repeatCount} раз` : ''}</span>
+                        {n.completedComment && <p>РЭС: «{n.completedComment}»</p>}
+                      </div>
+                      <button type="button" className="ui-btn ui-btn--soft" onClick={() => go(isErr ? 'tech_pending' : 'askue_pending')}>
+                        К уведомлению <IconArrowRight size={16} />
+                      </button>
                     </div>
-                    <button type="button" className="ui-btn" onClick={() => go(data.pu.openNotification.type === 'error' ? 'tech_pending' : 'askue_pending')}>
-                      К уведомлению <IconArrowRight size={16} />
-                    </button>
+                  );
+                })()}
+
+                {data.tp.problems.filter(p => p.lineId === data.line.id).map(p => (
+                  <div key={p.id} className="pu-note pu-note--bad">
+                    <span className="pu-note__icon"><IconAlertTriangle size={20} /></span>
+                    <div className="pu-note__text">
+                      <b>Проблемная линия{p.escalated ? ' · у техблока' : ''}</b>
+                      <span>ПУ {p.puNumber} · неудачных проверок: {p.failureCount} · с {fmtD(p.firstReportDate)} · последняя {fmtD(p.lastErrorDate)}</span>
+                      {p.lastErrorDetails && <p>{p.lastErrorDetails}</p>}
+                      {p.resComment && <p>РЭС: «{p.resComment}»</p>}
+                    </div>
                   </div>
-                )}
+                ))}
 
                 <div className="ui-card pu-history">
+                  <div className="pu-card-title"><span className="pu-card-title__icon"><IconClock size={18} /></span><b>История</b></div>
                   <div className="ui-tabs">
                     <button type="button" className={`ui-tab ${tab === 'checks' ? 'is-on' : ''}`} onClick={() => setTab('checks')}>Проверки и мероприятия · {data.checks.length}</button>
                     <button type="button" className={`ui-tab ${tab === 'uploads' ? 'is-on' : ''}`} onClick={() => setTab('uploads')}>Загрузки · {data.uploads.length}</button>
@@ -10113,6 +10124,7 @@ function PuPanel({ puNumber, onClose, onOpen, onSectionChange }) {
                       <ol className="pu-timeline">
                         {data.checks.map(c => (
                           <li key={c.id}>
+                            <span className={`pu-timeline__status pu-timeline__status--${c.status}`}>{CHECK_RU[c.status] || c.status}</span>
                             <div className="pu-timeline__row is-bad"><b>Ошибка</b><span className="muted">{fmtD(c.initialCheckDate)}</span><p>{c.initialError}</p></div>
                             {c.workCompletedDate && (
                               <div className="pu-timeline__row is-work"><b>Мероприятия РЭС</b><span className="muted">{fmtD(c.workCompletedDate)}{c.failureCount > 1 ? ` · после ${c.failureCount} съёмов` : ''}</span>
@@ -10131,7 +10143,6 @@ function PuPanel({ puNumber, onClose, onOpen, onSectionChange }) {
                                 <b>{c.recheckResult === 'ok' ? 'Перепроверка: устранено' : 'Перепроверка: ошибка осталась'}</b><span className="muted">{fmtD(c.recheckDate)}</span>
                               </div>
                             )}
-                            <span className="pu-timeline__status">{CHECK_RU[c.status] || c.status}</span>
                           </li>
                         ))}
                       </ol>
@@ -10192,7 +10203,9 @@ function PuPanel({ puNumber, onClose, onOpen, onSectionChange }) {
                   </div>
                 )}
 
-                <div className="ui-card ui-card--flush">
+                <div className="ui-card ui-card--flush pu-lines-card">
+                  <div className="pu-card-title"><span className="pu-card-title__icon"><IconLayers size={18} /></span><b>Линии ТП</b>
+                    <span className="muted">клик по ПУ — открыть его карточку</span></div>
                   <table className="ui-table pu-lines">
                     <thead><tr><th>Линия</th><th>Начало</th><th>Середина</th><th>Конец</th></tr></thead>
                     <tbody>{data.tp.lines.map(l => (
@@ -10219,7 +10232,7 @@ function PuPanel({ puNumber, onClose, onOpen, onSectionChange }) {
 
                 {data.tp.escalations.length > 0 && (
                   <div className="ui-card pu-esc">
-                    <b>Вопросы техблоку по этой ТП</b>
+                    <div className="pu-card-title"><span className="pu-card-title__icon pu-card-title__icon--tech"><IconGavel size={18} /></span><b>Вопросы техблоку по этой ТП</b></div>
                     {data.tp.escalations.map(e => (
                       <div key={e.id} className="pu-esc__item">
                         <span className={`pu-flag ${e.status === 'open' ? 'pu-flag--tech' : 'pu-flag--ok'}`}>{e.status === 'open' ? 'ждёт решения' : 'решено'}</span>
@@ -10265,18 +10278,72 @@ function AnalysisTabs({ active, onSectionChange }) {
 // ═══ «Сводка» — главная: что ждёт действия, состояние ПУ, динамика ═══════════
 // Данные — GET /api/dashboard (одним запросом, по области должности).
 const DASH_STATUS = [
-  { key: 'ok', label: 'Норма', cls: 'st-ok' },
-  { key: 'pending', label: 'На перепроверке', cls: 'st-pending' },
-  { key: 'error', label: 'Ошибка', cls: 'st-error' },
-  { key: 'unchecked', label: 'Не проверен', cls: 'st-none' },
+  { key: 'ok', label: 'Норма', cls: 'st-ok', color: '#2f8a57' },
+  { key: 'pending', label: 'На перепроверке', cls: 'st-pending', color: '#c98a14' },
+  { key: 'error', label: 'Ошибка', cls: 'st-error', color: '#d64545' },
+  { key: 'unchecked', label: 'Не проверен', cls: 'st-none', color: '#c9c8c1' },
 ];
 const fmtInt = (n) => Number(n || 0).toLocaleString('ru-RU');
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+
+// Кольцо: сегменты по значениям, 2px зазоры, подсказка на сегменте.
+function Donut({ parts, size = 180, stroke = 22, center, onTip }) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const total = parts.reduce((a, p) => a + p.value, 0);
+  const gap = parts.filter(p => p.value > 0).length > 1 ? 2 : 0;
+  let off = 0;
+  return (
+    <svg className="donut" viewBox={`0 0 ${size} ${size}`} width={size} height={size} role="img"
+      aria-label={parts.map(p => `${p.label}: ${p.value}`).join(', ')}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-2)" strokeWidth={stroke} />
+      {total > 0 && parts.map(p => {
+        if (!p.value) return null;
+        const len = (p.value / total) * c;
+        const el = (
+          <circle key={p.label} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={p.color} strokeWidth={stroke}
+            strokeDasharray={`${Math.max(0, len - gap)} ${c}`} strokeDashoffset={-off}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`} className="donut__seg"
+            onMouseMove={onTip ? (e) => onTip({ x: e.clientX, y: e.clientY, text: `${p.label}: ${fmtInt(p.value)} (${pct(p.value, total)}%)` }) : undefined}
+            onMouseLeave={onTip ? () => onTip(null) : undefined} />
+        );
+        off += len;
+        return el;
+      })}
+      {center}
+    </svg>
+  );
+}
+
+// Кольцо-индикатор доли (на градиентной плитке).
+function RingPct({ value, size = 64 }) {
+  const r = (size - 8) / 2, c = 2 * Math.PI * r;
+  return (
+    <svg className="ring-pct" viewBox={`0 0 ${size} ${size}`} width={size} height={size} aria-hidden="true">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,.28)" strokeWidth="6" />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#fff" strokeWidth="6" strokeLinecap="round"
+        strokeDasharray={`${(Math.min(100, value) / 100) * c} ${c}`} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle">{value}%</text>
+    </svg>
+  );
+}
+
+// Мини-столбики по неделям (на плитке).
+function MiniBars({ values }) {
+  const max = Math.max(1, ...values);
+  return (
+    <span className="mini-bars" aria-hidden="true">
+      {values.map((v, i) => <i key={i} style={{ height: `${Math.max(8, (v / max) * 100)}%` }} />)}
+    </span>
+  );
+}
 
 function Dashboard({ selectedRes, onSectionChange }) {
   const { user } = useContext(AuthContext);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  const [tip, setTip] = useState(null);
+  const [table, setTable] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -10292,113 +10359,135 @@ function Dashboard({ selectedRes, onSectionChange }) {
 
   const w = data.waiting;
   const t = data.totals;
-  const tiles = [
-    { id: 'tech_pending', value: w.techPending, label: 'Ждут мероприятий РЭС', hint: 'ошибки ПУ после съёма', tone: 'warn', icon: <IconWrench size={20} /> },
-    { id: 'askue_pending', value: w.askuePending, label: 'Ждут проверки АСКУЭ', hint: 'РЭС отработал — нужен съём', tone: 'info', icon: <IconClipboard size={20} /> },
-    { id: 'techblock', value: w.techblock, label: 'У техблока', hint: `завершено за 30 дней: ${w.techblockClosed30}`, tone: 'accent', icon: <IconGavel size={20} /> },
-    { id: 'problem_vl', value: w.problemVl, label: 'Проблемные ВЛ и ТП', hint: 'повторные ошибки и перегрузы', tone: 'danger', icon: <IconAlertTriangle size={20} /> },
-    { id: 'power_overload', value: w.overload, label: 'Перегрузы в работе', hint: 'ограничение или мероприятия', tone: 'danger', icon: <IconZap size={20} /> },
-  ].filter(x => (SECTION_PERMS[x.id] || []).some(k => hasPerm(user, k)));
-
+  const can = (id) => (SECTION_PERMS[id] || []).some(k => hasPerm(user, k));
+  const weeksFound = data.weekly.map(x => x.found);
+  const weeksClosed = data.weekly.map(x => x.closed);
   const resName = data.resId ? (data.byRes[0]?.name || '') : 'Все РЭС';
+  const okPct = pct(t.ok, t.pu);
+  const statusParts = DASH_STATUS.map(s => ({ label: s.label, value: t[s.key] || 0, color: s.color }));
+  const resRows = data.byRes.filter(r => r.pu > 0);
+
+  const heroes = [
+    { id: 'structure', tone: 'g1', title: 'ПУ в норме', value: `${fmtInt(t.ok)} из ${fmtInt(t.pu)}`, hint: 'по последним съёмам', ring: okPct },
+    { id: 'tech_pending', tone: 'g2', title: 'Ждут мероприятий РЭС', value: fmtInt(w.techPending), hint: 'выявлено за 12 недель', bars: weeksFound, icon: <IconWrench size={22} /> },
+    { id: 'askue_pending', tone: 'g3', title: 'Ждут проверки АСКУЭ', value: fmtInt(w.askuePending), hint: 'отработано РЭС за 12 недель', bars: weeksClosed, icon: <IconClipboard size={22} /> },
+    { id: 'techblock', tone: 'g4', title: 'У техблока', value: fmtInt(w.techblock), hint: `решено за 30 дней: ${w.techblockClosed30}`, icon: <IconGavel size={22} /> },
+  ].filter(h => can(h.id));
+  const chips = [
+    { id: 'problem_vl', label: 'Проблемные ВЛ и ТП', value: w.problemVl, icon: <IconAlertTriangle size={18} />, tone: 'bad' },
+    { id: 'power_overload', label: 'Перегрузы в работе', value: w.overload, icon: <IconZap size={18} />, tone: 'warn' },
+  ].filter(c => can(c.id));
 
   return (
     <div className="dash">
       <PageHeader icon={<IconGauge size={24} />} title="Сводка"
-        subtitle={`${resName} · что ждёт действия и как идут дела по сети 0,4 кВ`} />
+        subtitle={`${resName} · ${fmtInt(t.tp)} ТП · ${fmtInt(t.vl)} линий · ${fmtInt(t.pu)} ПУ в структуре`}
+        actions={chips.map(c => (
+          <button key={c.id} type="button" className={`dash-chip dash-chip--${c.tone}`} onClick={() => onSectionChange(c.id)}>
+            {c.icon}<span>{c.label}</span><b>{fmtInt(c.value)}</b>
+          </button>
+        ))} />
 
-      {tiles.length > 0 && (
-        <div className="dash-tiles">
-          {tiles.map(x => (
-            <button key={x.id} type="button" className={`dash-tile dash-tile--${x.tone}`} onClick={() => onSectionChange(x.id)}>
-              <span className="dash-tile__icon">{x.icon}</span>
-              <span className="dash-tile__value">{fmtInt(x.value)}</span>
-              <span className="dash-tile__label">{x.label}</span>
-              <span className="dash-tile__hint">{x.hint}</span>
+      {heroes.length > 0 && (
+        <div className="dash-heroes">
+          {heroes.map(h => (
+            <button key={h.id} type="button" className={`dash-hero-card dash-hero-card--${h.tone}`} onClick={() => onSectionChange(h.id)}>
+              <span className="dash-hero-card__top">
+                {h.ring != null ? <RingPct value={h.ring} /> : <span className="dash-hero-card__icon">{h.icon}</span>}
+                {h.bars && <MiniBars values={h.bars} />}
+              </span>
+              <span className="dash-hero-card__value">{h.value}</span>
+              <span className="dash-hero-card__title">{h.title}</span>
+              <span className="dash-hero-card__hint">{h.hint}</span>
             </button>
           ))}
         </div>
       )}
 
-      <div className="dash-grid">
-        <div className="ui-card dash-card">
+      <div className="dash-row">
+        <div className="ui-card dash-card dash-status">
           <div className="dash-card__head">
-            <h3>Приборы учёта</h3>
-            <span className="muted">{fmtInt(t.tp)} ТП · {fmtInt(t.vl)} линий · {fmtInt(t.pu)} ПУ в структуре</span>
+            <h3>Состояние приборов учёта</h3>
+            <span className="muted">доля по последним съёмам</span>
           </div>
-          <div className="dash-hero">
-            <div><b>{pct(t.ok, t.pu)}%</b><span>в норме</span></div>
-            <div><b>{fmtInt(t.error)}</b><span>с ошибкой</span></div>
-            <div><b>{fmtInt(t.pending)}</b><span>на перепроверке</span></div>
-            <div><b>{fmtInt(t.unchecked)}</b><span>ещё не проверены</span></div>
-          </div>
-          <StatusBars rows={data.byRes} single={!!data.resId} />
+          {!t.pu ? <p className="muted dash-empty">Структура сети ещё не загружена.</p> : (
+            <div className="dash-status__body">
+              <Donut parts={statusParts} size={200} stroke={26} onTip={setTip}
+                center={<>
+                  <text x="50%" y="46%" textAnchor="middle" className="donut__big">{okPct}%</text>
+                  <text x="50%" y="60%" textAnchor="middle" className="donut__small">в норме</text>
+                </>} />
+              <ul className="dash-status__legend">
+                {DASH_STATUS.map(s => (
+                  <li key={s.key}>
+                    <i className={`dash-swatch ${s.cls}`} />
+                    <span>{s.label}</span>
+                    <b>{fmtInt(t[s.key])}</b>
+                    <em>{pct(t[s.key], t.pu)}%</em>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
-        <div className="ui-card dash-card">
+        <div className="ui-card dash-card dash-trend-card">
           <div className="dash-card__head">
             <h3>Динамика за 12 недель</h3>
-            <span className="muted">ПУ с ошибкой по съёмам и отработанные РЭС мероприятия, по неделям</span>
+            <span className="muted">ПУ с ошибкой по съёмам и отработанные РЭС мероприятия</span>
           </div>
           <TrendChart weeks={data.weekly} />
         </div>
       </div>
-    </div>
-  );
-}
 
-// Состояние ПУ по РЭС: горизонтальный 100%-стек (норма → перепроверка → ошибка →
-// не проверен), легенда с итогами, подсказка на сегменте, вид «таблицей».
-function StatusBars({ rows, single }) {
-  const [table, setTable] = useState(false);
-  const [tip, setTip] = useState(null);
-  const shown = rows.filter(r => r.pu > 0);
-  const sum = (k) => shown.reduce((a, r) => a + r[k], 0);
-  if (!shown.length) return <p className="muted dash-empty">Структура сети ещё не загружена — здесь появится состояние ПУ по РЭС.</p>;
-  return (
-    <div className="dash-bars">
-      <div className="dash-legend">
-        {DASH_STATUS.map(s => (
-          <span key={s.key} className="dash-legend__item"><i className={`dash-swatch ${s.cls}`} />{s.label} · <b>{fmtInt(sum(s.key))}</b></span>
-        ))}
-        <button type="button" className="ui-link" onClick={() => setTable(v => !v)}>{table ? 'Диаграммой' : 'Таблицей'}</button>
-      </div>
-      {table ? (
-        <table className="ui-table">
-          <thead><tr><th>РЭС</th><th>ПУ</th>{DASH_STATUS.map(s => <th key={s.key}>{s.label}</th>)}</tr></thead>
-          <tbody>{shown.map(r => (
-            <tr key={r.id}><td>{r.name}</td><td>{fmtInt(r.pu)}</td>{DASH_STATUS.map(s => <td key={s.key}>{fmtInt(r[s.key])}</td>)}</tr>
-          ))}</tbody>
-        </table>
-      ) : (
-        <ul className="dash-bar-list">
-          {shown.map(r => (
-            <li key={r.id}>
-              {!single && <span className="dash-bar__name">{r.name}</span>}
-              <span className="dash-bar" onMouseLeave={() => setTip(null)}>
-                {DASH_STATUS.filter(s => r[s.key] > 0).map(s => (
-                  <span key={s.key} className={`dash-bar__seg ${s.cls}`} style={{ flexGrow: r[s.key] }}
-                    onMouseEnter={(e) => setTip({ x: e.clientX, y: e.clientY, text: `${r.name}: ${s.label.toLowerCase()} — ${fmtInt(r[s.key])} из ${fmtInt(r.pu)} (${pct(r[s.key], r.pu)}%)` })}
-                    onMouseMove={(e) => setTip(t => t && { ...t, x: e.clientX, y: e.clientY })} />
-                ))}
-              </span>
-              <span className="dash-bar__val">{pct(r.ok, r.pu)}%</span>
-            </li>
-          ))}
-        </ul>
+      {!data.resId && resRows.length > 0 && (
+        <div className="ui-card dash-card">
+          <div className="dash-card__head dash-card__head--row">
+            <div>
+              <h3>По РЭС</h3>
+              <span className="muted">кольцо — состояние ПУ, в центре доля в норме</span>
+            </div>
+            <button type="button" className="ui-link" onClick={() => setTable(v => !v)}>{table ? 'Кольцами' : 'Таблицей'}</button>
+          </div>
+          {table ? (
+            <table className="ui-table">
+              <thead><tr><th>РЭС</th><th>ТП</th><th>ПУ</th>{DASH_STATUS.map(s => <th key={s.key}>{s.label}</th>)}</tr></thead>
+              <tbody>{resRows.map(r => (
+                <tr key={r.id}><td>{r.name}</td><td>{fmtInt(r.tp)}</td><td>{fmtInt(r.pu)}</td>{DASH_STATUS.map(s => <td key={s.key}>{fmtInt(r[s.key])}</td>)}</tr>
+              ))}</tbody>
+            </table>
+          ) : (
+            <div className="dash-res-grid">
+              {resRows.map(r => (
+                <div key={r.id} className="dash-res">
+                  <Donut size={112} stroke={14} onTip={setTip}
+                    parts={DASH_STATUS.map(s => ({ label: `${r.name} · ${s.label.toLowerCase()}`, value: r[s.key] || 0, color: s.color }))}
+                    center={<text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" className="donut__mid">{pct(r.ok, r.pu)}%</text>} />
+                  <b className="dash-res__name">{r.name}</b>
+                  <span className="dash-res__meta">{fmtInt(r.tp)} ТП · {fmtInt(r.pu)} ПУ</span>
+                  <span className="dash-res__bad">
+                    {r.error > 0 && <span className="t-bad">ошибок {fmtInt(r.error)}</span>}
+                    {r.pending > 0 && <span className="t-warn">на перепроверке {fmtInt(r.pending)}</span>}
+                    {!r.error && !r.pending && <span className="t-ok">без замечаний</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
       {tip && <div className="dash-tip" style={{ left: tip.x + 14, top: tip.y + 14 }}>{tip.text}</div>}
     </div>
   );
 }
 
-// Две линии по неделям (выявлено / отработано), одна ось, перекрестье с подсказкой.
+// Динамика: две области с мягкой заливкой, одна ось, перекрестье с подсказкой.
 function TrendChart({ weeks }) {
   const [hover, setHover] = useState(null);
-  const W = 640, H = 230, L = 36, R = 92, T = 14, B = 30;
+  const W = 640, H = 240, L = 36, R = 16, T = 14, B = 30;
   const series = [
-    { key: 'found', label: 'Выявлено ошибок', cls: 'ser-1' },
-    { key: 'closed', label: 'Отработано РЭС', cls: 'ser-2' },
+    { key: 'found', label: 'Выявлено ошибок', cls: 'ser-1', grad: 'dashG1' },
+    { key: 'closed', label: 'Отработано РЭС', cls: 'ser-2', grad: 'dashG2' },
   ];
   const max = Math.max(4, ...weeks.flatMap(w => series.map(s => w[s.key])));
   const step = Math.ceil(max / 4);
@@ -10406,6 +10495,16 @@ function TrendChart({ weeks }) {
   const x = (i) => L + (i * (W - L - R)) / Math.max(1, weeks.length - 1);
   const y = (v) => T + (H - T - B) * (1 - v / top);
   const day = (iso) => { const d = new Date(iso); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  // Сглаженная линия (кардинальный сплайн → кубические Безье).
+  const path = (key) => weeks.map((w, i) => {
+    const px = x(i), py = y(w[key]);
+    if (i === 0) return `M${px},${py}`;
+    const p0 = weeks[Math.max(0, i - 2)], p1 = weeks[i - 1], p3 = weeks[Math.min(weeks.length - 1, i + 1)];
+    const x0 = x(Math.max(0, i - 2)), x1 = x(i - 1), x3 = x(Math.min(weeks.length - 1, i + 1));
+    const c1x = x1 + (px - x0) / 6, c1y = y(p1[key]) + (py - y(p0[key])) / 6;
+    const c2x = px - (x3 - x1) / 6, c2y = py - (y(p3[key]) - y(p1[key])) / 6;
+    return `C${c1x},${Math.min(H - B, c1y)} ${c2x},${Math.min(H - B, c2y)} ${px},${py}`;
+  }).join(' ');
   const onMove = (e) => {
     const box = e.currentTarget.getBoundingClientRect();
     const px = ((e.clientX - box.left) / box.width) * W;
@@ -10413,15 +10512,19 @@ function TrendChart({ weeks }) {
     setHover(Math.max(0, Math.min(weeks.length - 1, i)));
   };
   const empty = weeks.every(w => !w.found && !w.closed);
-  const last = weeks[weeks.length - 1] || {};
+  const sum = (k) => weeks.reduce((a, w) => a + w[k], 0);
   return (
     <div className="dash-trend">
       <div className="dash-legend">
-        {series.map(s => <span key={s.key} className="dash-legend__item"><i className={`dash-swatch ${s.cls}`} />{s.label}</span>)}
+        {series.map(s => <span key={s.key} className="dash-legend__item"><i className={`dash-swatch ${s.cls}`} />{s.label} · <b>{fmtInt(sum(s.key))}</b></span>)}
       </div>
       <div className="dash-trend__box">
         <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Динамика за 12 недель: выявлено ошибок и отработано РЭС"
           onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+          <defs>
+            <linearGradient id="dashG1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2a78d6" stopOpacity=".22" /><stop offset="1" stopColor="#2a78d6" stopOpacity="0" /></linearGradient>
+            <linearGradient id="dashG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#eb6834" stopOpacity=".2" /><stop offset="1" stopColor="#eb6834" stopOpacity="0" /></linearGradient>
+          </defs>
           {[0, 1, 2, 3, 4].map(k => (
             <g key={k}>
               <line className="dash-grid-line" x1={L} x2={W - R} y1={y(k * step)} y2={y(k * step)} />
@@ -10433,10 +10536,8 @@ function TrendChart({ weeks }) {
           )))}
           {series.map(s => (
             <g key={s.key} className={s.cls}>
-              <polyline className="dash-line" points={weeks.map((w, i) => `${x(i)},${y(w[s.key])}`).join(' ')} />
-              <text className="dash-end-label" x={W - R + 8} y={y(last[s.key] || 0) + (s.key === 'found' ? -4 : 12)}>
-                {s.label.split(' ')[0]} {last[s.key] || 0}
-              </text>
+              <path d={`${path(s.key)} L${x(weeks.length - 1)},${H - B} L${x(0)},${H - B} Z`} fill={`url(#${s.grad})`} stroke="none" />
+              <path className="dash-line" d={path(s.key)} />
             </g>
           ))}
           {hover !== null && (
@@ -10820,7 +10921,7 @@ const renderContent = () => {
     <AuthContext.Provider value={{ user, selectedRes }}>
       <PuPanelCtx.Provider value={openPu}>
       <ModalDockProvider>
-      <div className={`app ${puOpen ? 'pu-open' : ''}`}>
+      <div className={`app ${puOpen ? 'has-pu-card' : ''}`}>
         <MainMenu
           activeSection={activeSection}
           onSectionChange={setActiveSection}

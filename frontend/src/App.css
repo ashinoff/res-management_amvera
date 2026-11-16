@@ -8199,7 +8199,7 @@ input[type="text"], input[type="password"], input[type="email"], input[type="dat
 .dash-tile__label { font-size: 14px; font-weight: 650; }
 .dash-tile__hint { grid-column: 1 / -1; font-size: 13px; color: var(--text-muted); }
 .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 16px; align-items: start; }
-.dash-card { display: grid; gap: 16px; }
+.dash-card { display: grid; gap: 16px; align-content: start; }
 .dash-card__head { display: grid; gap: 4px; }
 .dash-card__head h3 { font-size: 18px; font-weight: 700; margin: 0; }
 .dash-card__head .muted { font-size: 13.5px; }
@@ -8345,11 +8345,7 @@ textarea, input, select, button { font-family: inherit; }
 
 .analysis-tabs { margin-bottom: 22px; }
 
-/* Карточка ПУ: раздел плавно уходит влево, справа выезжает панель. */
-.app .main-content, .app .main-menu { transition: transform .38s var(--ease), filter .38s var(--ease); }
-.app.pu-open .main-content { transform: translateX(-56px); filter: saturate(.7) brightness(.97); }
-.app.pu-open .main-menu { filter: saturate(.7) brightness(.97); }
-@media (prefers-reduced-motion: reduce) { .app .main-content, .app .main-menu { transition: none; } }
+/* Карточка ПУ: выезжает справа поверх области раздела. */
 
 .pu-panel { position: fixed; inset: 0; z-index: 1300; }
 .pu-panel__scrim { position: absolute; inset: 0; background: rgba(20,24,31,.28); animation: pu-fade .3s var(--ease) both; }
@@ -8396,9 +8392,6 @@ textarea, input, select, button { font-family: inherit; }
 .pu-state__text { display: grid; gap: 4px; min-width: 0; }
 .pu-state__text b { font-size: 17px; }
 .pu-state__text p { margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
-.pu-open { display: flex; gap: 16px; align-items: center; justify-content: space-between; border-left: 4px solid var(--amber); }
-.pu-open--pending_askue { border-left-color: var(--blue); }
-.pu-open p { margin: 6px 0 0; color: var(--text-muted); }
 .pu-history { display: grid; gap: 12px; }
 .pu-history .ui-tabs { margin-bottom: 4px; justify-self: start; }
 .pu-timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
@@ -8462,7 +8455,218 @@ button.pu-flag { cursor: pointer; margin-left: 0; justify-self: start; padding: 
   .pu-panel__body { grid-template-columns: 1fr; padding: 16px; }
   .pu-panel__head { padding: 14px 16px; flex-wrap: wrap; }
   .pu-state { flex-direction: column; align-items: flex-start; }
-  .pu-open { flex-direction: column; align-items: flex-start; }
-  .app.pu-open .main-content { transform: none; }
 }
 .dash-tile__value, .dash-tile__label { justify-self: start; text-align: left; }
+
+/* =====================================================================
+   ДОВОДКА 2026-11: карточка ПУ поверх раздела, окна, просмотр файлов,
+   документы, должности, «Сводка»
+   ===================================================================== */
+
+/* ── Карточка ПУ: накатывается ровно на область раздела, ничего не двигается ── */
+.pu-panel { left: 284px; }
+.pu-panel__sheet {
+  width: auto; left: 0; border-radius: 0; box-shadow: -1px 0 0 var(--border), -12px 0 28px rgba(20,24,31,.06);
+  animation: pu-slide .34s var(--ease) backwards;   /* backwards: после въезда transform не остаётся */
+}
+@media (max-width: 1024px) { .pu-panel { left: 0; } }
+
+.pu-card-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pu-card-title b { font-size: 16px; }
+.pu-card-title .muted { font-size: 13px; margin-left: auto; }
+.pu-card-title__icon {
+  width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none;
+  color: var(--accent-strong); background: color-mix(in srgb, var(--tint) 55%, #fff);
+}
+.pu-card-title__icon--tech { color: #6b3fa0; background: #efe7f8; }
+.pu-lines-card .pu-card-title { padding: 16px 18px 12px; }
+
+/* Заметки (уведомление, проблемная линия): мягкая подложка и значок, без полос. */
+.pu-note {
+  display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: var(--radius-lg);
+  background: var(--n-bg); box-shadow: var(--shadow-sm);
+}
+.pu-note__icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; flex: none; color: var(--n-ink); background: rgba(255,255,255,.7); }
+.pu-note__text { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.pu-note__text b { font-size: 15.5px; color: var(--n-ink); }
+.pu-note__text span { font-size: 13.5px; color: var(--text-muted); }
+.pu-note__text p { margin: 4px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+.pu-note--warn { --n-bg: #fbf3e2; --n-ink: #8a5c0c; }
+.pu-note--info { --n-bg: #e8f0f8; --n-ink: #2f5486; }
+.pu-note--bad  { --n-bg: #fbeeed; --n-ink: #a83631; }
+.ui-btn--soft { border-color: transparent; background: rgba(255,255,255,.85); }
+.ui-btn--soft:hover:not(:disabled) { background: #fff; }
+
+/* История: точки на ленте вместо полос. */
+.pu-timeline > li { position: relative; padding: 14px 16px 14px 16px; background: var(--surface-2); }
+.pu-timeline__row { border-left: 0; padding-left: 22px; position: relative; }
+.pu-timeline__row::before {
+  content: ''; position: absolute; left: 4px; top: 6px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--border-strong); box-shadow: 0 0 0 3px #fff;
+}
+.pu-timeline__row.is-bad::before { background: #d64545; }
+.pu-timeline__row.is-work::before { background: #c98a14; }
+.pu-timeline__row.is-ok::before { background: #2f8a57; }
+.pu-timeline__status {
+  justify-self: start; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  color: var(--text-muted); background: #fff;
+}
+.pu-timeline__status--completed { color: var(--green); background: var(--green-bg); }
+.pu-timeline__status--awaiting_work { color: var(--amber); background: var(--amber-bg); }
+.pu-timeline__status--awaiting_recheck { color: var(--blue); background: var(--blue-bg); }
+
+/* ── Окна (ModalShell): шапка как в Сфере ── */
+.modal-backdrop { background: rgba(20,24,31,.36); backdrop-filter: blur(2px); }
+.modal-shell-bar {
+  display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 20px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.modal-shell-icon {
+  width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none;
+  color: var(--accent-strong); background: color-mix(in srgb, var(--tint) 55%, #fff);
+}
+.modal-shell-title { flex: 1; min-width: 0; font-size: 17px; font-weight: 700; color: var(--text); }
+.modal-shell-ctrls { display: flex; gap: 4px; margin-left: auto; flex: none; }
+.msc {
+  width: 38px; height: 38px; border-radius: 10px; border: 0; background: transparent; color: var(--text-muted);
+  display: grid; place-items: center; cursor: pointer; transition: background-color .15s ease, color .15s ease;
+}
+.msc:hover { background: var(--surface-2); color: var(--text); }
+.msc--close:hover { background: var(--red-bg); color: var(--red); }
+.modal-footer { border-top: 1px solid var(--border); background: var(--surface-2); }
+
+/* ── Просмотр файлов ── */
+.fv { position: fixed; inset: 0; z-index: 1600; background: rgba(16,20,26,.82); display: grid; grid-template-rows: auto 1fr; animation: pu-fade .2s ease backwards; }
+.fv__bar {
+  display: flex; align-items: center; gap: 12px; padding: 14px 20px; margin: 14px 14px 0; border-radius: 16px;
+  background: rgba(255,255,255,.96); box-shadow: var(--shadow-pop);
+}
+.fv__icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; color: var(--accent-strong); background: color-mix(in srgb, var(--tint) 55%, #fff); flex: none; }
+.fv__title { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.fv__title b { font-size: 15.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fv__title span { font-size: 13px; color: var(--text-muted); }
+.fv__btn { text-decoration: none; }
+.fv__close { width: 44px; height: 44px; border: 0; border-radius: 12px; background: transparent; display: grid; place-items: center; cursor: pointer; color: var(--text-muted); }
+.fv__close:hover { background: var(--red-bg); color: var(--red); }
+.fv__stage { min-height: 0; display: grid; place-items: center; padding: 18px 90px 24px; overflow: auto; }
+.fv__img { max-width: 100%; max-height: calc(100vh - 140px); border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.4); background: #fff; }
+.fv__pdf { width: min(1000px, 100%); height: calc(100vh - 140px); overflow: auto; border-radius: 12px; background: #fff; }
+.fv__msg { display: grid; justify-items: center; gap: 14px; padding: 28px 32px; border-radius: 16px; background: #fff; color: var(--text); }
+.fv__nav {
+  position: fixed; top: 50%; width: 56px; height: 56px; margin-top: -28px; border: 0; border-radius: 50%;
+  background: rgba(255,255,255,.92); color: var(--text); display: grid; place-items: center; cursor: pointer;
+  box-shadow: var(--shadow-pop); transition: background-color .15s ease, transform .15s ease;
+}
+.fv__nav:hover { background: #fff; transform: scale(1.05); }
+.fv__nav--prev { left: 18px; } .fv__nav--next { right: 18px; }
+@media (max-width: 640px) {
+  .fv__stage { padding: 12px 8px 80px; }
+  .fv__nav { top: auto; bottom: 16px; margin-top: 0; }
+  .fv__btn { padding: 0 12px; }
+}
+
+/* ── Документы: кнопки и статус ── */
+.ico-glow-blue, .ico-glow-red, .ico-glow-green, .ico-glow-amber { filter: none !important; text-shadow: none !important; }
+.btn-view, .btn-icon {
+  width: 40px; height: 40px; min-height: 0; padding: 0; border-radius: 10px; border: 0;
+  display: inline-grid; place-items: center; cursor: pointer;
+  background: color-mix(in srgb, var(--tint) 45%, #fff); color: var(--accent-strong);
+  transition: background-color .15s ease, color .15s ease;
+}
+.btn-view:hover { background: var(--tint); }
+.btn-view .ico, .btn-icon .ico { color: inherit !important; }
+.btn-icon.danger { background: var(--red-bg); color: var(--red); }
+.btn-icon.danger:hover { background: #f6d9d7; }
+.btn-icon:disabled { opacity: .45; cursor: default; }
+.action-buttons { display: inline-flex; gap: 8px; align-items: center; }
+.status-badge {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 112px; height: 28px; padding: 0 12px;
+  border-radius: 999px; font-size: 13px; font-weight: 700; border: 0;
+}
+.status-badge.status-completed { color: var(--green); background: var(--green-bg); }
+.status-badge.status-awaiting_recheck, .status-badge.status-awaiting_work, .status-badge.status-pending { color: var(--amber); background: var(--amber-bg); }
+.file-count { display: inline-flex; padding: 3px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; font-weight: 600; color: var(--text-muted); }
+
+/* ── Должности: одинаковые плашки ── */
+.role-badge {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 168px; height: 30px; padding: 0 14px;
+  border-radius: 999px; font-size: 13px; font-weight: 650; line-height: 1; white-space: nowrap;
+  color: var(--accent-strong); background: color-mix(in srgb, var(--tint) 50%, #fff); border: 0;
+}
+.role-badge.role-admin { color: #fff; background: var(--accent-strong); }
+.role-badge.role-master_res, .role-badge.role-nach_res, .role-badge.role-nach_riru,
+.role-badge.role-eng_realization, .role-badge.role-eng_development, .role-badge.role-monter { color: #3d5d32; background: #e3eedf; }
+.role-badge.role-glav_ing, .role-badge.role-nach_srs, .role-badge.role-eng_srs,
+.role-badge.role-nach_pts, .role-badge.role-eng_pts { color: #22545e; background: #dcecef; }
+.role-badge.role-nach_sue, .role-badge.role-eng_sue, .role-badge.role-nach_stp, .role-badge.role-eng_stp { color: #2c6046; background: #dcefe4; }
+
+/* ── Сводка ── */
+.dash-chip {
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border: 0; border-radius: 12px;
+  font-size: 14px; font-weight: 600; cursor: pointer; background: var(--surface); box-shadow: var(--shadow-sm);
+  transition: box-shadow .15s ease;
+}
+.dash-chip:hover { box-shadow: var(--shadow); }
+.dash-chip b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.dash-chip--bad { color: #a83631; } .dash-chip--warn { color: #8a5c0c; }
+.dash-chip span { color: var(--text); }
+
+.dash-heroes { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin-bottom: 18px; }
+.dash-hero-card {
+  position: relative; overflow: hidden; display: grid; gap: 4px; text-align: left; padding: 20px 22px; min-height: 176px;
+  border: 0; border-radius: 20px; color: #fff; cursor: pointer;
+  background: linear-gradient(135deg, var(--h1), var(--h2));
+  box-shadow: 0 10px 26px color-mix(in srgb, var(--h2) 35%, transparent);
+  transition: transform .18s var(--ease), box-shadow .18s var(--ease);
+}
+.dash-hero-card::after {      /* мягкий блик в углу */
+  content: ''; position: absolute; right: -40px; top: -40px; width: 160px; height: 160px; border-radius: 50%;
+  background: rgba(255,255,255,.12);
+}
+.dash-hero-card:hover { transform: translateY(-3px); box-shadow: 0 16px 34px color-mix(in srgb, var(--h2) 45%, transparent); }
+.dash-hero-card--g1 { --h1: #3a9a7c; --h2: #1f6a66; }
+.dash-hero-card--g2 { --h1: #5aa07a; --h2: #2f6f52; }
+.dash-hero-card--g3 { --h1: #3f8fa3; --h2: #245f73; }
+.dash-hero-card--g4 { --h1: #7d9a6a; --h2: #4b6b3e; }
+.dash-hero-card__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-height: 64px; position: relative; z-index: 1; }
+.dash-hero-card__icon { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; background: rgba(255,255,255,.2); }
+.dash-hero-card__value { font-size: 32px; font-weight: 800; letter-spacing: -.02em; line-height: 1.05; font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
+.dash-hero-card__title { font-size: 15px; font-weight: 700; position: relative; z-index: 1; }
+.dash-hero-card__hint { font-size: 12.5px; opacity: .85; position: relative; z-index: 1; }
+.ring-pct text { fill: #fff; font-size: 15px; font-weight: 800; font-family: inherit; }
+.mini-bars { display: flex; align-items: flex-end; gap: 3px; height: 46px; }
+.mini-bars i { display: block; width: 7px; border-radius: 3px 3px 1px 1px; background: rgba(255,255,255,.75); }
+
+.dash-row { display: grid; grid-template-columns: minmax(340px, .9fr) minmax(420px, 1.4fr); gap: 16px; margin-bottom: 16px; align-items: stretch; }
+.dash-status__body { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; }
+.dash-status__legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; flex: 1; min-width: 180px; }
+.dash-status__legend li { display: grid; grid-template-columns: 14px 1fr auto 46px; align-items: center; gap: 10px; font-size: 14px; }
+.dash-status__legend b { font-variant-numeric: tabular-nums; }
+.dash-status__legend em { font-style: normal; text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.donut { display: block; flex: none; overflow: visible; }
+.donut__seg { cursor: default; transition: opacity .15s ease; }
+.donut:hover .donut__seg { opacity: .85; }
+.donut:hover .donut__seg:hover { opacity: 1; }
+.donut__big { font-size: 34px; font-weight: 800; fill: var(--text); font-family: inherit; }
+.donut__small { font-size: 13px; fill: var(--text-muted); font-family: inherit; }
+.donut__mid { font-size: 20px; font-weight: 800; fill: var(--text); font-family: inherit; }
+.dash-card__head--row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.dash-res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+.dash-res {
+  display: grid; justify-items: center; gap: 4px; padding: 18px 12px 16px; border-radius: 16px; text-align: center;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 28%, #fff), #fff);
+}
+.dash-res__name { font-size: 15px; margin-top: 6px; }
+.dash-res__meta { font-size: 12.5px; color: var(--text-muted); }
+.dash-res__bad { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px; font-size: 12.5px; font-weight: 650; }
+.t-bad { color: #b73a35; } .t-warn { color: #8a5c0c; } .t-ok { color: var(--green); }
+.dash-trend-card .dash-trend__box svg { max-height: 280px; }
+
+@media (max-width: 1100px) { .dash-row { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .dash-heroes { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .dash-hero-card { min-height: 150px; padding: 14px; }
+  .dash-hero-card__value { font-size: 24px; }
+  .dash-status__body { justify-content: center; }
+  .page-header-actions { width: 100%; }
+}

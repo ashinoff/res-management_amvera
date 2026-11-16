@@ -3162,6 +3162,12 @@ app.get('/api/pu-card/:puNumber', authenticateToken, async (req, res) => {
             return { position: pos, puNumber: n || null, status: n ? (statusOf(n)?.status || 'not_checked') : 'empty' };
           }),
         })),
+        problems: problems.map(p => ({
+          id: p.id, lineId: p.networkStructureId, puNumber: p.puNumber, position: p.position,
+          failureCount: p.failureCount, firstReportDate: p.firstReportDate, lastErrorDate: p.lastErrorDate,
+          lastErrorDetails: p.lastErrorDetails, resComment: p.resComment,
+          escalated: escalations.some(e => e.networkStructureId === p.networkStructureId && e.status === 'open'),
+        })),
         escalations: escalations.map(e => ({
           id: e.id, vlName: e.vlName, puNumber: e.puNumber, status: e.status, description: e.description,
           decision: e.decision, createdAt: e.createdAt, closedAt: e.closedAt,
