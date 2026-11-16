@@ -8094,8 +8094,10 @@ body { background: var(--bg); color: var(--text); -webkit-font-smoothing: antial
 
 /* ── Контент и появление раздела ── */
 .content { padding: 30px 44px 44px; background: var(--bg); }
-.section-fade { animation: section-in .28s var(--ease) both; }
-@keyframes section-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* Только прозрачность: transform на обёртке раздела делает её «рамкой» для
+   position:fixed — модалки внутри раздела зажимаются в его размер. */
+.section-fade { animation: section-in .28s var(--ease) backwards; }
+@keyframes section-in { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .section-fade { animation: none; } }
 
 /* ── Шапка страницы ── */
@@ -8262,7 +8264,7 @@ input[type="text"], input[type="password"], input[type="email"], input[type="dat
 .tb-age.is-late { color: var(--red); }
 .tb-chevron { flex: none; color: var(--text-faint); transition: transform .2s var(--ease); margin-top: 4px; }
 .tb-card.is-open .tb-chevron { transform: rotate(180deg); }
-.tb-card__body { display: grid; gap: 16px; padding: 4px 22px 22px; border-top: 1px solid var(--border); animation: section-in .22s var(--ease) both; }
+.tb-card__body { display: grid; gap: 16px; padding: 4px 22px 22px; border-top: 1px solid var(--border); animation: section-in .22s var(--ease) backwards; }
 .tb-facts { display: grid; gap: 8px; margin: 14px 0 0; font-size: 14px; }
 .tb-facts > div { display: grid; grid-template-columns: 140px 1fr; gap: 12px; }
 .tb-facts dt { color: var(--text-muted); }
