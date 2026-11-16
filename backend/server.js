@@ -346,8 +346,9 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING,
     allowNull: false
   },
+  // Должность — ключ каталога ROLES (ниже). Была ENUM admin/uploader/res_responsible.
   role: {
-    type: DataTypes.ENUM('admin', 'uploader', 'res_responsible'),
+    type: DataTypes.STRING(40),
     allowNull: false
   },
   resId: {
@@ -520,26 +521,6 @@ const SectionMonthlyPeak = sequelize.define('SectionMonthlyPeak', {
   peakKw: { type: DataTypes.FLOAT, allowNull: false },
   peakAt: { type: DataTypes.DATE, allowNull: true },      // момент пика (может быть null, если только по периоду)
   source: { type: DataTypes.STRING, allowNull: true }     // '30' | '60'
-});
-
-// 3d. Срез реестра «Опрос ПУ» (Пирамида) — для «Карты опроса структуры сети».
-// Полностью замещается при каждой синхронизации. serialNorm — нормализованный
-// серийник (trim/без пробелов/без ведущих нулей) для матчинга со структурой.
-const PolledMeter = sequelize.define('PolledMeter', {
-  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  serialRaw: { type: DataTypes.STRING, allowNull: true },
-  serialNorm: { type: DataTypes.STRING, allowNull: false },  // индекс — в initializeDatabase
-  isSpodes: { type: DataTypes.BOOLEAN, defaultValue: false },
-  isCollected: { type: DataTypes.BOOLEAN, defaultValue: false },
-  snapshotAt: { type: DataTypes.DATE, allowNull: true },
-  // Расширенный срез (Опрос отдаёт после апдейта): ТП и точка учёта ПУ.
-  // Старый 3-польный формат оставляет их null. Колонки/индекс — в initializeDatabase.
-  tp: { type: DataTypes.STRING, allowNull: true },
-  tpNorm: { type: DataTypes.STRING, allowNull: true },   // нормализованное имя ТП, индекс
-  tuPath: { type: DataTypes.TEXT, allowNull: true },
-  // Тип ПУ (кол. «Тип ПУ» из Пирамиды). Нужен для анализа: журнал напряжений
-  // доступен для СПОДЭС И РиМ (любой РиМ, в т.ч. РиМ-СПОДЭС). Формат <6 полей → null.
-  puType: { type: DataTypes.STRING, allowNull: true }
 });
 
 // 3c. Случай перегрузки секции (workflow мероприятий по превышению Pном, этап 3).
@@ -879,6 +860,30 @@ const ProblemVL = sequelize.define('ProblemVL', {
   }
 });
 
+// Вопрос техблоку: РЭС отметил, что проблему ПУ своими силами не решить и нужны
+// дополнительные мероприятия. Пока вопрос открыт, линия (networkStructureId)
+// выведена из обычного мониторинга: по её ПУ не создаются уведомления об ошибке
+// и проблемные ВЛ — линия не гоняется между АСКУЭ и РЭС. Решение принимает
+// руководство техблока (право techblock_complete) кнопкой «Завершить».
+const Escalation = sequelize.define('Escalation', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  resId: { type: DataTypes.INTEGER, allowNull: false, references: { model: ResUnit, key: 'id' } },
+  networkStructureId: { type: DataTypes.INTEGER, allowNull: true, references: { model: NetworkStructure, key: 'id' } },
+  puNumber: { type: DataTypes.STRING, allowNull: false },
+  tpName: { type: DataTypes.STRING, allowNull: false },
+  vlName: { type: DataTypes.STRING, allowNull: false },
+  position: { type: DataTypes.STRING(10), allowNull: true },
+  errorDetails: { type: DataTypes.TEXT, allowNull: true },   // ошибка ПУ, с которой пришли
+  errorData: { type: DataTypes.JSONB, allowNull: true },     // исходное уведомление целиком
+  description: { type: DataTypes.TEXT, allowNull: false },   // развёрнутое описание РЭС
+  attachments: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+  createdBy: { type: DataTypes.INTEGER, allowNull: true, references: { model: User, key: 'id' } },
+  status: { type: DataTypes.STRING(10), allowNull: false, defaultValue: 'open' }, // open | closed
+  decision: { type: DataTypes.TEXT, allowNull: true },
+  closedBy: { type: DataTypes.INTEGER, allowNull: true, references: { model: User, key: 'id' } },
+  closedAt: { type: DataTypes.DATE, allowNull: true },
+});
+
 // 9. Модель прочтений уведомлений (НОВАЯ)
 const NotificationRead = sequelize.define('NotificationRead', {
   id: {
@@ -1011,6 +1016,10 @@ Notification.hasMany(NotificationRead, { foreignKey: 'notificationId' });
 NotificationRead.belongsTo(Notification, { foreignKey: 'notificationId' });
 NotificationRead.belongsTo(User, { foreignKey: 'userId' });
 PuUploadHistory.belongsTo(User, { foreignKey: 'uploadedBy' });
+Escalation.belongsTo(ResUnit, { foreignKey: 'resId' });
+Escalation.belongsTo(NetworkStructure, { foreignKey: 'networkStructureId' });
+Escalation.belongsTo(User, { as: 'author', foreignKey: 'createdBy' });
+Escalation.belongsTo(User, { as: 'closer', foreignKey: 'closedBy' });
 
 // =====================================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -1073,52 +1082,137 @@ User.prototype.validatePassword = async function(password) {
   return bcrypt.compare(password, this.password);
 };
 
-// Middleware для проверки JWT токена
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+// =====================================================
+// ДОЛЖНОСТИ И ПРАВА (как в ЭнергоСфере)
+// =====================================================
+// Должность = область видимости (scope: 'all' — все РЭС, 'res' — свой РЭС),
+// право = действие или раздел. Права настраиваются НЕ персонально, а матрицей
+// «должность × право» (таблица RolePermissions, раздел «Права доступа»).
+// Стартовые права выдаются один раз на должность (SeededRoles) — дальше
+// матрицу ведёт администратор. Суперадмин (login='admin') может всё.
+const ROLES = {
+  admin:           { title: 'Администратор',      scope: 'all' },
+  nach_sue:        { title: 'Начальник СУЭ',       scope: 'all' },
+  eng_sue:         { title: 'Инженер СУЭ',         scope: 'all' },
+  nach_res:        { title: 'Начальник РЭС',       scope: 'res' },
+  master_res:      { title: 'Мастер РЭС',          scope: 'res' },
+  nach_riru:       { title: 'Начальник РИРУ',      scope: 'res' },
+  eng_realization: { title: 'Инженер реализации',  scope: 'res' },
+  eng_development: { title: 'Инженер развития',    scope: 'res' },
+  monter:          { title: 'Монтёр',              scope: 'res' },
+  glav_ing:        { title: 'Главный инженер',     scope: 'all' },
+  nach_srs:        { title: 'Начальник СРС',       scope: 'all' },
+  eng_srs:         { title: 'Инженер СРС',         scope: 'all' },
+  nach_pts:        { title: 'Начальник ПТС',       scope: 'all' },
+  eng_pts:         { title: 'Инженер ПТС',         scope: 'all' },
+  nach_stp:        { title: 'Начальник СТП',       scope: 'all' },
+  eng_stp:         { title: 'Инженер СТП',         scope: 'all' },
+};
+// Прежние роли ПО → должности (переезд учёток при первом старте новой версии).
+const LEGACY_ROLES = { uploader: 'eng_sue', res_responsible: 'master_res' };
 
-  if (!token) {
-    return res.status(401).json({ error: 'Access denied' });
+// Каталог прав — ЕДИНЫЙ источник (ключ → группа и русское название для UI и 403).
+// Новое право: ключ здесь → requirePerm(ключ) на роут → hasPerm(user, ключ) в UI.
+const PERMISSION_GROUPS = [
+  { id: 'sections', title: 'Разделы' },
+  { id: 'askue', title: 'АСКУЭ' },
+  { id: 'res', title: 'РЭС' },
+  { id: 'tech', title: 'Техблок' },
+  { id: 'structure', title: 'Структура сети' },
+  { id: 'admin', title: 'Администрирование' },
+];
+const PERMISSION_CATALOG = {
+  dashboard_view:        { group: 'sections', title: 'Сводка' },
+  structure_view:        { group: 'sections', title: 'Структура сети' },
+  tech_pending_view:     { group: 'sections', title: 'Ожидающие мероприятий (просмотр)' },
+  askue_pending_view:    { group: 'sections', title: 'Ожидающие проверки АСКУЭ (просмотр)' },
+  problem_vl_view:       { group: 'sections', title: 'Проблемные ВЛ и ТП' },
+  overload_view:         { group: 'sections', title: 'Превышение Pном' },
+  power_analysis_view:   { group: 'sections', title: 'Анализ мощности' },
+  voltage_analysis_view: { group: 'sections', title: 'Анализ напряжения' },
+  deep_analysis_view:    { group: 'sections', title: 'Глубокий анализ работ' },
+  documents_view:        { group: 'sections', title: 'Загруженные документы' },
+  history_view:          { group: 'sections', title: 'История системы' },
+  reports_view:          { group: 'sections', title: 'Отчёты' },
+  upload_files:          { group: 'askue', title: 'Загружать журналы и профили мощности (проверка и перепроверка)' },
+  overload_askue:        { group: 'askue', title: 'Завершать ограничения по перегрузу (этап АСКУЭ)' },
+  problem_vl_manage:     { group: 'askue', title: 'Проблемные ВЛ: письма РЭС и «рассмотрено»' },
+  res_work:              { group: 'res', title: 'Отмечать выполнение мероприятий по ошибкам ПУ' },
+  overload_res:          { group: 'res', title: 'Отмечать мероприятия по перегрузу ТП' },
+  techblock_view:        { group: 'tech', title: 'Видеть «Требуют решения техблока»' },
+  techblock_complete:    { group: 'tech', title: 'Завершать вопросы техблока (решение принято)' },
+  structure_upload:      { group: 'structure', title: 'Загрузка/обновление структуры сети' },
+  structure_edit:        { group: 'structure', title: 'Редактирование структуры (ПУ, ВЛ/КЛ/КВЛ/ВУ, секции, тех.учёты, добавление/удаление)' },
+  structure_edit_pu:     { group: 'structure', title: 'Изменение номеров ПУ своего РЭС (без секций/удаления)' },
+  checks_delete:         { group: 'structure', title: 'Удаление карточек проверок и истории' },
+  settings_view:         { group: 'admin', title: 'Открывать «Настройки»' },
+  notifications_delete:  { group: 'admin', title: 'Удаление уведомлений' },
+  files_manage:          { group: 'admin', title: 'Управление файлами (удаление, диагностика)' },
+  history_purge:         { group: 'admin', title: 'Очистка истории до даты' },
+  users_manage:          { group: 'admin', title: 'Управление пользователями' },
+  permissions_manage:    { group: 'admin', title: 'Настройка прав должностей' },
+  db_tools:              { group: 'admin', title: 'Сервисные операции с базой (проверка, бэкап, восстановление)' },
+};
+const PERMISSIONS = Object.fromEntries(Object.entries(PERMISSION_CATALOG).map(([k, v]) => [k, v.title]));
+
+// Стартовая матрица. Выдаётся один раз на должность — потом её правит администратор.
+const VIEW_COMMON = ['dashboard_view', 'structure_view', 'power_analysis_view', 'voltage_analysis_view', 'documents_view', 'history_view', 'reports_view'];
+const TECH_VIEW = [...VIEW_COMMON, 'tech_pending_view', 'problem_vl_view', 'overload_view', 'techblock_view'];
+const DEFAULT_ROLE_PERMISSIONS = {
+  admin: Object.keys(PERMISSION_CATALOG),
+  nach_sue: [...VIEW_COMMON, 'tech_pending_view', 'askue_pending_view', 'problem_vl_view', 'overload_view', 'deep_analysis_view',
+    'upload_files', 'overload_askue', 'problem_vl_manage', 'structure_edit_pu', 'techblock_view'],
+  eng_sue: [...VIEW_COMMON, 'tech_pending_view', 'askue_pending_view', 'problem_vl_view', 'overload_view',
+    'upload_files', 'overload_askue', 'structure_edit_pu'],
+  nach_res: [...VIEW_COMMON, 'tech_pending_view', 'overload_view', 'res_work', 'overload_res'],
+  master_res: [...VIEW_COMMON, 'tech_pending_view', 'overload_view', 'res_work', 'overload_res'],
+  nach_riru: [...VIEW_COMMON, 'tech_pending_view', 'overload_view'],
+  eng_realization: [...VIEW_COMMON],
+  eng_development: [...VIEW_COMMON],
+  monter: ['dashboard_view', 'structure_view'],
+  glav_ing: [...TECH_VIEW, 'deep_analysis_view', 'techblock_complete'],
+  nach_srs: [...TECH_VIEW, 'techblock_complete'],
+  eng_srs: [...TECH_VIEW],
+  nach_pts: [...TECH_VIEW, 'techblock_complete'],
+  eng_pts: [...TECH_VIEW],
+  nach_stp: [...VIEW_COMMON, 'overload_view'],
+  eng_stp: [...VIEW_COMMON, 'overload_view'],
+};
+
+const RolePermission = sequelize.define('RolePermission', {
+  role: { type: DataTypes.STRING(40), allowNull: false },
+  permission: { type: DataTypes.STRING(60), allowNull: false },
+}, { indexes: [{ unique: true, fields: ['role', 'permission'] }] });
+const SeededRole = sequelize.define('SeededRole', {
+  role: { type: DataTypes.STRING(40), primaryKey: true },
+});
+
+// Матрица в памяти: role → Set(прав). Перечитывается при правке и раз в минуту.
+let roleMatrix = new Map();
+let roleMatrixAt = 0;
+async function loadRoleMatrix(force = false) {
+  if (!force && Date.now() - roleMatrixAt < 60 * 1000) return roleMatrix;
+  const rows = await RolePermission.findAll({ attributes: ['role', 'permission'], raw: true });
+  const m = new Map();
+  for (const { role, permission } of rows) {
+    if (!PERMISSION_CATALOG[permission]) continue;
+    if (!m.has(role)) m.set(role, new Set());
+    m.get(role).add(permission);
   }
-
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid token' });
-    }
-    req.user = user;
-    next();
-  });
-};
-
-// Middleware для проверки ролей
-const checkRole = (roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Access denied for your role' });
-    }
-    next();
-  };
-};
-
-// =====================================================
-// СИСТЕМА ПРАВ (суперадмин + гранулярные права админов)
-// =====================================================
-// Каталог прав — ЕДИНЫЙ источник (ключ → русское название для UI и 403). Новое
-// опасное право добавляется ЗДЕСЬ, затем requirePerm(ключ) на роут и скрытие в UI.
-const PERMISSIONS = {
-  structure_upload:     'Загрузка/обновление структуры сети',
-  structure_edit:       'Редактирование структуры (ПУ, ВЛ/КЛ/КВЛ/ВУ, секции, тех.учёты, добавление/удаление)',
-  structure_edit_pu:    'Изменение номеров ПУ в структуре (без секций/удаления)',
-  checks_delete:        'Удаление карточек проверок и истории',
-  notifications_delete: 'Удаление уведомлений',
-  files_manage:         'Управление файлами (удаление, диагностика)',
-  history_purge:        'Очистка истории до даты',
-  pollmap_sync:         'Синхронизация карты опроса',
-  overload_askue:       'Завершение ограничений по перегрузу (этап АСКУЭ)',
-  users_manage:         'Управление пользователями',
-  db_tools:             'Сервисные операции с базой (diagnose, восстановление и пр.)',
-};
+  roleMatrix = m;
+  roleMatrixAt = Date.now();
+  return m;
+}
+// Выдать стартовые права должностям, которым их ещё не выдавали.
+async function seedRolePermissions() {
+  const seeded = new Set((await SeededRole.findAll({ raw: true })).map(r => r.role));
+  for (const [role, perms] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
+    if (seeded.has(role)) continue;
+    await RolePermission.bulkCreate(perms.map(permission => ({ role, permission })), { ignoreDuplicates: true });
+    await SeededRole.create({ role });
+  }
+  await loadRoleMatrix(true);
+}
 
 // Порог «проблемной ТП»: кейс перегруза с cycles >= этого и stage != completed —
 // мероприятия не дали результата, ТП попадает в «Проблемные ТП».
@@ -1128,52 +1222,90 @@ const PROBLEM_TP_CYCLES = 2;
 // initializeDatabase() из суперадмина; null — безопасный fallback (поле nullable).
 let SYSTEM_USER_ID = null;
 
-// Лёгкий кеш доступа: userId → { isSuper, permissions, ts }. TTL 60с; сбрасывается
-// при сохранении прав / изменении пользователя. Права в JWT не вшиваем — здесь истина.
+// Кеш учёток: userId → { isSuper, role, resId, ts }. TTL 60с; сбрасывается при
+// изменении пользователя. В JWT доверяем только id: должность и РЭС — из БД.
 const ACCESS_TTL_MS = 60 * 1000;
 const accessCache = new Map();
 const invalidateAccess = (userId) => { accessCache.delete(Number(userId)); };
 async function getUserAccess(userId) {
   const key = Number(userId);
   const hit = accessCache.get(key);
-  if (hit && (Date.now() - hit.ts) < ACCESS_TTL_MS) return hit;
-  const u = await User.findByPk(key, { attributes: ['id', 'role', 'isSuper', 'permissions'] });
-  const info = {
-    isSuper: !!(u && u.isSuper),
-    role: u ? u.role : null,
-    permissions: (u && u.permissions && typeof u.permissions === 'object') ? u.permissions : {},
-    ts: Date.now(),
+  let base = hit && (Date.now() - hit.ts) < ACCESS_TTL_MS ? hit : null;
+  if (!base) {
+    const u = await User.findByPk(key, { attributes: ['id', 'role', 'resId', 'isSuper'] });
+    base = { exists: !!u, isSuper: !!(u && u.isSuper), role: u ? u.role : null, resId: u ? u.resId : null, ts: Date.now() };
+    accessCache.set(key, base);
+  }
+  const matrix = await loadRoleMatrix();
+  const perms = (base.isSuper || base.role === 'admin') ? new Set(Object.keys(PERMISSION_CATALOG)) : (matrix.get(base.role) || new Set());
+  const allRes = base.isSuper || ROLES[base.role]?.scope === 'all';
+  return { ...base, perms, allRes };
+}
+// Учётки, чьей должности выдано право (для адресных уведомлений).
+async function usersWithPerm(key, where = {}) {
+  const matrix = await loadRoleMatrix();
+  const roles = ['admin', ...[...matrix.entries()].filter(([, set]) => set.has(key)).map(([role]) => role)];
+  return User.findAll({ where: { ...where, [Op.or]: [{ role: { [Op.in]: roles } }, { isSuper: true }] } });
+}
+const userCan = (user, key) => !!user && (user.isSuper || (user.perms && user.perms.has(key)));
+// Учётка с правами — для мест, где под рукой модель User, а не req.user (бейдж платформы).
+async function accessOf(user) {
+  const acc = await getUserAccess(user.id);
+  return { id: user.id, role: acc.role, resId: acc.resId, isSuper: acc.isSuper, allRes: acc.allRes, perms: acc.perms };
+}
+// Что отдаём интерфейсу о текущем пользователе (login, platform, me).
+async function publicUser(user) {
+  const acc = await getUserAccess(user.id);
+  return {
+    id: user.id,
+    fio: user.fio,
+    role: acc.role,
+    roleTitle: acc.isSuper ? 'Суперадмин' : (ROLES[acc.role]?.title || acc.role),
+    resId: acc.resId,
+    resName: user.ResUnit?.name,
+    isSuper: acc.isSuper,
+    allRes: acc.allRes,
+    permissions: Object.fromEntries([...acc.perms].map(k => [k, true])),
   };
-  accessCache.set(key, info);
-  return info;
 }
 
-// Право на ОПАСНОЕ действие. Гранулярные права раздаются ЛЮБОЙ роли через раздел
-// «Права доступа» (кроме суперадмина, у него всё). `key` — ключ каталога ИЛИ массив
-// ключей (достаточно любого из них). Суперадмин → всегда; иначе нужен один из прав.
-const requirePerm = (key) => async (req, res, next) => {
-  try {
-    const list = Array.isArray(key) ? key : [key];
-    const info = await getUserAccess(req.user.id);
-    if (info.isSuper) return next();
-    if (info.permissions && list.some(k => info.permissions[k])) return next();
-    return res.status(403).json({ error: 'Недостаточно прав', permission: list[0], title: PERMISSIONS[list[0]] || list[0] });
-  } catch (e) {
-    console.error('requirePerm error:', e.message);
-    return res.status(500).json({ error: 'Ошибка проверки прав' });
+// Middleware для проверки JWT токена. Должность, РЭС и права — свежие из БД (кеш),
+// поэтому смена должности или матрицы действует без перелогина.
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied' });
   }
+
+  jwt.verify(token, JWT_SECRET, (err, payload) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid token' });
+    }
+    getUserAccess(payload.id).then(acc => {
+      if (!acc.exists) return res.status(401).json({ error: 'Учётная запись удалена' });
+      req.user = { id: payload.id, role: acc.role, resId: acc.resId, isSuper: acc.isSuper, allRes: acc.allRes, perms: acc.perms };
+      next();
+    }, e => {
+      console.error('auth access error:', e.message);
+      res.status(500).json({ error: 'Ошибка проверки доступа' });
+    });
+  });
 };
 
-// Только суперадмин (управление правами).
-const requireSuper = async (req, res, next) => {
-  try {
-    const info = await getUserAccess(req.user.id);
-    if (info.isSuper) return next();
-    return res.status(403).json({ error: 'Доступно только суперадмину' });
-  } catch (e) {
-    console.error('requireSuper error:', e.message);
-    return res.status(500).json({ error: 'Ошибка проверки прав' });
-  }
+// Право на действие или раздел. `key` — ключ каталога ИЛИ массив ключей (достаточно
+// любого). Суперадмин — всегда. Право не расширяет географию: свой РЭС проверяет роут.
+const requirePerm = (key) => (req, res, next) => {
+  const list = Array.isArray(key) ? key : [key];
+  if (req.user && list.some(k => userCan(req.user, k))) return next();
+  return res.status(403).json({ error: 'Недостаточно прав', permission: list[0], title: PERMISSIONS[list[0]] || list[0] });
+};
+
+// Только суперадмин.
+const requireSuper = (req, res, next) => {
+  if (req.user?.isSuper) return next();
+  return res.status(403).json({ error: 'Доступно только суперадмину' });
 };
 
 // Файловый скоуп-токен — отдельный от сессионного, кладётся в URL (?t=) для
@@ -1281,15 +1413,7 @@ app.post('/api/auth/login', async (req, res) => {
     res.json({
       token,
       fileToken: makeFileToken(user),
-      user: {
-        id: user.id,
-        fio: user.fio,
-        role: user.role,
-        resId: user.resId,
-        resName: user.ResUnit?.name,
-        isSuper: !!user.isSuper,
-        permissions: user.permissions || {}
-      }
+      user: await publicUser(user)
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -1350,15 +1474,7 @@ app.post('/api/auth/platform', async (req, res) => {
     res.json({
       token: appToken,
       fileToken: makeFileToken(user),
-      user: {
-        id: user.id,
-        fio: user.fio,
-        role: user.role,
-        resId: user.resId,
-        resName: user.ResUnit?.name,
-        isSuper: !!user.isSuper,
-        permissions: user.permissions || {}
-      }
+      user: await publicUser(user)
     });
   } catch (error) {
     console.error('Platform auth error:', error.message);
@@ -1392,11 +1508,15 @@ app.get('/api/platform/badge', async (req, res) => {
     }
     if (!user) return res.json({ count: 0 });
 
-    const counts = await getNotificationCountsCached(user);
+    // «Требует действия» — то, что человек по своей должности может отработать.
+    const acc = await accessOf(user);
+    const counts = await getNotificationCountsCached(acc);
     let count = 0;
-    if (user.role === 'admin') count = counts.tech_pending + counts.askue_pending + counts.problem_vl + (counts.power_overload || 0);
-    else if (user.role === 'res_responsible') count = counts.tech_pending;
-    else if (user.role === 'uploader') count = counts.askue_pending;
+    if (userCan(acc, 'res_work')) count += counts.tech_pending || 0;
+    if (userCan(acc, 'upload_files')) count += counts.askue_pending || 0;
+    if (userCan(acc, 'problem_vl_manage')) count += counts.problem_vl || 0;
+    if (userCan(acc, 'techblock_complete')) count += counts.techblock || 0;
+    count += counts.powerOverload || 0;
     res.json({ count });
   } catch (error) {
     console.error('Platform badge error:', error.message);
@@ -1418,15 +1538,7 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
 
     res.json({
       fileToken: makeFileToken(user),
-      user: {
-        id: user.id,
-        fio: user.fio,
-        role: user.role,
-        resId: user.resId,
-        resName: user.ResUnit?.name,
-        isSuper: !!user.isSuper,
-        permissions: user.permissions || {}
-      }
+      user: await publicUser(user)
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1451,7 +1563,7 @@ app.get('/api/network/structure/:resId?', authenticateToken, async (req, res) =>
     const resId = req.params.resId || req.user.resId;
     
     // Если не админ, может видеть только свой РЭС
-    if (req.user.role !== 'admin' && resId != req.user.resId) {
+    if (!req.user.allRes && resId != req.user.resId) {
       return res.status(403).json({ error: 'Access denied' });
     }
     
@@ -1481,344 +1593,6 @@ app.get('/api/network/structure/:resId?', authenticateToken, async (req, res) =>
 
     res.json(structures);
   } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ===== КАРТА ОПРОСА СТРУКТУРЫ (интеграция с «Опрос ПУ»/Пирамида) =====
-// Нормализация серийника: trim, без пробелов, без ведущих нулей.
-const normSerial = (v) => String(v == null ? '' : v).trim().replace(/\s+/g, '').replace(/^0+/, '');
-// Нормализация имени ТП для сверки структуры со срезом Пирамиды: верхний регистр,
-// без пробелов/дефисов/подчёркиваний, срезаем ведущий префикс ТП/TP. Применять
-// ОДИНАКОВО к именам ТП структуры и к полю tp из среза.
-const normTpName = (v) => String(v == null ? '' : v).toUpperCase().replace(/[\s\-_]/g, '').replace(/^(ТП|TP)/, '');
-// РиМ по типу ПУ (кириллица «РиМ» или латиница «RiM»). Журнал напряжений доступен
-// для СПОДЭС ИЛИ РиМ (любой РиМ, включая РиМ-СПОДЭС).
-const isRimType = (t) => /рим|rim/i.test(String(t == null ? '' : t));
-const hasVoltageJournal = (isSpodes, puType) => !!isSpodes || isRimType(puType);
-
-// Синхронизация среза реестра «Опрос ПУ» (полностью замещает PolledMeter).
-// Ответ на ошибку — структурированный { error, code, hint, detail }, чтобы фронт
-// показал человеку понятную подсказку, а «программисту» — code/detail.
-// Ключ OPROS_API_KEY НИКОГДА не попадает в ответ/лог (даже частично); OPROS_URL — можно.
-app.post('/api/poll-map/sync', authenticateToken, checkRole(['admin', 'uec_responsible']), requirePerm('pollmap_sync'), async (req, res) => {
-  const url = process.env.OPROS_URL;
-  const key = process.env.OPROS_API_KEY;
-
-  // 1) not_configured — нет URL и/или ключа.
-  if (!url || !key) {
-    const missing = [!url && 'OPROS_URL', !key && 'OPROS_API_KEY'].filter(Boolean).join(' и ');
-    console.warn(`[poll-map/sync] not_configured — не заданы: ${missing}`);
-    return res.status(503).json({
-      error: 'Интеграция с «Опрос ПУ» не настроена',
-      code: 'not_configured',
-      hint: `Не заданы переменные: ${missing}. Добавьте их в env Мониторинга на Amvera и нажмите «Пересобрать».`,
-      detail: `отсутствует env: ${missing}`
-    });
-  }
-  const base = url.replace(/\/$/, '');
-
-  // Сетевая стадия: fetch до получения ответа.
-  let resp;
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 60000);
-    try {
-      resp = await fetch(`${base}/api/integration/meters`, {
-        headers: { 'X-Api-Key': key },
-        signal: ctrl.signal
-      });
-    } finally { clearTimeout(timer); }
-  } catch (e) {
-    // 2) dns_or_network — не дошли до ответа (ENOTFOUND/ECONNREFUSED/таймаут…).
-    const nodeCode = e.name === 'AbortError' ? 'ETIMEDOUT/abort'
-      : (e.cause && e.cause.code) || e.code || e.name || 'NETWORK_ERROR';
-    console.warn(`[poll-map/sync] dns_or_network — ${nodeCode}`);
-    return res.status(502).json({
-      error: '«Опрос ПУ» недоступен',
-      code: 'dns_or_network',
-      hint: `Опрос ПУ недоступен: проверьте OPROS_URL (сейчас: ${base}) и что приложение «Опрос ПУ» запущено.`,
-      detail: e.name === 'AbortError' ? 'таймаут 60с (abort)' : `код ошибки Node: ${nodeCode}`
-    });
-  }
-
-  // Стадии по статусу апстрима.
-  if (resp.status === 401) {
-    console.warn('[poll-map/sync] upstream_401 — ключ не принят');
-    return res.status(502).json({
-      error: '«Опрос ПУ» отклонил ключ (401)',
-      code: 'upstream_401',
-      hint: 'Ключи не совпадают: OPROS_API_KEY в Мониторинге должен быть равен INTEGRATION_API_KEY в «Опросе ПУ». После правки env — «Пересобрать» то приложение, где меняли ключ.',
-      detail: 'integration-endpoint вернул HTTP 401'
-    });
-  }
-  if (resp.status === 503) {
-    console.warn('[poll-map/sync] upstream_503 — в Опросе не настроена интеграция');
-    return res.status(502).json({
-      error: 'В «Опросе ПУ» не настроена интеграция (503)',
-      code: 'upstream_503',
-      hint: 'В «Опросе ПУ» не задан INTEGRATION_API_KEY — добавьте его и пересоберите «Опрос ПУ».',
-      detail: 'integration-endpoint вернул HTTP 503'
-    });
-  }
-  if (resp.status === 404) {
-    console.warn('[poll-map/sync] upstream_404 — старая версия Опроса');
-    return res.status(502).json({
-      error: 'Endpoint интеграции не найден (404)',
-      code: 'upstream_404',
-      hint: '«Опрос ПУ» работает, но это старая версия без integration-endpoint — нажмите «Пересобрать» у «Опроса ПУ».',
-      detail: 'integration-endpoint вернул HTTP 404'
-    });
-  }
-  if (!resp.ok) {
-    // 6) upstream_other — иной статус: в detail статус + первые 200 символов тела.
-    let body = '';
-    try { body = (await resp.text()).slice(0, 200); } catch { /* тело недоступно */ }
-    console.warn(`[poll-map/sync] upstream_other — HTTP ${resp.status}`);
-    return res.status(502).json({
-      error: `«Опрос ПУ» вернул неожиданный ответ (${resp.status})`,
-      code: 'upstream_other',
-      hint: 'Неожиданный ответ «Опроса ПУ». Проверьте состояние приложения «Опрос ПУ» и повторите позже.',
-      detail: `HTTP ${resp.status}; тело: ${body}`
-    });
-  }
-
-  // 7) bad_payload — 200, но JSON не распарсился / нет meters / элементы не тройки.
-  let payload;
-  try {
-    payload = await resp.json();
-  } catch {
-    console.warn('[poll-map/sync] bad_payload — JSON не распарсился');
-    return res.status(502).json({
-      error: 'Некорректный ответ «Опроса ПУ»',
-      code: 'bad_payload',
-      hint: '«Опрос ПУ» ответил, но тело не является JSON. Возможно, между системами прокси или заглушка. Проверьте OPROS_URL.',
-      detail: 'ответ 200, но JSON не распарсился'
-    });
-  }
-  const meters = payload && payload.meters;
-  if (!Array.isArray(meters)) {
-    console.warn('[poll-map/sync] bad_payload — нет массива meters');
-    return res.status(502).json({
-      error: 'Некорректный ответ «Опроса ПУ»',
-      code: 'bad_payload',
-      hint: 'В ответе «Опроса ПУ» нет поля meters (массива). Обновите «Опрос ПУ» до актуальной версии.',
-      detail: 'поле meters отсутствует или не является массивом'
-    });
-  }
-  const badRow = meters.find(r => !Array.isArray(r) || r.length < 3);
-  if (badRow !== undefined) {
-    console.warn('[poll-map/sync] bad_payload — элемент meters не тройка');
-    return res.status(502).json({
-      error: 'Некорректный ответ «Опроса ПУ»',
-      code: 'bad_payload',
-      hint: 'Формат элементов meters не [serial, spodes, collected]. Обновите «Опрос ПУ».',
-      detail: `элемент meters не является тройкой: ${JSON.stringify(badRow).slice(0, 120)}`
-    });
-  }
-
-  // 8) empty_snapshot — валидно, но пусто. Не ошибка: существующий срез НЕ затираем.
-  if (meters.length === 0) {
-    const existing = await PolledMeter.count();
-    console.warn(`[poll-map/sync] empty_snapshot — срез пуст (сохранён прежний: ${existing})`);
-    return res.status(200).json({
-      warning: true,
-      code: 'empty_snapshot',
-      hint: existing > 0
-        ? 'В «Опросе ПУ» нет успешных загрузок — срез пуст. Прежний срез сохранён, карта не обнулена. Загрузите выгрузку Пирамиды в «Опрос ПУ».'
-        : 'В «Опросе ПУ» нет успешных загрузок — срез пуст. Загрузите выгрузку Пирамиды в «Опрос ПУ», затем синхронизируйте снова.',
-      total: 0, collected: 0, spodes: 0,
-      snapshotAt: (payload && payload.snapshot_at) || null,
-      keptExisting: existing
-    });
-  }
-
-  const snapshotAt = payload.snapshot_at ? new Date(payload.snapshot_at) : new Date();
-
-  // Дедуп по serialNorm: collected=1 побеждает, затем spodes=1.
-  const byNorm = new Map();
-  for (const row of meters) {
-    const serial = row[0];
-    const spodes = row[1] == 1 || row[1] === true;
-    const collected = row[2] == 1 || row[2] === true;
-    // Поля 4-6 расширенного формата (при наличии): ТП, точка учёта, тип ПУ.
-    // Старый 3-польный формат → null (обратная совместимость).
-    const tp = row.length > 3 && row[3] != null && row[3] !== '' ? String(row[3]) : null;
-    const tuPath = row.length > 4 && row[4] != null && row[4] !== '' ? String(row[4]) : null;
-    const puType = row.length > 5 && row[5] != null && row[5] !== '' ? String(row[5]) : null;
-    const norm = normSerial(serial);
-    if (!norm) continue;
-    const prev = byNorm.get(norm);
-    if (!prev) byNorm.set(norm, { serialRaw: String(serial), serialNorm: norm, isSpodes: spodes, isCollected: collected, tp, tpNorm: tp ? normTpName(tp) : null, tuPath, puType, snapshotAt });
-    else {
-      if (collected) prev.isCollected = true;
-      if (spodes) prev.isSpodes = true;
-      if (!prev.tp && tp) { prev.tp = tp; prev.tpNorm = normTpName(tp); }
-      if (!prev.tuPath && tuPath) prev.tuPath = tuPath;
-      if (!prev.puType && puType) prev.puType = puType;
-    }
-  }
-  const rowsToInsert = [...byNorm.values()];
-
-  // Транзакция: старый срез при ошибке НЕ затираем.
-  const transaction = await sequelize.transaction();
-  try {
-    await PolledMeter.destroy({ where: {}, transaction });
-    for (let i = 0; i < rowsToInsert.length; i += 1000) {
-      await PolledMeter.bulkCreate(rowsToInsert.slice(i, i + 1000), { transaction });
-    }
-    await transaction.commit();
-  } catch (e) {
-    await transaction.rollback();
-    console.error('[poll-map/sync] db_error —', e.message);
-    return res.status(500).json({
-      error: 'Ошибка записи среза в БД',
-      code: 'db_error',
-      hint: 'Срез получен, но не записался в базу Мониторинга. Прежний срез сохранён. Повторите синхронизацию; если повторяется — сообщите программисту.',
-      detail: e.message
-    });
-  }
-
-  const collected = rowsToInsert.filter(r => r.isCollected).length;
-  const spodes = rowsToInsert.filter(r => r.isSpodes).length;
-  console.log(`[poll-map/sync] ok — total ${rowsToInsert.length}, collected ${collected}, spodes ${spodes}`);
-  res.json({ code: 'ok', total: rowsToInsert.length, collected, spodes, snapshotAt });
-});
-
-// Карта опроса: структура × срез «Опрос ПУ». Всё двумя findAll, без циклов-запросов.
-app.get('/api/poll-map', authenticateToken, async (req, res) => {
-  try {
-    let resId = req.query.resId;
-    // Карта опроса доступна всем ролям, но данные — по области видимости роли:
-    // админ видит всю карту (может фильтровать через ?resId), остальные
-    // (uploader / res_responsible / uec_responsible) — только свой РЭС.
-    if (req.user.role !== 'admin') resId = req.user.resId;
-    const where = {};
-    if (resId) where.resId = resId;
-
-    const [structures, sections, meters] = await Promise.all([
-      NetworkStructure.findAll({ where, include: [ResUnit], order: [['tpName', 'ASC'], ['vlName', 'ASC']] }),
-      TpSection.findAll({ where, include: [ResUnit], order: [['tpName', 'ASC'], ['sectionNumber', 'ASC']] }),
-      PolledMeter.findAll()
-    ]);
-
-    const map = new Map();
-    let snapshotAt = null;
-    for (const m of meters) {
-      map.set(m.serialNorm, { isSpodes: m.isSpodes, isCollected: m.isCollected, puType: m.puType });
-      if (!snapshotAt && m.snapshotAt) snapshotAt = m.snapshotAt;
-    }
-    const noData = meters.length === 0;
-
-    // journal — доступен ли журнал напряжений: СПОДЭС ИЛИ РиМ (любой РиМ).
-    const statusOf = (pu) => {
-      if (!pu) return { status: 'no_pu', spodes: false, journal: false };
-      // Срез не синхронизирован — структура видна, но данных опроса нет:
-      // нейтральный статус 'no_data' (не путать с 'absent' = есть срез, ПУ в нём нет).
-      if (noData) return { status: 'no_data', spodes: false, journal: false };
-      const m = map.get(normSerial(pu));
-      if (!m) return { status: 'absent', spodes: false, journal: false };
-      return {
-        status: m.isCollected ? 'collected' : 'not_collected',
-        spodes: !!m.isSpodes,
-        journal: hasVoltageJournal(m.isSpodes, m.puType)
-      };
-    };
-
-    const structSerials = new Set();
-    const rows = structures.map(s => {
-      [s.startPu, s.middlePu, s.endPu].forEach(p => { if (p) structSerials.add(normSerial(p)); });
-      return {
-        id: s.id, resId: s.resId, resName: s.ResUnit?.name || '',
-        tpName: s.tpName, vlName: s.vlName, sectionId: s.sectionId,
-        startPu: s.startPu, middlePu: s.middlePu, endPu: s.endPu,
-        poll: { start: statusOf(s.startPu), middle: statusOf(s.middlePu), end: statusOf(s.endPu) }
-      };
-    });
-
-    // Секции шин (тех.учёт на вводе) — тоже точки мониторинга: статус по techPuNumber.
-    const sectionRows = sections.map(s => {
-      if (s.techPuNumber) structSerials.add(normSerial(s.techPuNumber));
-      return {
-        id: s.id, resId: s.resId, resName: s.ResUnit?.name || '',
-        tpName: s.tpName, sectionNumber: s.sectionNumber, tnKva: s.tnKva,
-        techPuNumber: s.techPuNumber,
-        poll: statusOf(s.techPuNumber)
-      };
-    });
-
-    const blank = () => ({ totalPu: 0, collected: 0, notCollected: 0, absent: 0, spodes: 0, noPu: 0 });
-    const acc = (agg, cell) => {
-      if (cell.status === 'no_pu') { agg.noPu++; return; }
-      if (cell.status === 'no_data') return;   // срез не синхронизирован — счётчики не трогаем
-      agg.totalPu++;
-      if (cell.status === 'collected') agg.collected++;
-      else if (cell.status === 'not_collected') agg.notCollected++;
-      else if (cell.status === 'absent') agg.absent++;
-      if (cell.spodes) agg.spodes++;
-    };
-    const byResMap = new Map();
-    const total = blank();
-    const ensureAgg = (resId, resName) => {
-      if (!byResMap.has(resId)) byResMap.set(resId, { resId, resName, ...blank() });
-      return byResMap.get(resId);
-    };
-    for (const r of rows) {
-      const agg = ensureAgg(r.resId, r.resName);
-      [r.poll.start, r.poll.middle, r.poll.end].forEach(c => { acc(agg, c); acc(total, c); });
-    }
-    // Тех.учёты секций входят в сводку покрытия наравне с ПУ ВЛ.
-    for (const s of sectionRows) {
-      const agg = ensureAgg(s.resId, s.resName);
-      acc(agg, s.poll); acc(total, s.poll);
-    }
-    const pct = (a) => a.totalPu > 0 ? Math.round((a.collected / a.totalPu) * 100) : 0;
-    // Без среза — сводка «прочерками» (null): структура РЭС видна, цифр опроса нет.
-    const dash = { totalPu: null, collected: null, notCollected: null, absent: null, spodes: null, noPu: null, coveragePct: null };
-    const byRes = [...byResMap.values()]
-      .map(a => noData ? { resId: a.resId, resName: a.resName, ...dash } : { ...a, coveragePct: pct(a) })
-      .sort((x, y) => (x.resName || '').localeCompare(y.resName || '', 'ru'));
-    const summary = { byRes, total: noData ? { ...dash } : { ...total, coveragePct: pct(total) } };
-
-    const orphanList = [];
-    for (const m of meters) {
-      if (!structSerials.has(m.serialNorm)) orphanList.push({ serial: m.serialRaw || m.serialNorm, isSpodes: m.isSpodes, isCollected: m.isCollected });
-    }
-    const orphans = { count: orphanList.length, list: orphanList };
-
-    // Кандидаты СПОДЭС по каждой ТП структуры: ПУ среза с tpNorm этой ТП, СПОДЭС,
-    // которых НЕТ в номерах структуры. Один проход: Map tpNorm → список.
-    const tpDataAvailable = meters.some(m => m.tpNorm);   // Опрос отдал поле tp?
-    const metersByTp = new Map();
-    for (const m of meters) {
-      if (!m.tpNorm) continue;
-      if (!metersByTp.has(m.tpNorm)) metersByTp.set(m.tpNorm, []);
-      metersByTp.get(m.tpNorm).push(m);
-    }
-    const tpMap = new Map();   // ключ resId||tpName — уникальные ТП структуры (ВЛ + секции)
-    const addTp = (resId, resName, tpName) => {
-      const k = resId + '||' + tpName;
-      if (!tpMap.has(k)) tpMap.set(k, { resId, resName, tpName });
-    };
-    structures.forEach(s => addTp(s.resId, s.ResUnit?.name || '', s.tpName));
-    sections.forEach(s => addTp(s.resId, s.ResUnit?.name || '', s.tpName));
-    const tps = [...tpMap.values()].map(t => {
-      const list = metersByTp.get(normTpName(t.tpName)) || [];
-      // Кандидаты для контроля — ПУ с журналом напряжений (СПОДЭС ИЛИ РиМ), которых
-      // нет в номерах структуры.
-      const candidates = list
-        .filter(m => hasVoltageJournal(m.isSpodes, m.puType) && !structSerials.has(m.serialNorm))
-        .map(m => ({
-          serial: m.serialRaw || m.serialNorm, tuPath: m.tuPath || null,
-          isCollected: m.isCollected, isSpodes: !!m.isSpodes,
-          isRim: isRimType(m.puType), puType: m.puType || null
-        }));
-      return { resId: t.resId, resName: t.resName, tpName: t.tpName, tpMatched: list.length > 0, candidates };
-    });
-
-    res.json({ snapshotAt, noData, rows, sections: sectionRows, summary, orphans, tps, tpDataAvailable });
-  } catch (error) {
-    console.error('poll-map error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1897,7 +1671,7 @@ app.put('/api/network/structure/:id',
 app.get('/api/network/sections', authenticateToken, async (req, res) => {
   try {
     const resId = req.query.resId || req.user.resId;
-    if (req.user.role !== 'admin' && resId != req.user.resId) {
+    if (!req.user.allRes && resId != req.user.resId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1942,7 +1716,7 @@ app.post('/api/network/sections',
         return res.status(400).json({ error: 'Обязательны РЭС, ТП и номер секции' });
       }
       // Право не расширяет географию: не-админ создаёт секции только своего РЭС.
-      if (req.user.role !== 'admin' && Number(resId) !== Number(req.user.resId)) {
+      if (!req.user.allRes && Number(resId) !== Number(req.user.resId)) {
         return res.status(403).json({ error: 'Создавать секции можно только в своём РЭС' });
       }
 
@@ -1976,7 +1750,7 @@ app.put('/api/network/sections/:id',
     try {
       const section = await TpSection.findByPk(req.params.id);
       if (!section) return res.status(404).json({ error: 'Секция не найдена' });
-      if (req.user.role !== 'admin' && Number(section.resId) !== Number(req.user.resId)) {
+      if (!req.user.allRes && Number(section.resId) !== Number(req.user.resId)) {
         return res.status(403).json({ error: 'Редактировать секции можно только в своём РЭС' });
       }
 
@@ -2022,7 +1796,7 @@ app.delete('/api/network/sections/:id',
     try {
       const section = await TpSection.findByPk(req.params.id);
       if (!section) return res.status(404).json({ error: 'Секция не найдена' });
-      if (req.user.role !== 'admin' && Number(section.resId) !== Number(req.user.resId)) {
+      if (!req.user.allRes && Number(section.resId) !== Number(req.user.resId)) {
         return res.status(403).json({ error: 'Удалять секции можно только в своём РЭС' });
       }
 
@@ -2059,15 +1833,14 @@ app.delete('/api/network/sections/:id',
 app.get('/api/overload', authenticateToken, async (req, res) => {
   try {
     const { stage, resId } = req.query;
-    const acc = await getUserAccess(req.user.id);
-    const isAdmin = req.user.role === 'admin' || acc.isSuper;
-    const canAskue = acc.isSuper || !!(acc.permissions && acc.permissions.overload_askue);
-    const isRes = req.user.role === 'res_responsible';
-
-    // Область «своя работа» по этапам (для не-админа). Пользователь с обеими ролями
-    // доступа (право + РЭС) — объединение. Пусто → без права и не РЭС/админ.
-    let allowedStages = null; // null = все (админ/супер)
-    if (!isAdmin) {
+    // Каждый видит свою работу: АСКУЭ — этапы ограничения, РЭС — мероприятия.
+    // Все этапы — суперадмин, Администратор и те, кто только смотрит (техблок и др.).
+    const canAskue = userCan(req.user, 'overload_askue');
+    const isRes = userCan(req.user, 'overload_res');
+    if (!userCan(req.user, 'overload_view') && !canAskue && !isRes) return res.json([]);
+    const allStages = req.user.isSuper || req.user.role === 'admin' || (!canAskue && !isRes);
+    let allowedStages = null; // null = все этапы
+    if (!allStages) {
       const set = new Set();
       if (canAskue) { set.add('askue_limit'); set.add('awaiting_recheck'); }
       if (isRes) { set.add('res_work'); set.add('awaiting_recheck'); }
@@ -2075,14 +1848,13 @@ app.get('/api/overload', authenticateToken, async (req, res) => {
     }
 
     const where = {};
-    // РЭС-скоуп: не-админ — свой РЭС; админ — ?resId либо все.
-    if (!isAdmin) where.resId = req.user.resId;
+    // Область: должность «свой РЭС» — свой; «все РЭС» — ?resId либо все.
+    if (!req.user.allRes) where.resId = req.user.resId;
     else if (resId) where.resId = parseInt(resId, 10);
 
-    // Этап: явный ?stage у админа — как есть; у не-админа — только из своей области
-    // (чужой этап → пусто). Без ?stage — дефолтная область (у админа все).
+    // Этап: явный ?stage — только из своей области (чужой этап → пусто).
     if (stage) {
-      if (isAdmin) where.stage = stage;
+      if (allowedStages === null) where.stage = stage;
       else if ((allowedStages || []).includes(stage)) where.stage = stage;
       else return res.json([]);
     } else if (allowedStages !== null) {
@@ -2147,6 +1919,9 @@ app.post('/api/overload/:caseId/askue-complete',
       if (oc.stage !== 'askue_limit') {
         return res.status(400).json({ error: 'Случай не на этапе АСКУЭ' });
       }
+      if (!req.user.allRes && oc.resId !== req.user.resId) {
+        return res.status(403).json({ error: 'Чужой РЭС' });
+      }
       const askueData = {
         consumers: consumersN, limitedKw: limitedN, unpolledKw: unpolledN,
         totalKw: totalN, at: new Date().toISOString()
@@ -2183,7 +1958,7 @@ app.post('/api/overload/:caseId/askue-complete',
 // РЭС выполнил мероприятия (комментарий + фото) → ожидает перепроверки
 app.post('/api/overload/:caseId/res-complete',
   authenticateToken,
-  checkRole(['res_responsible', 'admin']),
+  requirePerm('overload_res'),
   upload.array('attachments', 5),
   async (req, res) => {
     const uploadedFiles = [];
@@ -2201,7 +1976,7 @@ app.post('/api/overload/:caseId/res-complete',
       });
       if (!oc) return res.status(404).json({ error: 'Случай не найден' });
       if (oc.stage !== 'res_work') return res.status(400).json({ error: 'Случай не на этапе мероприятий РЭС' });
-      if (req.user.role === 'res_responsible' && oc.resId !== req.user.resId) {
+      if (!req.user.allRes && oc.resId !== req.user.resId) {
         return res.status(403).json({ error: 'Чужой РЭС' });
       }
 
@@ -2248,7 +2023,6 @@ app.post('/api/overload/:caseId/res-complete',
 // удаления уведомлений). Чистит и висящие power_overload-уведомления секций.
 app.post('/api/overload/delete-bulk',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('notifications_delete'),
   async (req, res) => {
     try {
@@ -2459,7 +2233,7 @@ async function processProfileFile(filePath, userId) {
 // 5. ЗАГРУЗКА ФАЙЛОВ ДЛЯ АНАЛИЗА
 app.post('/api/upload/analyze',
   authenticateToken,
-  checkRole(['admin', 'uploader']),
+  requirePerm('upload_files'),
   uploadExcel.single('file'),
   async (req, res) => {
     let uploadRecord;
@@ -2594,7 +2368,6 @@ app.post('/api/upload/analyze',
 // 6. ЗАГРУЗКА ПОЛНОЙ СТРУКТУРЫ СЕТИ
 app.post('/api/network/upload-full-structure',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('structure_upload'),
   uploadExcel.single('file'),
   async (req, res) => {
@@ -2822,8 +2595,8 @@ app.get('/api/network/structure-template',
 // затирают, обновляется только заполненное. Просмотровый роут (по роли/РЭС).
 app.get('/api/network/structure-export', authenticateToken, async (req, res) => {
   try {
-    const resId = req.user.role === 'admin' ? (req.query.resId || null) : req.user.resId;
-    if (req.user.role !== 'admin' && req.query.resId && req.query.resId != req.user.resId) {
+    const resId = req.user.allRes ? (req.query.resId || null) : req.user.resId;
+    if (!req.user.allRes && req.query.resId && req.query.resId != req.user.resId) {
       return res.status(403).json({ error: 'Access denied' });
     }
     const where = {};
@@ -2871,45 +2644,34 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
     const { resId, type } = req.query;   // ← добавили type
     let whereClause = {};
 
-    // Право на этап АСКУЭ — определяет видимость power_overload с audience:'askue'.
-    const acc = await getUserAccess(req.user.id);
-    const canAskue = acc.isSuper || !!(acc.permissions && acc.permissions.overload_askue);
+    // Что видно — по правам должности, где — по её области (все РЭС или свой).
+    const u = req.user;
+    const canAskue = userCan(u, 'overload_askue');
+    const isRes = userCan(u, 'overload_res');
+    const types = ['success', 'info'];
+    if (userCan(u, 'tech_pending_view') || userCan(u, 'res_work')) types.push('error');
+    if (userCan(u, 'askue_pending_view') || userCan(u, 'upload_files')) types.push('pending_askue');
+    if (userCan(u, 'overload_view') || canAskue || isRes) types.push('power_overload');
+    if (userCan(u, 'problem_vl_view')) types.push('problem_vl');
 
-    if (req.user.role === 'admin') {
-      // Админ видит ВСЕ уведомления нужного РЭС
-      if (resId) {
-        whereClause = { resId: parseInt(resId) };
-      } else {
-        whereClause = {};  // Все уведомления
-      }
-
-    } else if (req.user.role === 'res_responsible') {
+    if (u.allRes) {
+      whereClause = resId ? { resId: parseInt(resId) } : {};
+      whereClause.type = { [Op.in]: types };
+    } else {
       whereClause = {
-        resId: req.user.resId,
         [Op.or]: [
-          { toUserId: null },
-          { toUserId: req.user.id }
+          { toUserId: u.id },
+          { toUserId: null, resId: u.resId ?? -1, type: { [Op.in]: types } }
         ]
       };
-
-    } else if (req.user.role === 'uploader') {
-      const or = [
-        { toUserId: req.user.id },
-        { toUserId: null, resId: req.user.resId, type: 'pending_askue' }
-      ];
-      // Загрузчик с правом АСКУЭ видит перегрузы своего РЭС (этап АСКУЭ) — фильтр
-      // по audience ниже оставит только askue-адресованные.
-      if (canAskue) or.push({ toUserId: null, resId: req.user.resId, type: 'power_overload' });
-      whereClause = { [Op.or]: or };
-
-    } else {
-      whereClause = { toUserId: req.user.id };
     }
-    
+
     // ← НОВОЕ: фильтруем по типу прямо в БД, чтобы error не вытеснялись
     //   свежими уведомлениями других типов
     if (type) {
-      whereClause.type = type;
+      if (!types.includes(type)) return res.json([]);
+      if (u.allRes) whereClause.type = type;
+      else whereClause = { [Op.and]: [whereClause, { type }] };
     }
     
     const notifications = await Notification.findAll({
@@ -2947,13 +2709,13 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
     // Адресация power_overload по этапу (audience): 'askue' — пользователям с правом
     // overload_askue (и админам/суперу); 'res'/без метки — РЭС по resId (уже в
     // whereClause) + админам. Так этап АСКУЭ не сыпется РЭСу и наоборот.
-    const isAdminLike = req.user.role === 'admin' || acc.isSuper;
+    const seesAll = u.isSuper || u.role === 'admin' || (!canAskue && !isRes);
     const audienceFiltered = notificationsWithReadStatus.filter(notif => {
       if (notif.type !== 'power_overload') return true;
-      if (isAdminLike) return true;
+      if (seesAll) return true;
       const aud = notif.errorData && notif.errorData.audience;
       if (aud === 'askue') return canAskue;
-      return req.user.role === 'res_responsible';   // 'res'/без метки → только РЭС своего resId
+      return isRes;   // 'res'/без метки → мероприятия РЭС
     });
 
     // ✅ Дедупликация: для error и pending_askue — 1 ПУ + 1 набор фаз = 1 запись (последняя)
@@ -2988,10 +2750,11 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
 });
 
 // 8. ВЫПОЛНЕНИЕ МЕРОПРИЯТИЙ
+const ESCALATION_MIN_WORDS = 15;
 
 app.post('/api/notifications/:id/complete-work', 
   authenticateToken, 
-  checkRole(['res_responsible']),
+  requirePerm('res_work'),
   upload.array('attachments', 5),
   async (req, res) => {
     const startTime = Date.now();
@@ -3002,12 +2765,17 @@ app.post('/api/notifications/:id/complete-work',
     
     try {
       const { comment, checkFromDate } = req.body;
+      // «Проблему решить невозможно, нужны доп. мероприятия» — вопрос уходит техблоку.
+      const escalate = req.body.escalate === 'true' || req.body.escalate === true;
       
       // 1) ВАЛИДАЦИЯ ДО ВСЕГО ОСТАЛЬНОГО (быстрый отказ без транзакции и без загрузок)
       if (!comment || typeof comment !== 'string') {
-        return res.status(400).json({ error: 'Комментарий обязателен' });
+        return res.status(400).json({ error: escalate ? 'Опишите проблему для техблока' : 'Комментарий обязателен' });
       }
       const wordCount = comment.trim().split(/\s+/).filter(w => w.length > 0).length;
+      if (escalate && wordCount < ESCALATION_MIN_WORDS) {
+        return res.status(400).json({ error: `Опишите проблему подробнее — не менее ${ESCALATION_MIN_WORDS} слов: что мешает, что сделано, что нужно` });
+      }
       if (wordCount < 5) {
         return res.status(400).json({ error: 'Комментарий должен содержать не менее 5 слов' });
       }
@@ -3044,6 +2812,37 @@ app.post('/api/notifications/:id/complete-work',
         }
         
         const errorData = JSON.parse(notification.message);
+        if (!req.user.allRes && notification.resId !== req.user.resId) {
+          await transaction.rollback();
+          await cleanupCloudinary(uploadedFiles);
+          return res.status(403).json({ error: 'Чужой РЭС' });
+        }
+
+        if (escalate) {
+          // Линию — техблоку: перепроверки АСКУЭ нет, уведомления по линии сняты,
+          // пока вопрос открыт — по ней не создаются новые (см. анализ съёмов).
+          const esc = await Escalation.create({
+            resId: notification.resId,
+            networkStructureId: notification.networkStructureId,
+            puNumber: errorData.puNumber,
+            tpName: errorData.tpName,
+            vlName: errorData.vlName,
+            position: errorData.position,
+            errorDetails: errorData.errorDetails,
+            errorData,
+            description: comment.trim(),
+            attachments,
+            createdBy: req.user.id,
+          }, { transaction });
+          await Notification.destroy({
+            where: { type: 'error', networkStructureId: notification.networkStructureId, resId: notification.resId },
+            transaction
+          });
+          await notification.destroy({ transaction });
+          await transaction.commit();
+          invalidateEscalated();
+          return res.json({ success: true, escalated: true, id: esc.id, message: 'Передано техблоку', filesUploaded: attachments.length });
+        }
         
         // Создаем запись в CheckHistory
         await CheckHistory.create({
@@ -3125,10 +2924,165 @@ app.post('/api/notifications/:id/complete-work',
     }
 });
 
+// =====================================================
+// ТРЕБУЮТ РЕШЕНИЯ ТЕХБЛОКА
+// =====================================================
+// РЭС отметил «проблему решить невозможно, нужны доп. мероприятия» — вопрос
+// здесь, пока руководство техблока его не завершит. Область — по должности.
+const ESCALATION_DECISION_MIN_WORDS = 5;
+const escalationOut = (e) => ({
+  id: e.id, status: e.status,
+  resId: e.resId, resName: e.ResUnit?.name || '',
+  networkStructureId: e.networkStructureId,
+  puNumber: e.puNumber, tpName: e.tpName, vlName: e.vlName, position: e.position,
+  errorDetails: e.errorDetails, details: e.errorData?.details || null,
+  firstReportDate: e.errorData?.firstReportDate || null, repeatCount: e.errorData?.repeatCount || 1,
+  description: e.description, attachments: e.attachments || [],
+  author: e.author ? e.author.fio : null, createdAt: e.createdAt,
+  decision: e.decision, closer: e.closer ? e.closer.fio : null, closedAt: e.closedAt,
+});
+
+app.get('/api/techblock', authenticateToken, requirePerm('techblock_view'), async (req, res) => {
+  try {
+    const status = req.query.status === 'closed' ? 'closed' : 'open';
+    const where = { status };
+    if (!req.user.allRes) where.resId = req.user.resId;
+    else if (req.query.resId) where.resId = parseInt(req.query.resId, 10);
+    const rows = await Escalation.findAll({
+      where,
+      include: [
+        { model: ResUnit, attributes: ['id', 'name'] },
+        { model: User, as: 'author', attributes: ['id', 'fio'] },
+        { model: User, as: 'closer', attributes: ['id', 'fio'] },
+      ],
+      order: status === 'open' ? [['createdAt', 'ASC']] : [['closedAt', 'DESC']],
+      limit: 500,
+    });
+    res.json(rows.map(escalationOut));
+  } catch (error) {
+    console.error('techblock list error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// «Завершить»: решение принято — линия возвращается в обычный мониторинг
+// (следующий съём с ошибкой снова даст уведомление РЭС). РЭС получает решение.
+app.post('/api/techblock/:id/complete', authenticateToken, requirePerm('techblock_complete'), async (req, res) => {
+  try {
+    const decision = String(req.body?.decision || '').trim();
+    if (decision.split(/\s+/).filter(Boolean).length < ESCALATION_DECISION_MIN_WORDS) {
+      return res.status(400).json({ error: `Запишите решение техблока — не менее ${ESCALATION_DECISION_MIN_WORDS} слов` });
+    }
+    const esc = await Escalation.findByPk(req.params.id);
+    if (!esc) return res.status(404).json({ error: 'Вопрос не найден' });
+    if (!req.user.allRes && esc.resId !== req.user.resId) return res.status(403).json({ error: 'Чужой РЭС' });
+    if (esc.status !== 'open') return res.status(400).json({ error: 'Вопрос уже завершён' });
+
+    await sequelize.transaction(async (t) => {
+      await esc.update({ status: 'closed', decision, closedBy: req.user.id, closedAt: new Date() }, { transaction: t });
+      // Проблемность линии до решения не копим: прежние активные записи снимаем.
+      if (esc.networkStructureId) {
+        await ProblemVL.update({ status: 'dismissed' }, {
+          where: { networkStructureId: esc.networkStructureId, status: 'active' }, transaction: t
+        });
+      }
+      const closer = await User.findByPk(req.user.id, { attributes: ['fio'], transaction: t });
+      await Notification.create({
+        fromUserId: req.user.id,
+        toUserId: null,
+        resId: esc.resId,
+        networkStructureId: esc.networkStructureId,
+        type: 'info',
+        message: `Техблок завершил вопрос по ${esc.tpName} — ${esc.vlName} (ПУ ${esc.puNumber}). Решение: ${decision}${closer ? ` (${closer.fio})` : ''}`,
+        isRead: false
+      }, { transaction: t });
+    });
+    invalidateEscalated();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('techblock complete error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// =====================================================
+// СВОДКА (главная страница)
+// =====================================================
+// Одним запросом: что ждёт действия, состояние ПУ по РЭС и динамика за 12 недель
+// (выявлено ошибок съёмами / отработано РЭС / передано техблоку). Область — по
+// должности; «все РЭС» могут сузить ?resId.
+app.get('/api/dashboard', authenticateToken, requirePerm('dashboard_view'), async (req, res) => {
+  try {
+    const resId = !req.user.allRes ? req.user.resId : (req.query.resId ? parseInt(req.query.resId, 10) : null);
+    const rf = (col) => (resId ? `AND ${col} = :resId` : '');
+    const q = (sql) => sequelize.query(sql, { replacements: { resId }, type: Sequelize.QueryTypes.SELECT });
+
+    const [byRes, weekly, escalationsByWeek, counts] = await Promise.all([
+      q(`SELECT r.id, r.name,
+            COUNT(DISTINCT ns."tpName")::int AS tp,
+            COUNT(DISTINCT ns.id)::int AS vl,
+            COUNT(ps.id)::int AS pu,
+            COUNT(ps.id) FILTER (WHERE ps.status = 'checked_ok')::int AS ok,
+            COUNT(ps.id) FILTER (WHERE ps.status = 'checked_error')::int AS error,
+            COUNT(ps.id) FILTER (WHERE ps.status = 'pending_recheck')::int AS pending,
+            COUNT(ps.id) FILTER (WHERE ps.status NOT IN ('checked_ok','checked_error','pending_recheck'))::int AS unchecked
+         FROM "ResUnits" r
+         LEFT JOIN "NetworkStructures" ns ON ns."resId" = r.id
+         LEFT JOIN "PuStatuses" ps ON ps."networkStructureId" = ns.id
+         WHERE TRUE ${rf('r.id')}
+         GROUP BY r.id, r.name ORDER BY r.name`),
+      q(`WITH weeks AS (
+           SELECT generate_series(date_trunc('week', now()) - interval '11 weeks', date_trunc('week', now()), interval '1 week') AS w
+         ),
+         found AS (
+           SELECT date_trunc('week', h."createdAt") AS w, COUNT(DISTINCT h."puNumber")::int AS n
+           FROM "PuUploadHistories" h
+           JOIN "PuStatuses" ps ON ps."puNumber" = h."puNumber"
+           JOIN "NetworkStructures" ns ON ns.id = ps."networkStructureId"
+           WHERE h."hasErrors" = true AND h."createdAt" >= now() - interval '12 weeks' ${rf('ns."resId"')}
+           GROUP BY 1
+         ),
+         closed AS (
+           SELECT date_trunc('week', c."workCompletedDate") AS w, COUNT(*)::int AS n,
+                  COUNT(*) FILTER (WHERE c."recheckResult" = 'ok')::int AS confirmed
+           FROM "CheckHistories" c
+           WHERE c."workCompletedDate" >= now() - interval '12 weeks' ${rf('c."resId"')}
+           GROUP BY 1
+         )
+         SELECT to_char(weeks.w, 'YYYY-MM-DD') AS week,
+                COALESCE(found.n, 0) AS found, COALESCE(closed.n, 0) AS closed, COALESCE(closed.confirmed, 0) AS confirmed
+         FROM weeks LEFT JOIN found ON found.w = weeks.w LEFT JOIN closed ON closed.w = weeks.w
+         ORDER BY weeks.w`),
+      q(`SELECT COUNT(*) FILTER (WHERE status = 'open')::int AS open,
+                COUNT(*) FILTER (WHERE status = 'closed' AND "closedAt" >= now() - interval '30 days')::int AS closed30
+         FROM "Escalations" WHERE TRUE ${rf('"resId"')}`),
+      getNotificationCountsCached(req.user),
+    ]);
+
+    const totals = byRes.reduce((t, r) => {
+      for (const k of ['tp', 'vl', 'pu', 'ok', 'error', 'pending', 'unchecked']) t[k] = (t[k] || 0) + r[k];
+      return t;
+    }, {});
+    res.json({
+      resId, totals, byRes, weekly,
+      waiting: {
+        techPending: counts.tech_pending || 0,
+        askuePending: counts.askue_pending || 0,
+        problemVl: counts.problem_vl || 0,
+        overload: counts.powerOverload || 0,
+        techblock: escalationsByWeek[0]?.open || 0,
+        techblockClosed30: escalationsByWeek[0]?.closed30 || 0,
+      },
+    });
+  } catch (error) {
+    console.error('dashboard error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // 9. ОЧИСТКА ВСЕХ ДАННЫХ
 app.delete('/api/network/clear-all',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('structure_edit'),
   async (req, res) => {
     const { password, beforeDate } = req.body;  // ДОБАВИЛИ beforeDate
@@ -3286,7 +3240,7 @@ app.post('/api/network/delete-selected',
 
     try {
       // Право не расширяет географию: не-админ удаляет только ВЛ своего РЭС.
-      if (req.user.role !== 'admin') {
+      if (!req.user.allRes) {
         const foreign = await NetworkStructure.count({
           where: { id: { [Op.in]: ids }, resId: { [Op.ne]: req.user.resId } }, transaction
         });
@@ -3369,9 +3323,9 @@ app.get('/api/reports/detailed', authenticateToken, async (req, res) => {
     }
     
     // Добавляем фильтр по РЭС для не-админов
-    if (req.user.role === 'admin' && req.query.resId) {
+    if (req.user.allRes && req.query.resId) {
       whereClause.resId = parseInt(req.query.resId);
-    } else if (req.user.role !== 'admin') {
+    } else if (!req.user.allRes) {
       whereClause.resId = req.user.resId;
     }
     
@@ -3493,9 +3447,9 @@ app.get('/api/reports/detailed', authenticateToken, async (req, res) => {
       case 'vl_workload':
         // ВЛ в работе у РЭС — аналитика
         let resWorkloadCondition = {};
-        if (req.user.role === 'admin' && req.query.resId) {
+        if (req.user.allRes && req.query.resId) {
           resWorkloadCondition.id = parseInt(req.query.resId);
-        } else if (req.user.role !== 'admin') {
+        } else if (!req.user.allRes) {
           resWorkloadCondition.id = req.user.resId;
         }
         
@@ -3506,9 +3460,9 @@ app.get('/api/reports/detailed', authenticateToken, async (req, res) => {
         
         // Получаем все error-уведомления
         let errorWhereClause = { type: 'error' };
-        if (req.user.role === 'admin' && req.query.resId) {
+        if (req.user.allRes && req.query.resId) {
           errorWhereClause.resId = parseInt(req.query.resId);
-        } else if (req.user.role !== 'admin') {
+        } else if (!req.user.allRes) {
           errorWhereClause.resId = req.user.resId;
         }
         
@@ -3601,7 +3555,6 @@ app.get('/api/reports/detailed', authenticateToken, async (req, res) => {
 // 12. УДАЛЕНИЕ УВЕДОМЛЕНИЙ
 app.delete('/api/notifications/:id',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('notifications_delete'),
   async (req, res) => {
     try {
@@ -3632,7 +3585,6 @@ app.delete('/api/notifications/:id',
 // API для массового удаления уведомлений
 app.post('/api/notifications/delete-bulk',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('notifications_delete'),
   async (req, res) => {
     const { ids, password, deleteDocuments } = req.body; // ✅ ДОБАВИЛИ deleteDocuments
@@ -3749,7 +3701,7 @@ app.post('/api/notifications/delete-bulk',
 // роут ДЛЯ ОТЧЕТОВ эксель
 app.get('/api/reports/export-history', 
   authenticateToken, 
-  checkRole(['admin']), 
+  requirePerm('history_view'), 
   async (req, res) => {
     try {
       const history = await CheckHistory.findAll({
@@ -3789,10 +3741,10 @@ app.get('/api/reports/export-history',
 // =====================================================
 
 // 13. ПОЛУЧЕНИЕ СПИСКА ПОЛЬЗОВАТЕЛЕЙ
-app.get('/api/users/list', authenticateToken, checkRole(['admin']), async (req, res) => {
+app.get('/api/users/list', authenticateToken, requirePerm(['users_manage', 'settings_view']), async (req, res) => {
   try {
     const users = await User.findAll({
-      attributes: ['id', 'fio', 'login', 'role', 'resId', 'email', 'createdAt'],
+      attributes: ['id', 'fio', 'login', 'role', 'resId', 'email', 'isSuper', 'createdAt'],
       include: [ResUnit],
       order: [['createdAt', 'DESC']]
     });
@@ -3805,7 +3757,7 @@ app.get('/api/users/list', authenticateToken, checkRole(['admin']), async (req, 
 });
 
 // 14. СОЗДАНИЕ ПОЛЬЗОВАТЕЛЯ
-app.post('/api/users/create', authenticateToken, checkRole(['admin']), requirePerm('users_manage'), async (req, res) => {
+app.post('/api/users/create', authenticateToken, requirePerm('users_manage'), async (req, res) => {
   try {
     const { fio, login, password, email, role, resId } = req.body;
 
@@ -3825,8 +3777,11 @@ app.post('/api/users/create', authenticateToken, checkRole(['admin']), requirePe
       return res.status(400).json({ error: 'Пароль должен содержать минимум 6 символов' });
     }
     
-    if (role !== 'admin' && !resId) {
-      return res.status(400).json({ error: 'Для не-админов необходимо указать РЭС' });
+    if (!ROLES[role]) {
+      return res.status(400).json({ error: 'Выберите должность из списка' });
+    }
+    if (ROLES[role].scope === 'res' && !resId) {
+      return res.status(400).json({ error: `Для должности «${ROLES[role].title}» выберите РЭС` });
     }
     
     // Проверка уникальности логина
@@ -3842,7 +3797,7 @@ app.post('/api/users/create', authenticateToken, checkRole(['admin']), requirePe
       password,
       email,
       role,
-      resId: role === 'admin' ? null : resId
+      resId: ROLES[role].scope === 'all' ? null : resId
     });
     
     const createdUser = await User.findByPk(user.id, {
@@ -3863,7 +3818,7 @@ app.post('/api/users/create', authenticateToken, checkRole(['admin']), requirePe
 });
 
 // 15. ОБНОВЛЕНИЕ ПОЛЬЗОВАТЕЛЯ
-app.put('/api/users/:id', authenticateToken, checkRole(['admin']), requirePerm('users_manage'), async (req, res) => {
+app.put('/api/users/:id', authenticateToken, requirePerm('users_manage'), async (req, res) => {
   try {
     const userId = req.params.id;
     const { fio, login, password, email, role, resId } = req.body;
@@ -3903,11 +3858,17 @@ app.put('/api/users/:id', authenticateToken, checkRole(['admin']), requirePerm('
       updateData.login = login;
     }
     if (email) updateData.email = email;
+    if (role && !ROLES[role]) {
+      return res.status(400).json({ error: 'Выберите должность из списка' });
+    }
     if (role) updateData.role = role;
-    if (role === 'admin') {
+    const nextRole = role || user.role;
+    if (ROLES[nextRole]?.scope === 'all') {
       updateData.resId = null;
-    } else if (resId !== undefined) {
-      updateData.resId = resId;
+    } else {
+      const nextRes = resId !== undefined ? resId : user.resId;
+      if (!nextRes) return res.status(400).json({ error: `Для должности «${ROLES[nextRole]?.title || nextRole}» выберите РЭС` });
+      updateData.resId = nextRes;
     }
     
     // Если передан новый пароль
@@ -3939,7 +3900,7 @@ app.put('/api/users/:id', authenticateToken, checkRole(['admin']), requirePerm('
 });
 
 // 16. УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ
-app.delete('/api/users/:id', authenticateToken, checkRole(['admin']), requirePerm('users_manage'), async (req, res) => {
+app.delete('/api/users/:id', authenticateToken, requirePerm('users_manage'), async (req, res) => {
   try {
     const userId = req.params.id;
     const { password } = req.body;
@@ -4009,24 +3970,35 @@ app.delete('/api/users/:id', authenticateToken, checkRole(['admin']), requirePer
 });
 
 // =====================================================
-// УПРАВЛЕНИЕ ПРАВАМИ (только суперадмин)
+// ПРАВА ДОЛЖНОСТЕЙ (матрица «должность × право»)
 // =====================================================
-// Список ВСЕХ пользователей (кроме суперадмина) — любой роли — + их права и каталог.
-app.get('/api/admin/permissions', authenticateToken, requireSuper, async (req, res) => {
+// Каталог должностей и прав — для форм (пользователи) и раздела «Права доступа».
+app.get('/api/roles', authenticateToken, (req, res) => {
+  res.json({
+    roles: Object.entries(ROLES).map(([key, r]) => ({ key, title: r.title, scope: r.scope })),
+    groups: PERMISSION_GROUPS,
+    catalog: PERMISSION_CATALOG,
+    lockedRole: 'admin',
+  });
+});
+
+// Матрица: по каждой должности — список прав и сколько людей на ней.
+app.get('/api/admin/permissions', authenticateToken, requirePerm('permissions_manage'), async (req, res) => {
   try {
-    const users = await User.findAll({
-      where: { isSuper: false },
-      attributes: ['id', 'fio', 'login', 'email', 'role', 'permissions'],
-      include: [ResUnit],
-      order: [['fio', 'ASC']]
+    const matrix = await loadRoleMatrix(true);
+    const counts = await User.findAll({
+      attributes: ['role', [sequelize.fn('COUNT', sequelize.col('id')), 'n']],
+      where: { isSuper: false }, group: ['role'], raw: true,
     });
+    const people = Object.fromEntries(counts.map(c => [c.role, Number(c.n)]));
     res.json({
-      catalog: PERMISSIONS,
-      admins: users.map(u => ({
-        id: u.id, fio: u.fio, login: u.login, email: u.email, role: u.role,
-        resName: u.ResUnit?.name || '',
-        permissions: (u.permissions && typeof u.permissions === 'object') ? u.permissions : {}
-      }))
+      groups: PERMISSION_GROUPS,
+      catalog: PERMISSION_CATALOG,
+      lockedRole: 'admin',
+      roles: Object.entries(ROLES).map(([key, r]) => ({
+        key, title: r.title, scope: r.scope, people: people[key] || 0,
+        permissions: key === 'admin' ? Object.keys(PERMISSION_CATALOG) : [...(matrix.get(key) || [])],
+      })),
     });
   } catch (error) {
     console.error('Get permissions error:', error);
@@ -4034,23 +4006,22 @@ app.get('/api/admin/permissions', authenticateToken, requireSuper, async (req, r
   }
 });
 
-// Сохранить права пользователя (любой роли, кроме суперадмина). Ключи — по каталогу.
-app.put('/api/admin/permissions/:userId', authenticateToken, requireSuper, async (req, res) => {
+// Сохранить права должности. «Администратор» не правится — у него всегда всё
+// (иначе можно отнять у себя же право настраивать права).
+app.put('/api/admin/permissions/:role', authenticateToken, requirePerm('permissions_manage'), async (req, res) => {
   try {
-    const userId = req.params.userId;
-    const user = await User.findByPk(userId);
-    if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
-    if (user.isSuper) return res.status(403).json({ error: 'Права суперадмина не редактируются' });
-
-    const incoming = (req.body && typeof req.body.permissions === 'object' && req.body.permissions) || {};
-    // Оставляем только известные ключи каталога со значением true.
-    const clean = {};
-    for (const key of Object.keys(PERMISSIONS)) {
-      if (incoming[key]) clean[key] = true;
-    }
-    await user.update({ permissions: clean });
-    invalidateAccess(userId);   // применяется без перелогина (кеш сброшен)
-
+    const role = req.params.role;
+    if (!ROLES[role]) return res.status(404).json({ error: 'Нет такой должности' });
+    if (role === 'admin') return res.status(400).json({ error: 'У «Администратора» всегда все права' });
+    const incoming = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
+    const clean = [...new Set(incoming.filter(k => PERMISSION_CATALOG[k]))];
+    await sequelize.transaction(async (t) => {
+      await RolePermission.destroy({ where: { role }, transaction: t });
+      if (clean.length) await RolePermission.bulkCreate(clean.map(permission => ({ role, permission })), { transaction: t });
+      await SeededRole.findOrCreate({ where: { role }, transaction: t });
+    });
+    await loadRoleMatrix(true);   // применяется сразу, без перелогина
+    invalidateNotifCountsCache();
     res.json({ success: true, permissions: clean });
   } catch (error) {
     console.error('Save permissions error:', error);
@@ -4065,11 +4036,15 @@ app.put('/api/admin/permissions/:userId', authenticateToken, requireSuper, async
 // Получение списка проблемных ВЛ
 app.get('/api/problem-vl/list', 
   authenticateToken, 
-  checkRole(['admin']), 
+  requirePerm('problem_vl_view'), 
   async (req, res) => {
     try {
       const where = { status: 'active' };
-      if (req.query.resId) where.resId = parseInt(req.query.resId);
+      if (!req.user.allRes) where.resId = req.user.resId;
+      else if (req.query.resId) where.resId = parseInt(req.query.resId);
+      // Линии у техблока не показываем проблемными, пока вопрос не завершён.
+      const escalated = await escalatedLineIds();
+      if (escalated.length) where.networkStructureId = { [Op.or]: [{ [Op.notIn]: escalated }, null] };
       const problemVLs = await ProblemVL.findAll({
         where,
         include: [ResUnit, NetworkStructure],
@@ -4086,11 +4061,12 @@ app.get('/api/problem-vl/list',
 // PROBLEM_TP_CYCLES и ещё не завершён. Выход из списка — когда кейс дошёл до completed.
 app.get('/api/problem-vl/overload-tp',
   authenticateToken,
-  checkRole(['admin']),
+  requirePerm('problem_vl_view'),
   async (req, res) => {
     try {
       const where = { cycles: { [Op.gte]: PROBLEM_TP_CYCLES }, stage: { [Op.ne]: 'completed' } };
-      if (req.query.resId) where.resId = parseInt(req.query.resId);
+      if (!req.user.allRes) where.resId = req.user.resId;
+      else if (req.query.resId) where.resId = parseInt(req.query.resId);
       const cases = await OverloadCase.findAll({
         where,
         include: [
@@ -4126,7 +4102,7 @@ app.get('/api/problem-vl/overload-tp',
 // Отклонение проблемы
 app.put('/api/problem-vl/:id/dismiss', 
   authenticateToken, 
-  checkRole(['admin']), 
+  requirePerm('problem_vl_manage'), 
   async (req, res) => {
     try {
       const { password } = req.body;
@@ -4159,7 +4135,7 @@ app.put('/api/problem-vl/:id/dismiss',
 // отправка писем ENDPOINT :
 app.post('/api/problem-vl/:id/send-email', 
   authenticateToken, 
-  checkRole(['admin']), 
+  requirePerm('problem_vl_manage'), 
   async (req, res) => {
     try {
       const problemVL = await ProblemVL.findByPk(req.params.id, {
@@ -4171,12 +4147,7 @@ app.post('/api/problem-vl/:id/send-email',
       }
       
       // Находим ответственных за РЭС
-      const responsibleUsers = await User.findAll({
-        where: {
-          resId: problemVL.resId,
-          role: 'res_responsible'
-        }
-      });
+      const responsibleUsers = (await usersWithPerm('res_work', { resId: problemVL.resId })).filter(u => !u.isSuper);
       
       if (responsibleUsers.length === 0) {
         return res.status(400).json({ error: 'Не найден ответственный для этого РЭС' });
@@ -4225,9 +4196,9 @@ app.get('/api/reports/problem-vl',
       
       // Добавляем фильтр по РЭС для не-админов
       // Добавляем фильтр по РЭС
-    if (req.user.role === 'admin' && req.query.resId) {
+    if (req.user.allRes && req.query.resId) {
       whereClause.resId = parseInt(req.query.resId);
-    } else if (req.user.role !== 'admin') {
+    } else if (!req.user.allRes) {
       whereClause.resId = req.user.resId;
     }
       
@@ -4261,9 +4232,9 @@ app.get('/api/reports/problem-vl',
 app.get('/api/reports/overload', authenticateToken, async (req, res) => {
   try {
     const where = { tnKva: { [Op.ne]: null } };
-    if (req.user.role === 'admin' && req.query.resId) {
+    if (req.user.allRes && req.query.resId) {
       where.resId = parseInt(req.query.resId, 10);
-    } else if (req.user.role !== 'admin') {
+    } else if (!req.user.allRes) {
       where.resId = req.user.resId;
     }
 
@@ -4342,7 +4313,7 @@ app.get('/api/power/monthly-peaks', authenticateToken, async (req, res) => {
     }
 
     const where = {};
-    if (req.user.role === 'res_responsible') where.resId = req.user.resId;
+    if (!req.user.allRes) where.resId = req.user.resId;
     else if (req.query.resId) where.resId = parseInt(req.query.resId, 10);
 
     const sections = await TpSection.findAll({
@@ -4411,7 +4382,7 @@ function invalidateNotifCountsCache() { notifCountsCache.clear(); }
 // Любое изменение Notification/OverloadCase полностью чистит кэш. Хуки модели
 // ловят ВСЕ пути create/update/destroy (и bulk) — надёжнее ручных вызовов по
 // десяткам мест создания/удаления, ни одно не пропустим.
-[Notification, OverloadCase].forEach((M) => {
+[Notification, OverloadCase, Escalation].forEach((M) => {
   M.addHook('afterCreate', invalidateNotifCountsCache);
   M.addHook('afterUpdate', invalidateNotifCountsCache);
   M.addHook('afterDestroy', invalidateNotifCountsCache);
@@ -4421,7 +4392,7 @@ function invalidateNotifCountsCache() { notifCountsCache.clear(); }
 });
 
 async function getNotificationCountsCached(user) {
-  const key = `${user.role}_${user.resId ?? ''}_${user.id ?? ''}`;
+  const key = `${user.role}_${user.isSuper ? 's' : ''}_${user.resId ?? ''}_${user.id ?? ''}`;
   const now = Date.now();
   const hit = notifCountsCache.get(key);
   if (hit && (now - hit.ts) < NOTIF_COUNTS_TTL_MS) return hit.data;
@@ -4430,77 +4401,56 @@ async function getNotificationCountsCached(user) {
   return data;
 }
 
-// Получение количества непрочитанных уведомлений
-// Счётчики уведомлений по роли (переиспользуются эндпоинтом ниже и бейджем
-// платформы /api/platform/badge). Возвращает { tech_pending, askue_pending,
-// problem_vl }. user — { id, role, resId }.
+// Счётчики уведомлений (меню-бейджи и бейдж платформы /api/platform/badge).
+// Область — по должности (все РЭС или свой), что считать — по правам.
+// user — { id, role, resId, isSuper, allRes, perms } (req.user или accessOf()).
+// Возвращает { tech_pending, askue_pending, problem_vl, power_overload,
+// powerOverload, techblock }.
 async function getNotificationCounts(user) {
-  let whereClause = {};
+  const scope = user.allRes ? {} : { resId: user.resId ?? -1 };
+  let whereClause = user.allRes ? {} : {
+    resId: user.resId ?? -1,
+    [Op.or]: [{ toUserId: null }, { toUserId: user.id }]
+  };
 
-  if (user.role === 'admin') {
-    whereClause = {};
-  } else if (user.role === 'res_responsible') {
-    whereClause = {
-      resId: user.resId,
-      [Op.or]: [
-        { toUserId: null },
-        { toUserId: user.id }
-      ]
-    };
-  } else {
-    // Загрузчик АСКУЭ: как в GET /api/notifications — свои личные уведомления
-    // ПЛЮС общие pending_askue по его РЭС (они создаются с toUserId=null,
-    // resId=РЭС — см. Notification.create). Без второй ветки счётчик их не
-    // видел, и бейдж «Ожидающие проверки АСКУЭ» не появлялся, хотя список — 5.
-    whereClause = {
-      [Op.or]: [
-        { toUserId: user.id },
-        { toUserId: null, resId: user.resId, type: 'pending_askue' }
-      ]
-    };
-  }
-
-  // Для проблемных ВЛ считаем только активные + проблемные ТП (перегруз) — только admin.
+  // Проблемные ВЛ (без линий, отданных техблоку) + проблемные ТП (перегруз).
   let problemVLCount = 0;
   let powerOverloadCount = 0;
-  if (user.role === 'admin') {
+  if (userCan(user, 'problem_vl_view')) {
+    const escalated = await escalatedLineIds();
     problemVLCount = await ProblemVL.count({
-      where: { status: 'active' }  // Только активные!
+      where: { ...scope, status: 'active', ...(escalated.length ? { networkStructureId: { [Op.or]: [{ [Op.notIn]: escalated }, null] } } : {}) }
     });
-    // Бейдж «Проблемные ВЛ» учитывает и проблемные ТП (cycles >= порога, не завершён).
     problemVLCount += await OverloadCase.count({
-      where: { cycles: { [Op.gte]: PROBLEM_TP_CYCLES }, stage: { [Op.ne]: 'completed' } }
-    });
-    // Перегрузы секций (профиль мощности) — для АСКУЭ/админа.
-    powerOverloadCount = await Notification.count({
-      where: { type: 'power_overload' }
+      where: { ...scope, cycles: { [Op.gte]: PROBLEM_TP_CYCLES }, stage: { [Op.ne]: 'completed' } }
     });
   }
+  if (userCan(user, 'overload_view')) {
+    powerOverloadCount = await Notification.count({ where: { ...scope, type: 'power_overload' } });
+  }
 
-  // Бейдж «Превышение Pном» — ТОЛЬКО рабочие кейсы пользователя (нужно действие).
-  // awaiting_recheck в бейдж НЕ входит ни у кого (там действия нет — ждём профиль).
-  let powerOverloadCases = 0;
-  if (user.role === 'admin') {
-    // Сумма активных рабочих этапов (askue_limit + res_work), без awaiting_recheck.
-    powerOverloadCases = await OverloadCase.count({
-      where: { stage: { [Op.in]: ['askue_limit', 'res_work'] } }
-    });
-  } else if (user.role === 'uploader') {
-    // Загрузчик (АСКУЭ) с правом — этап АСКУЭ (askue_limit) своего РЭС.
-    const uacc = await getUserAccess(user.id);
-    if (uacc.isSuper || (uacc.permissions && uacc.permissions.overload_askue)) {
-      powerOverloadCases = await OverloadCase.count({
-        where: { stage: 'askue_limit', resId: user.resId }
-      });
-    }
-  } else if (user.role === 'res_responsible') {
-    powerOverloadCases = await OverloadCase.count({
-      where: { stage: 'res_work', resId: user.resId }
-    });
+  // «Превышение Pном» — ТОЛЬКО рабочие кейсы, где человек может действовать.
+  // awaiting_recheck в бейдж не входит (там ждём профиль, действия нет).
+  const stages = [];
+  if (userCan(user, 'overload_askue')) stages.push('askue_limit');
+  if (userCan(user, 'overload_res')) stages.push('res_work');
+  const powerOverloadCases = stages.length
+    ? await OverloadCase.count({ where: { ...scope, stage: { [Op.in]: stages } } })
+    : 0;
+
+  const techblock = userCan(user, 'techblock_view')
+    ? await Escalation.count({ where: { ...scope, status: 'open' } })
+    : 0;
+
+  const types = [];
+  if (userCan(user, 'tech_pending_view') || userCan(user, 'res_work')) types.push('error');
+  if (userCan(user, 'askue_pending_view') || userCan(user, 'upload_files')) types.push('pending_askue');
+  if (!types.length) {
+    return { tech_pending: 0, askue_pending: 0, problem_vl: problemVLCount, power_overload: powerOverloadCount, powerOverload: powerOverloadCases, techblock };
   }
 
   // ✅ PERF: считаем только те типы, которые реально участвуют в счётчиках
-  whereClause.type = { [Op.in]: ['error', 'pending_askue'] };
+  whereClause.type = { [Op.in]: types };
 
   const allNotifications = await Notification.findAll({
     where: whereClause,
@@ -4542,9 +4492,22 @@ async function getNotificationCounts(user) {
     askue_pending: askueKeys.size,
     problem_vl: problemVLCount,
     power_overload: powerOverloadCount,
-    powerOverload: powerOverloadCases
+    powerOverload: powerOverloadCases,
+    techblock
   };
 }
+
+// Линии, отданные техблоку (открытые вопросы): по ним не ведём «проблемность».
+// Кеш 15 с — сбрасывается при создании/закрытии вопроса.
+let escalatedCache = { ts: 0, ids: [] };
+async function escalatedLineIds() {
+  if (Date.now() - escalatedCache.ts < 15000) return escalatedCache.ids;
+  const rows = await Escalation.findAll({ where: { status: 'open' }, attributes: ['networkStructureId'], raw: true });
+  escalatedCache = { ts: Date.now(), ids: [...new Set(rows.map(r => r.networkStructureId).filter(Boolean))] };
+  return escalatedCache.ids;
+}
+const invalidateEscalated = () => { escalatedCache.ts = 0; };
+['afterCreate', 'afterUpdate', 'afterDestroy', 'afterBulkUpdate'].forEach(h => Escalation.addHook(h, invalidateEscalated));
 
 app.get('/api/notifications/counts', authenticateToken, async (req, res) => {
   try {
@@ -4562,9 +4525,9 @@ app.put('/api/notifications/mark-read', authenticateToken, async (req, res) => {
     let whereClause = {};
     
     // Определяем какие уведомления должны быть помечены
-    if (req.user.role === 'admin') {
+    if (req.user.allRes) {
       whereClause = type === 'all' ? {} : { type };
-    } else if (req.user.role === 'res_responsible') {
+    } else {
       whereClause = {
         resId: req.user.resId,
         [Op.or]: [
@@ -4572,9 +4535,6 @@ app.put('/api/notifications/mark-read', authenticateToken, async (req, res) => {
           { toUserId: req.user.id }
         ]
       };
-      if (type !== 'all') whereClause.type = type;
-    } else {
-      whereClause = { toUserId: req.user.id };
       if (type !== 'all') whereClause.type = type;
     }
     
@@ -4605,7 +4565,6 @@ app.put('/api/notifications/mark-read', authenticateToken, async (req, res) => {
 // API для массового удаления записей
 app.post('/api/documents/delete-bulk',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('files_manage'),
   async (req, res) => {
     const { ids, password } = req.body;
@@ -5186,7 +5145,7 @@ if (result.has_errors) {
                   }
                   
                   // Уведомление админам о проблемной ВЛ
-                  const admins = await User.findAll({ where: { role: 'admin' } });
+                  const admins = await usersWithPerm('problem_vl_view');
                   for (const admin of admins) {
                     await Notification.create({
                       fromUserId: SYSTEM_USER_ID,
@@ -5233,7 +5192,13 @@ if (result.has_errors) {
                 lastCheck: new Date()
               });
 
-              if (!result.has_errors) {
+              // Линия у техблока (РЭС: «решить невозможно, нужны доп. мероприятия»):
+              // статус ПУ обновляем, но уведомлений об ошибке и проблемной ВЛ не
+              // создаём, пока техблок не завершит вопрос.
+              const lineEscalated = result.has_errors && (await escalatedLineIds()).includes(networkStructure.id);
+              if (lineEscalated) {
+                console.log(`⏸ ПУ ${fileName}: линия у техблока — уведомление не создаём`);
+              } else if (!result.has_errors) {
                 // Ошибок нет — снимаем все открытые error-уведомления этого ПУ и
                 // автоматически решаем проблемную ВЛ (даже если было 2+ ошибки).
                 if (openErrorNotifs.length > 0) {
@@ -5433,7 +5398,7 @@ async function createNotifications(fromUserId, resId, errors) {
 // Проверка целостности базы данных
 app.get('/api/admin/database-health', 
   authenticateToken, 
-  checkRole(['admin']), 
+  requirePerm('db_tools'), 
   async (req, res) => {
     try {
       const issues = [];
@@ -5955,7 +5920,6 @@ try {
 // Очистка определенного типа проблем
 app.post('/api/admin/database-cleanup',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('db_tools'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
@@ -6467,7 +6431,7 @@ async function cloudinaryProbe(publicId) {
   return { publicId, ext, found, results, deliveryTests };
 }
 
-app.get('/api/admin/files/diag/:token', authenticateToken, checkRole(['admin']), requirePerm('files_manage'), async (req, res) => {
+app.get('/api/admin/files/diag/:token', authenticateToken, requirePerm('files_manage'), async (req, res) => {
   try {
     const publicId = resolvePublicId(req.params.token);
     if (!publicId || !publicId.startsWith('res-management/')) {
@@ -6509,7 +6473,7 @@ async function collectPurgeFileIds(beforeDate, transaction) {
 }
 
 // Предпросмотр: только COUNT, ничего не удаляет.
-app.post('/api/admin/purge-preview', authenticateToken, checkRole(['admin']), async (req, res) => {
+app.post('/api/admin/purge-preview', authenticateToken, requirePerm('history_purge'), async (req, res) => {
   try {
     const beforeDate = parseBeforeDate(req.body.before);
     if (!beforeDate) return res.status(400).json({ error: 'Некорректная дата (нужен формат YYYY-MM-DD)' });
@@ -6528,7 +6492,7 @@ app.post('/api/admin/purge-preview', authenticateToken, checkRole(['admin']), as
 });
 
 // Удаление. Транзакция БД, затем (после commit) — файлы Cloudinary батчами.
-app.post('/api/admin/purge', authenticateToken, checkRole(['admin']), requirePerm('history_purge'), async (req, res) => {
+app.post('/api/admin/purge', authenticateToken, requirePerm('history_purge'), async (req, res) => {
   const { before, password } = req.body;
   if (password !== DELETE_PASSWORD) return res.status(403).json({ error: 'Неверный пароль' });
   const beforeDate = parseBeforeDate(before);
@@ -6586,11 +6550,14 @@ const BACKUP_TABLES = [
   { key: 'Notifications', table: 'Notifications' },
   { key: 'NotificationReads', table: 'NotificationReads' },
   { key: 'PuUploadHistories', table: 'PuUploadHistories' },
+  { key: 'RolePermissions', table: 'RolePermissions' },
+  { key: 'SeededRoles', table: 'SeededRoles' },
+  { key: 'Escalations', table: 'Escalations' },
 ];
 
 // Полный JSON-дамп всех таблиц. Пароли выгружаются как есть (bcrypt-хэши),
 // ссылки Cloudinary едут внутри JSON — сами файлы переносить не нужно.
-app.get('/api/admin/backup', authenticateToken, checkRole(['admin']), requirePerm('db_tools'), async (req, res) => {
+app.get('/api/admin/backup', authenticateToken, requirePerm('db_tools'), async (req, res) => {
   try {
     const tables = {};
     for (const t of BACKUP_TABLES) {
@@ -6624,7 +6591,7 @@ app.get('/api/admin/backup', authenticateToken, checkRole(['admin']), requirePer
 // правильный порядок вставки, без отключения триггеров.
 const backupUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
-app.post('/api/admin/restore', authenticateToken, checkRole(['admin']), requirePerm('db_tools'), backupUpload.single('file'), async (req, res) => {
+app.post('/api/admin/restore', authenticateToken, requirePerm('db_tools'), backupUpload.single('file'), async (req, res) => {
   try {
     if (req.body.confirm !== 'true') {
       return res.status(400).json({ error: 'Требуется подтверждение: восстановление заменит ВСЕ данные в базе.' });
@@ -6788,6 +6755,13 @@ async function initializeDatabase() {
       `ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "permissions" JSONB NOT NULL DEFAULT '{}'::jsonb`,
       // Идемпотентный сид: учётка login='admin' — суперадмин.
       `UPDATE "Users" SET "isSuper"=true WHERE "login"='admin'`,
+      // Должности вместо ролей: ENUM → строка, прежние роли → должности (LEGACY_ROLES).
+      // Повторный старт ничего не меняет: столбец уже строка, старых значений нет.
+      `ALTER TABLE "Users" ALTER COLUMN "role" TYPE VARCHAR(40) USING "role"::text`,
+      ...Object.entries(LEGACY_ROLES).map(([from, to]) => `UPDATE "Users" SET "role"='${to}' WHERE "role"='${from}'`),
+      `DROP TYPE IF EXISTS "enum_Users_role"`,
+      // Должности «все РЭС» к РЭС не привязаны.
+      `UPDATE "Users" SET "resId"=NULL WHERE "resId" IS NOT NULL AND "role" IN (${Object.entries(ROLES).filter(([, r]) => r.scope === 'all').map(([k]) => `'${k}'`).join(',')})`,
       // Секции шин ТП: привязка ВЛ к секции + индексы. ADD COLUMN IF NOT EXISTS
       // доезжает без DB_ALTER (Postgres-safe). Старые ВЛ остаются с NULL.
       `ALTER TABLE "NetworkStructures" ADD COLUMN IF NOT EXISTS "sectionId" INTEGER`,
@@ -6803,14 +6777,11 @@ async function initializeDatabase() {
       // Помесячные пики секции: уникальность (sectionId, year, month) — нужна и для
       // ON CONFLICT «максимум побеждает» в пайплайне профиля/бэкфилле.
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_smp_unique ON "SectionMonthlyPeaks" ("sectionId", "year", "month")`,
-      // Карта опроса: матчинг по нормализованному серийнику.
-      `CREATE INDEX IF NOT EXISTS idx_polledmeter_norm ON "PolledMeters" ("serialNorm")`,
-      // Расширенный срез (ТП/точка учёта/тип ПУ) — sequelize.sync колонки не добавляет.
-      `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "tp" VARCHAR(255)`,
-      `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "tpNorm" VARCHAR(255)`,
-      `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "tuPath" TEXT`,
-      `ALTER TABLE "PolledMeters" ADD COLUMN IF NOT EXISTS "puType" VARCHAR(255)`,
-      `CREATE INDEX IF NOT EXISTS idx_polledmeter_tpnorm ON "PolledMeters" ("tpNorm")`,
+      // «Карта опроса» убрана (2026-11): её срез больше не нужен.
+      `DROP TABLE IF EXISTS "PolledMeters"`,
+      // Вопросы техблоку: открытые по линии и по РЭС.
+      `CREATE INDEX IF NOT EXISTS idx_escalation_status ON "Escalations" ("status", "resId")`,
+      `CREATE INDEX IF NOT EXISTS idx_escalation_line ON "Escalations" ("networkStructureId")`,
       // Источник ряда и дата обновления профиля на секции (для модалки техучёта)
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileSource" VARCHAR(10)`,
       `ALTER TABLE "TpSections" ADD COLUMN IF NOT EXISTS "lastProfileAt" TIMESTAMP WITH TIME ZONE`,
@@ -6909,6 +6880,9 @@ async function initializeDatabase() {
       }
     }
     console.log('Performance indexes ensured');
+
+    // Стартовые права должностей (один раз на должность) и матрица в память.
+    await seedRolePermissions();
 
     // Лог дублей структуры ПОСЛЕ чистки — должно быть 0/0 (иначе смотреть warn выше).
     if (sequelize.getDialect() === 'postgres') {
@@ -7085,9 +7059,9 @@ app.get('/api/documents/list', authenticateToken, async (req, res) => {
     let whereClause = {};
     
     // Фильтрация по РЭС
-    if (req.user.role === 'admin' && resId) {
+    if (req.user.allRes && resId) {
       whereClause.resId = parseInt(resId);
-    } else if (req.user.role !== 'admin') {
+    } else if (!req.user.allRes) {
       whereClause.resId = req.user.resId;
     }
     
@@ -7126,7 +7100,7 @@ app.get('/api/documents/list', authenticateToken, async (req, res) => {
 // API для управления файлами 
 app.get('/api/admin/files', 
   authenticateToken, 
-  checkRole(['admin']), 
+  requirePerm(['files_manage', 'settings_view']), 
   async (req, res) => {
     try {
       // Получаем ВСЕ записи без проблемного where
@@ -7172,7 +7146,6 @@ app.get('/api/admin/files',
 // API для удаления файла из документа
 app.delete('/api/documents/record/:recordId',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('files_manage'),
   async (req, res) => {
     try {
@@ -7215,7 +7188,6 @@ app.delete('/api/documents/record/:recordId',
  
 app.delete('/api/admin/files/:public_id',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('files_manage'),
   async (req, res) => {
     try {
@@ -7542,9 +7514,9 @@ app.get('/api/history/uploads',
       let structureWhere = {};
       
       // Фильтр по РЭС
-      if (req.user.role === 'admin' && resId) {
+      if (req.user.allRes && resId) {
         structureWhere.resId = resId;
-      } else if (req.user.role !== 'admin') {
+      } else if (!req.user.allRes) {
         structureWhere.resId = req.user.resId;
       }
       
@@ -7670,9 +7642,9 @@ app.get('/api/history/checks',
       if (tpName) whereClause.tpName = { [Op.like]: `%${tpName}%` };
       
       // ИСПРАВЛЕНО: Фильтр по РЭС
-      if (req.user.role === 'admin' && resId) {
+      if (req.user.allRes && resId) {
         whereClause.resId = resId;
-      } else if (req.user.role !== 'admin') {
+      } else if (!req.user.allRes) {
         whereClause.resId = req.user.resId;
       }
       
@@ -7711,7 +7683,6 @@ app.get('/api/history/checks',
 // Очистка истории по конкретному ПУ
 app.delete('/api/history/clear-pu/:puNumber',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('checks_delete'),
   async (req, res) => {
     const { password } = req.body;
@@ -7769,7 +7740,6 @@ app.delete('/api/history/clear-pu/:puNumber',
 // Очистка истории по ТП
 app.post('/api/history/clear-tp',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('checks_delete'),
   async (req, res) => {
     const { password, tpNames, resId } = req.body;
@@ -7849,7 +7819,6 @@ app.post('/api/history/clear-tp',
 // Очистка всей истории
 app.delete('/api/history/clear-all',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('checks_delete'),
   async (req, res) => {
     const { password } = req.body;
@@ -7911,7 +7880,7 @@ app.get('/api/analytics/detailed',
       
       // Условие по РЭС
       let resCondition = {};
-      if (req.user.role !== 'admin') {
+      if (!req.user.allRes) {
         resCondition.id = req.user.resId;
       }
       
@@ -8058,7 +8027,6 @@ app.get('/api/analytics/detailed',
 // Получить полную диагностику по РЭС
 app.get('/api/admin/diagnose/:resId',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('db_tools'),
   async (req, res) => {
     try {
@@ -8233,7 +8201,6 @@ app.get('/api/admin/diagnose/:resId',
 // Исправить конкретное уведомление
 app.put('/api/admin/fix-notification/:id',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('db_tools'),
   async (req, res) => {
     try {
@@ -8281,7 +8248,6 @@ app.put('/api/admin/fix-notification/:id',
 // Автоисправление по структуре (для одного уведомления)
 app.post('/api/admin/auto-fix-notification/:id',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('db_tools'),
   async (req, res) => {
     try {
@@ -8348,7 +8314,6 @@ app.post('/api/admin/auto-fix-notification/:id',
 // Массовое автоисправление ВСЕХ несоответствий для РЭС
 app.post('/api/admin/auto-fix-all/:resId',
   authenticateToken,
-  checkRole(['admin']),
   requirePerm('db_tools'),
   async (req, res) => {
     const transaction = await sequelize.transaction();
@@ -8451,7 +8416,7 @@ app.get('/api/analytics/summary',
       
       // Условие по РЭС
       let resCondition = {};
-      if (req.user.role !== 'admin') {
+      if (!req.user.allRes) {
         resCondition.id = req.user.resId;
       }
       
@@ -8596,7 +8561,7 @@ app.get('/api/analytics/summary',
 // «Глубокий анализ работ» — детектор формально закрытых мероприятий РЭС.
 // Просмотровый роут (admin), без requirePerm. Всё считается из CheckHistory на лету,
 // БЕЗ новых таблиц и БЕЗ запросов в цикле — один findAll, дальше математика в JS.
-app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), async (req, res) => {
+app.get('/api/analytics/work-quality', authenticateToken, requirePerm('deep_analysis_view'), async (req, res) => {
   try {
     const numParam = (v, def, min, max) => {
       const n = Number(v);
@@ -8977,7 +8942,7 @@ app.get('/api/analytics/work-quality', authenticateToken, checkRole(['admin']), 
 // Бэкфилл pHash для УЖЕ загруженных вложений (визуальные дубли в анализе видят
 // только вложения с phashes). Обрабатываем партиями — админ вызывает повторно,
 // пока remaining>0. Best-effort: ошибка по файлу пропускается.
-app.post('/api/admin/backfill-phash', authenticateToken, checkRole(['admin']), async (req, res) => {
+app.post('/api/admin/backfill-phash', authenticateToken, requirePerm('db_tools'), async (req, res) => {
   const https = require('https');
   const downloadBuffer = (url) => new Promise((resolve, reject) => {
     https.get(url, (r) => {

@@ -10,7 +10,7 @@ import './App.css';
 // xlsx-js-style — drop-in форк SheetJS (тот же API, включая utils/read), плюс стили
 // ячеек. Один импорт вместо двух ('xlsx' удалён из зависимостей — был дубль).
 import * as XLSX from 'xlsx-js-style';
-import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo, IconMeter, IconUpload, IconSettings, IconUsers } from './icons.jsx';
+import { IconCheck, IconX, IconAlertTriangle, IconAlertCircle, IconZap, IconChart, IconSearch, IconEye, IconTrash, IconCalendar, IconWrench, IconClock, IconRefresh, IconClipboard, IconArrowRight, IconArrowLeft, IconArrowUp, IconArrowDown, IconEdit, IconMapPin, IconFileText, IconFolder, IconPaperclip, IconRocket, IconHelp, IconBell, IconLightbulb, IconLock, IconMegaphone, IconMail, IconBuilding, IconBroom, IconMessage, IconLayers, IconDownload, IconPlug, IconLink, IconDatabase, IconInfo, IconMeter, IconUpload, IconSettings, IconUsers, IconGauge, IconGavel } from './icons.jsx';
 import RossetiLoader from './RossetiLoader.jsx';
 
 // =====================================================
@@ -139,6 +139,21 @@ api.interceptors.request.use(config => {
 // раздаётся через «Права доступа» и лежит в user.permissions.
 const hasPerm = (user, key) => !!(user && (user.isSuper || (user.permissions && user.permissions[key])));
 
+// Каталог должностей (/api/roles) — один раз на сеанс: формы пользователей, права.
+let rolesCatalogPromise = null;
+function useRolesCatalog() {
+  const [cat, setCat] = useState(null);
+  useEffect(() => {
+    rolesCatalogPromise ||= api.get('/api/roles').then(r => r.data).catch(e => { rolesCatalogPromise = null; throw e; });
+    let alive = true;
+    rolesCatalogPromise.then(d => alive && setCat(d), () => {});
+    return () => { alive = false; };
+  }, []);
+  return cat;
+}
+const roleScope = (cat, key) => cat?.roles.find(r => r.key === key)?.scope || 'res';
+const roleTitle = (cat, key) => cat?.roles.find(r => r.key === key)?.title || key;
+
 // Человеческий тост (для 403 «нет права» и т.п.) без внешних зависимостей.
 function showToast(msg, kind = 'error') {
   try {
@@ -256,20 +271,6 @@ function LoginForm({ onLogin }) {
 const ROMAN = { 1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V' };
 const toRoman = (n) => ROMAN[n] || String(n);
 
-// Высокочастотная синусоида (осциллограф), центрированная по средней линии
-// (viewBox 0 0 120 44, mid=22). Узкая амплитуда — колебания идут ровно в зазоре
-// между словами «МОНИТОРИНГ» и «напряжения», не вываливаясь волнами вниз.
-const OSC_PATH = (() => {
-  const w = 120, mid = 22, amp = 14, periods = 9, n = 300;
-  let d = '';
-  for (let i = 0; i <= n; i++) {
-    const x = (w * i / n).toFixed(2);
-    const y = (mid - amp * Math.sin(periods * 2 * Math.PI * i / n)).toFixed(2);
-    d += (i === 0 ? 'M' : 'L') + x + ' ' + y + ' ';
-  }
-  return d.trim();
-})();
-
 // Логотип «Мониторинг напряжения» с платформы (ResmTile: зелёно-бирюзовая плитка,
 // белая «пульс»-линия). Инлайн-SVG.
 const RESM_LOGO = (
@@ -287,14 +288,22 @@ const RESM_LOGO = (
   </svg>
 );
 
-function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
+// Какие права открывают раздел (то же, что у пункта меню).
+const SECTION_PERMS = {
+  dashboard: ['dashboard_view'], structure: ['structure_view'], upload: ['upload_files'],
+  tech_pending: ['tech_pending_view', 'res_work'], askue_pending: ['askue_pending_view', 'upload_files'],
+  techblock: ['techblock_view'], problem_vl: ['problem_vl_view'], power_overload: ['overload_view', 'overload_askue', 'overload_res'],
+  power_analysis: ['power_analysis_view'], analytics: ['voltage_analysis_view'], deep_analysis: ['deep_analysis_view'],
+  documents: ['documents_view'], history: ['history_view'], reports: ['reports_view'], settings: ['settings_view'],
+  permissions: ['permissions_manage'],
+};
+
+function MainMenu({ activeSection, onSectionChange, user }) {
   const [notificationCounts, setNotificationCounts] = useState({
     tech_pending: 0,
     askue_pending: 0,
     problem_vl: 0
   });
-  // Тик «пробега» осциллограммы — инкремент по каждому успешному поллу counts.
-  const [sweepTick, setSweepTick] = useState(0);
   // Мобильное выезжающее меню (до 1024px). На десктопе класс .open ни на что не влияет.
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -328,38 +337,32 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
     try {
       const response = await api.get('/api/notifications/counts');
       setNotificationCounts(response.data);
-      // Однократный «пробег» осциллограммы на факт успешного ответа (без таймеров).
-      setSweepTick(t => t + 1);
     } catch (error) {
       console.error('Error loading notification counts:', error);
     }
   };
 
-  // Красный, если есть активные error (tech_pending) или перегрузы Pном; иначе зелёный.
-  const oscDanger =
-    (notificationCounts.tech_pending || 0) +
-    (notificationCounts.powerOverload || 0) +
-    (notificationCounts.power_overload || 0) > 0;
-
+  // Пункт виден, если у должности есть хоть одно из прав perm.
   const menuItems = [
-    { id: 'structure', label: 'Структура сети', icon: <IconLayers size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'poll_map', label: 'Карта опроса', icon: <IconMapPin size={18} />, roles: ['admin', 'uploader', 'res_responsible', 'uec_responsible'] },
-    { id: 'upload', label: 'Загрузить файлы', icon: <IconUpload size={18} />, roles: ['admin', 'uploader'] },
-    { id: 'tech_pending', label: 'Ожидающие мероприятий', icon: <IconWrench size={18} />, roles: ['admin', 'res_responsible'], badge: notificationCounts.tech_pending },
-    { id: 'askue_pending', label: 'Ожидающие проверки АСКУЭ', icon: <IconClipboard size={18} />, roles: ['admin', 'uploader'], badge: notificationCounts.askue_pending },
-    { id: 'problem_vl', label: 'Проблемные ВЛ', icon: <IconAlertTriangle size={18} />, roles: ['admin'], badge: notificationCounts.problem_vl },
-    { id: 'power_overload', label: 'Превышение Pном', icon: <IconZap size={18} />, roles: ['admin', 'uploader', 'res_responsible'], badge: notificationCounts.powerOverload },
-    { id: 'power_analysis', label: 'Анализ мощности', icon: <IconChart size={18} />, roles: ['admin', 'res_responsible'] },
-    { id: 'analytics', label: 'Анализ напряжения', icon: <IconChart size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'deep_analysis', label: 'Глубокий анализ работ', icon: <IconSearch size={18} />, roles: ['admin'] },
-    { id: 'documents', label: 'Загруженные документы', icon: <IconFolder size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'history', label: 'История системы', icon: <IconClock size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'reports', label: 'Отчеты', icon: <IconFileText size={18} />, roles: ['admin', 'uploader', 'res_responsible'] },
-    { id: 'settings', label: 'Настройки', icon: <IconSettings size={18} />, roles: ['admin'] },
-    { id: 'permissions', label: 'Права доступа', icon: <IconLock size={18} />, roles: ['admin'], superOnly: true }
+    { id: 'dashboard', label: 'Сводка', icon: <IconGauge size={18} />, perm: SECTION_PERMS.dashboard },
+    { id: 'structure', label: 'Структура сети', icon: <IconLayers size={18} />, perm: SECTION_PERMS.structure },
+    { id: 'upload', label: 'Загрузить файлы', icon: <IconUpload size={18} />, perm: SECTION_PERMS.upload },
+    { id: 'tech_pending', label: 'Ожидающие мероприятий', icon: <IconWrench size={18} />, perm: SECTION_PERMS.tech_pending, badge: notificationCounts.tech_pending },
+    { id: 'askue_pending', label: 'Ожидающие проверки АСКУЭ', icon: <IconClipboard size={18} />, perm: SECTION_PERMS.askue_pending, badge: notificationCounts.askue_pending },
+    { id: 'techblock', label: 'Решения техблока', icon: <IconGavel size={18} />, perm: SECTION_PERMS.techblock, badge: notificationCounts.techblock },
+    { id: 'problem_vl', label: 'Проблемные ВЛ', icon: <IconAlertTriangle size={18} />, perm: SECTION_PERMS.problem_vl, badge: notificationCounts.problem_vl },
+    { id: 'power_overload', label: 'Превышение Pном', icon: <IconZap size={18} />, perm: SECTION_PERMS.power_overload, badge: notificationCounts.powerOverload },
+    { id: 'power_analysis', label: 'Анализ мощности', icon: <IconChart size={18} />, perm: SECTION_PERMS.power_analysis },
+    { id: 'analytics', label: 'Анализ напряжения', icon: <IconChart size={18} />, perm: SECTION_PERMS.analytics },
+    { id: 'deep_analysis', label: 'Глубокий анализ работ', icon: <IconSearch size={18} />, perm: SECTION_PERMS.deep_analysis },
+    { id: 'documents', label: 'Загруженные документы', icon: <IconFolder size={18} />, perm: SECTION_PERMS.documents },
+    { id: 'history', label: 'История системы', icon: <IconClock size={18} />, perm: SECTION_PERMS.history },
+    { id: 'reports', label: 'Отчёты', icon: <IconFileText size={18} />, perm: SECTION_PERMS.reports },
+    { id: 'settings', label: 'Настройки', icon: <IconSettings size={18} />, perm: SECTION_PERMS.settings },
+    { id: 'permissions', label: 'Права доступа', icon: <IconLock size={18} />, perm: SECTION_PERMS.permissions }
   ];
 
-  const visibleItems = menuItems.filter(item => item.roles.includes(userRole) && (!item.superOnly || isSuper));
+  const visibleItems = menuItems.filter(item => item.perm.some(k => hasPerm(user, k)));
 
   // Суммарный индикатор внимания для кнопки-бургера (переиспользуем те же counts —
   // без второго поллинга): есть ли что-то требующее действия.
@@ -367,6 +370,7 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
     (notificationCounts.tech_pending || 0) +
     (notificationCounts.problem_vl || 0) +
     (notificationCounts.askue_pending || 0) +
+    (notificationCounts.techblock || 0) +
     (notificationCounts.powerOverload || notificationCounts.power_overload || 0) > 0;
 
   return (
@@ -380,19 +384,6 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
     <nav className={`main-menu ${menuOpen ? 'open' : ''}`}>
       <div className="monitor-head">
         <div className="monitor-brand">
-          {/* Сетка осциллографа (тонкие белые квадраты), отцентрована по средней
-              линии между словами. Базовая — едва заметная; на пробеге вспыхивает. */}
-          <div className={`osc-grid ${oscDanger ? 'danger' : 'ok'}`} aria-hidden="true" />
-          {sweepTick > 0 && (
-            <div key={`g${sweepTick}`} className={`osc-grid-flash ${oscDanger ? 'danger' : 'ok'}`}
-                 aria-hidden="true" />
-          )}
-          <svg className={`osc-bg ${oscDanger ? 'danger' : 'ok'}`} viewBox="0 0 120 44"
-               preserveAspectRatio="none" aria-hidden="true">
-            {sweepTick > 0 && (
-              <path key={sweepTick} className="osc-spark" d={OSC_PATH} fill="none" pathLength="1" />
-            )}
-          </svg>
           <div className="monitor-title">
             <span className="monitor-logo">{RESM_LOGO}</span>
             <span className="monitor-text">
@@ -435,11 +426,17 @@ function MainMenu({ activeSection, onSectionChange, userRole, isSuper }) {
 
 // Единая шапка страницы: SVG-иконка в квадратной плашке (статичная неоново-синяя
 // подсветка, БЕЗ анимаций — инвариант) + заголовок. Одинаковые отступы на всех страницах.
-function PageHeader({ icon, title }) {
+// Шапка страницы (как в ЭнергоСфере): иконка раздела, заголовок, пояснение
+// «что здесь и зачем» и действия справа.
+function PageHeader({ icon, title, subtitle, actions }) {
   return (
     <div className="page-header">
       <span className="page-header-icon">{icon}</span>
-      <h2 className="page-header-title">{title}</h2>
+      <div className="page-header-text">
+        <h2 className="page-header-title">{title}</h2>
+        {subtitle && <p className="page-header-sub">{subtitle}</p>}
+      </div>
+      {actions && <div className="page-header-actions">{actions}</div>}
     </div>
   );
 }
@@ -2173,7 +2170,7 @@ function FileUpload() {
 
   // Определяем resId
   let resIdToUse;
-  if (user.role === 'admin') {
+  if (user.allRes) {
     resIdToUse = user.resId || 1;
   } else {
     resIdToUse = user.resId;
@@ -2454,7 +2451,11 @@ function Notifications({ filterType, onSectionChange, selectedRes }) {
   const [uploadingPu, setUploadingPu] = useState(null);
   const [attachedFiles, setAttachedFiles] = useState([]); // ДОБАВЛЕНО!
   const [submitting, setSubmitting] = useState(false);
-  const [commentError, setCommentError] = useState(false); // подсветка «минимум 5 слов»
+  const [commentError, setCommentError] = useState(false); // подсветка «минимум N слов»
+  // «Проблему решить невозможно» — вопрос уходит техблоку (развёрнутое описание).
+  const [escalate, setEscalate] = useState(false);
+  const minWords = escalate ? 15 : 5;
+  const words = (t) => t.trim().split(/\s+/).filter(w => w.length > 0).length;
   const [selectedNotificationIds, setSelectedNotificationIds] = useState([]);
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [bulkDeletePassword, setBulkDeletePassword] = useState('');
@@ -2543,8 +2544,7 @@ const loadNotifications = useCallback(async () => {
 };
 
   const handleCompleteWork = async () => {
-    const wordCount = comment.trim().split(' ').filter(word => word.length > 0).length;
-    if (wordCount < 5) {
+    if (words(comment) < minWords) {
       // Не молча блокируем, а зажигаем красную рамку и фразу — чтобы было понятно,
       // почему кнопка не срабатывает (раньше клик по disabled ничего не давал).
       setCommentError(true);
@@ -2558,6 +2558,7 @@ const loadNotifications = useCallback(async () => {
       const formData = new FormData();
       formData.append('comment', comment);
       formData.append('checkFromDate', checkFromDate);
+      if (escalate) formData.append('escalate', 'true');
       
       // Добавляем файлы
       attachedFiles.forEach(file => {
@@ -2575,12 +2576,8 @@ const loadNotifications = useCallback(async () => {
     setSelectedNotification(null);
 
       
-      alert('Мероприятия отмечены как выполненные');
-      setShowCompleteModal(false);
-      setComment('');
-      setAttachedFiles([]);
-      setSelectedNotification(null);
-      
+      showToast(escalate ? 'Передано техблоку — линия не считается проблемной до решения' : 'Мероприятия отмечены как выполненные', 'ok');
+      window.dispatchEvent(new CustomEvent('notificationsUpdated'));
       await loadNotifications();
       
     } catch (error) {
@@ -2595,7 +2592,7 @@ const loadNotifications = useCallback(async () => {
       } else {
         msg = `Ошибка сервера (код ${error.response.status})`;
       }
-      alert('Ошибка: ' + msg);
+      showToast(msg);
     } finally {
     setSubmitting(false); // ДОБАВИТЬ - разблокируем кнопку в любом случае
   }
@@ -2845,7 +2842,7 @@ const loadNotifications = useCallback(async () => {
       : [{ wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 44 }];
     styleExportSheet(ws);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    const resTag = (user.role === 'admin' && selectedRes) ? `РЭС_${selectedRes}_` : '';
+    const resTag = (user.allRes && selectedRes) ? `РЭС_${selectedRes}_` : '';
     const perTag = periodFilter ? `${periodFilter}_` : '';
     XLSX.writeFile(wb, `${sheetName}_${resTag}${perTag}${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
   };
@@ -2995,7 +2992,7 @@ const loadNotifications = useCallback(async () => {
               
               <div className="notification-narrow-actions">
                 {/* Кнопка "Детали" убрана — детали открываются кликом по самому уведомлению */}
-                {user.role === 'res_responsible' && (
+                {hasPerm(user, 'res_work') && (
                   <button 
                     className="btn-complete-green"
                     onClick={(e) => {
@@ -3003,6 +3000,7 @@ const loadNotifications = useCallback(async () => {
                       setSelectedNotification({ id: notif.id, data });
                       setComment('');
                       setCommentError(false);
+                      setEscalate(false);
                       setShowCompleteModal(true);
                     }}
                     title="Выполнить мероприятия"
@@ -3305,22 +3303,34 @@ const loadNotifications = useCallback(async () => {
                 <p><strong>ПУ №:</strong> {selectedNotification.data.puNumber}</p>
               </div>
               
+              <label className={`escalate-toggle ${escalate ? 'is-on' : ''}`}>
+                <input type="checkbox" checked={escalate}
+                  onChange={(e) => { setEscalate(e.target.checked); setCommentError(false); }} />
+                <span className="escalate-toggle__text">
+                  <b>Проблему решить невозможно — требуются дополнительные мероприятия</b>
+                  <small>Вопрос уйдёт руководству техблока (главный инженер, СРС, ПТС). До их решения линия
+                    не считается проблемной и не возвращается в РЭС и АСКУЭ.</small>
+                </span>
+              </label>
+
               <div className="form-group">
                 <label style={commentError ? { color: '#dc2626', fontWeight: 600 } : undefined}>
-                  Что было выполнено? (минимум 5 слов)
+                  {escalate
+                    ? `Опишите проблему подробно: что мешает, что уже сделано, что нужно (минимум ${minWords} слов)`
+                    : `Что было выполнено? (минимум ${minWords} слов)`}
                 </label>
                 <textarea
                   value={comment}
                   onChange={(e) => {
                     const v = e.target.value;
                     setComment(v);
-                    // как только набрано 5+ слов — гасим красную подсветку
-                    if (commentError && v.trim().split(' ').filter(w => w.length > 0).length >= 5) {
+                    // как только набрано нужное число слов — гасим красную подсветку
+                    if (commentError && words(v) >= minWords) {
                       setCommentError(false);
                     }
                   }}
-                  placeholder="Опишите выполненные работы..."
-                  rows={4}
+                  placeholder={escalate ? 'Например: опора №7 наклонена, нужна замена со спецтехникой; провод перетянуть…' : 'Опишите выполненные работы...'}
+                  rows={escalate ? 7 : 4}
                   style={commentError ? {
                     borderColor: '#dc2626',
                     boxShadow: '0 0 0 3px rgba(220,38,38,0.2)',
@@ -3328,11 +3338,12 @@ const loadNotifications = useCallback(async () => {
                   } : undefined}
                 />
                 <small className="word-count" style={commentError ? { color: '#dc2626', fontWeight: 600 } : undefined}>
-                  Слов: {comment.trim().split(' ').filter(w => w.length > 0).length} из 5
-                  {commentError ? ' — нужно не менее 5 слов, чтобы завершить' : ''}
+                  Слов: {words(comment)} из {minWords}
+                  {commentError ? ` — нужно не менее ${minWords} слов` : ''}
                 </small>
               </div>
               
+              {!escalate && (
               <div className="form-group">
                 <label>Журнал событий требуется с даты:</label>
                 <input
@@ -3341,6 +3352,7 @@ const loadNotifications = useCallback(async () => {
                   onChange={(e) => setCheckFromDate(e.target.value)}
                 />
               </div>
+              )}
               
               <div className="form-group">
                 <label>Прикрепить фото/документы (макс. 5 файлов по 10MB)</label>
@@ -3408,7 +3420,7 @@ const loadNotifications = useCallback(async () => {
                 onClick={handleCompleteWork}
                 disabled={submitting}
               >
-                {submitting ? 'Отправка...' : 'Подтвердить выполнение'}
+                {submitting ? 'Отправка...' : escalate ? 'Передать техблоку' : 'Подтвердить выполнение'}
                 </button>
             </div>
         </ModalShell>
@@ -3545,7 +3557,7 @@ function Reports() {
       // ИСПРАВЛЕНО: передаем даты только для completed и problem_vl
       const params = {
         type: reportType,
-        resId: user.role === 'admin' ? selectedRes : user.resId
+        resId: user.allRes ? selectedRes : user.resId
       };
       
       // Добавляем даты только если нужно
@@ -3796,7 +3808,7 @@ function Reports() {
     <div className="reports">
       <PageHeader icon={<IconFileText size={24} />} title="Отчеты по проверкам" />
 
-      {user.role !== 'admin' && (
+      {!user.allRes && (
         <div className="res-indicator">
           <span>Показаны данные для: <strong>{user.resName}</strong></span>
         </div>
@@ -4153,7 +4165,7 @@ function PowerOverload({ selectedRes }) {
     if (showSpinner) setLoading(true);
     try {
       const params = {};
-      if (user.role === 'admin' && selectedRes) params.resId = selectedRes;
+      if (user.allRes && selectedRes) params.resId = selectedRes;
       const { data } = await api.get('/api/overload', { params });
       setCases(data);
     } catch (e) {
@@ -4182,10 +4194,11 @@ function PowerOverload({ selectedRes }) {
 
   // Вкладки «своей работы» по роли/праву. Backend уже отдаёт только доступную область,
   // здесь — разбивка по этапам с бейджами-счётчиками.
-  const isAdmin = user.role === 'admin' || user.isSuper;
   const askueRight = hasPerm(user, 'overload_askue');
-  const isRes = user.role === 'res_responsible';
-  const canDeleteCases = isAdmin && hasPerm(user, 'notifications_delete'); // удаление кейсов = право удаления уведомлений
+  const isRes = hasPerm(user, 'overload_res');
+  // Все этапы — суперадмин, Администратор и те, кто только смотрит (техблок и др.).
+  const isAdmin = user.isSuper || user.role === 'admin' || (!askueRight && !isRes);
+  const canDeleteCases = hasPerm(user, 'notifications_delete'); // удаление кейсов = право удаления уведомлений
   const cnt = (stg) => cases.filter(c => c.stage === stg).length;
   // Значок + цвет свечения/счётчика по вкладке-этапу.
   const TAB_META = {
@@ -4449,7 +4462,7 @@ function PowerOverload({ selectedRes }) {
                 {hasPerm(user, 'overload_askue') && c.stage === 'askue_limit' && (
                   <button className="confirm-btn" onClick={() => openAskue(c)}>Ограничение по АСКУЭ выполнено</button>
                 )}
-                {(user.role === 'res_responsible' || isAdmin) && c.stage === 'res_work' && (
+                {isRes && c.stage === 'res_work' && (
                   <button className="confirm-btn" onClick={() => openRes(c)}>Мероприятия выполнены</button>
                 )}
                 <button className="action-btn" onClick={() => setDetailsCase(null)}>Закрыть</button>
@@ -6189,6 +6202,7 @@ function UserSettings() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [resList, setResList] = useState([]);
+  const rolesCat = useRolesCatalog();
   
   // Форма для создания/редактирования
   const [userForm, setUserForm] = useState({
@@ -6196,7 +6210,7 @@ function UserSettings() {
     login: '',
     password: '',
     email: '',
-    role: 'uploader',
+    role: 'master_res',
     resId: ''
   });
   
@@ -6236,7 +6250,7 @@ function UserSettings() {
         login: '',
         password: '',
         email: '',
-        role: 'uploader',
+        role: 'master_res',
         resId: ''
       });
       loadUsers();
@@ -6313,7 +6327,7 @@ function UserSettings() {
               <tr>
                 <th>ФИО</th>
                 <th>Логин</th>
-                <th>Роль</th>
+                <th>Должность</th>
                 <th>РЭС</th>
                 <th>Email</th>
                 <th>Действия</th>
@@ -6326,9 +6340,7 @@ function UserSettings() {
                   <td><strong>{user.login}</strong></td>
                   <td>
                     <span className={`role-badge role-${user.role}`}>
-                      {user.role === 'admin' ? 'Админ' : 
-                       user.role === 'uploader' ? 'АСКУЭ' : 
-                       'ТЕХБЛОК'}
+                      {user.isSuper ? 'Суперадмин' : roleTitle(rolesCat, user.role)}
                     </span>
                   </td>
                   <td>{user.ResUnit?.name || '-'}</td>
@@ -6417,18 +6429,12 @@ function UserSettings() {
               </div>
               
               <div className="form-group">
-                <label>Роль</label>
-                <select
-                  value={userForm.role}
-                  onChange={(e) => setUserForm({...userForm, role: e.target.value})}
-                >
-                  {amSuper && <option value="admin">Администратор</option>}
-                  <option value="uploader">Загрузчик АСКУЭ</option>
-                  <option value="res_responsible">Ответственный РЭС</option>
-                </select>
+                <label>Должность</label>
+                <RoleSelect cat={rolesCat} value={userForm.role} allowAdmin={amSuper}
+                  onChange={(role) => setUserForm({...userForm, role})} />
               </div>
               
-              {userForm.role !== 'admin' && (
+              {roleScope(rolesCat, userForm.role) === 'res' && (
                 <div className="form-group">
                   <label>РЭС</label>
                   <select
@@ -6502,18 +6508,12 @@ function UserSettings() {
               </div>
               
               <div className="form-group">
-                <label>Роль</label>
-                <select
-                  value={userForm.role}
-                  onChange={(e) => setUserForm({...userForm, role: e.target.value})}
-                >
-                  {amSuper && <option value="admin">Администратор</option>}
-                  <option value="uploader">Загрузчик АСКУЭ</option>
-                  <option value="res_responsible">Ответственный РЭС</option>
-                </select>
+                <label>Должность</label>
+                <RoleSelect cat={rolesCat} value={userForm.role} allowAdmin={amSuper}
+                  onChange={(role) => setUserForm({...userForm, role})} />
               </div>
               
-              {userForm.role !== 'admin' && (
+              {roleScope(rolesCat, userForm.role) === 'res' && (
                 <div className="form-group">
                   <label>РЭС</label>
                   <select
@@ -6543,6 +6543,24 @@ function UserSettings() {
         </ModalShell>
       )}
     </div>
+  );
+}
+
+// Выбор должности: по группам «все РЭС» / «свой РЭС». Администратора назначает
+// только суперадмин.
+function RoleSelect({ cat, value, onChange, allowAdmin }) {
+  if (!cat) return <select disabled><option>Загрузка…</option></select>;
+  const roles = cat.roles.filter(r => r.key !== 'admin' || allowAdmin || value === 'admin');
+  const group = (scope, label) => (
+    <optgroup label={label}>
+      {roles.filter(r => r.scope === scope).map(r => <option key={r.key} value={r.key}>{r.title}</option>)}
+    </optgroup>
+  );
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
+      {group('all', 'Все РЭС')}
+      {group('res', 'Свой РЭС')}
+    </select>
   );
 }
 
@@ -6961,7 +6979,7 @@ function UploadedDocuments() {
       // ИСПРАВЛЕНО: используем selectedRes для фильтрации
       const params = new URLSearchParams();
       
-      if (user.role === 'admin' && selectedRes) {
+      if (user.allRes && selectedRes) {
         params.append('resId', selectedRes);
       }
       
@@ -7634,7 +7652,7 @@ function SystemHistory() {
   const [filters, setFilters] = useState({
   puNumber: '',
   tpName: '',
-  resId: user.role === 'admin' ? '' : user.resId, // ИЗМЕНЕНО - не-админы видят только свой РЭС
+  resId: user.allRes ? '' : user.resId, // ИЗМЕНЕНО - не-админы видят только свой РЭС
   dateFrom: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
   dateTo: new Date().toISOString().split('T')[0],
   fileType: '',
@@ -7666,7 +7684,7 @@ function SystemHistory() {
         page: currentPage,
         limit: 100,
         ...filters,
-        resId: user.role === 'admin' ? filters.resId : user.resId // Принудительно для не-админов
+        resId: user.allRes ? filters.resId : user.resId // Принудительно для не-админов
       });
       
       const response = await api.get(`/api/history/uploads?${params}`);
@@ -7677,7 +7695,7 @@ function SystemHistory() {
         page: currentPage,
         limit: 100,
         puNumber: filters.puNumber,
-        resId: user.role === 'admin' ? filters.resId : user.resId, // Принудительно для не-админов
+        resId: user.allRes ? filters.resId : user.resId, // Принудительно для не-админов
         tpName: filters.tpName,
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
@@ -7763,7 +7781,7 @@ function SystemHistory() {
     <div className="system-history">
       <PageHeader icon={<IconClock size={24} />} title="История системы" />
 
-      {user.role !== 'admin' && (
+      {!user.allRes && (
     <div className="res-indicator">
       <span>Показаны данные для: <strong>{user.resName}</strong></span>
     </div>
@@ -7809,7 +7827,7 @@ function SystemHistory() {
             <select 
               value={filters.resId}
               onChange={(e) => handleFilterChange('resId', e.target.value)}
-              disabled={user.role !== 'admin'} // Не-админы видят только свой РЭС
+              disabled={!user.allRes} // Не-админы видят только свой РЭС
             >
               <option value="">Все РЭС</option>
               {resList.map(res => (
@@ -8113,7 +8131,7 @@ function Analytics() {
     }));
     
     // Добавляем итоги
-    if (user.role === 'admin') {
+    if (user.allRes) {
       data.push({
         'РЭС': 'ИТОГО',
         'Всего ТП': totals.tpCount,
@@ -8132,7 +8150,7 @@ function Analytics() {
     XLSX.utils.book_append_sheet(wb, ws, 'Аналитика');
     
     // УЛУЧШЕНО: добавляем РЭС в имя файла для не-админов
-    const fileName = user.role !== 'admin' 
+    const fileName = !user.allRes 
       ? `Аналитика_${user.resName}_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`
       : `Аналитика_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`;
     
@@ -8193,7 +8211,7 @@ function Analytics() {
       XLSX.utils.book_append_sheet(wb, ws, 'Детальный отчет');
       
       // УЛУЧШЕНО: добавляем РЭС в имя файла для не-админов
-      const fileName = user.role !== 'admin'
+      const fileName = !user.allRes
         ? `Детальный_отчет_${user.resName}_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`
         : `Детальный_отчет_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`;
       
@@ -8216,7 +8234,7 @@ function Analytics() {
       <PageHeader icon={<IconChart size={24} />} title="Анализ напряжения" />
       
       {/* НОВОЕ: Индикатор для не-админов */}
-      {user.role !== 'admin' && (
+      {!user.allRes && (
         <div className="res-indicator">
           <span><IconMapPin className="ico" /> Показаны данные для: <strong>{user.resName}</strong></span>
         </div>
@@ -8310,7 +8328,7 @@ function Analytics() {
                 <td>{row.activeOverloadCases ?? 0}</td>
               </tr>
             ))}
-            {user.role === 'admin' && (
+            {user.allRes && (
               <tr className="totals-row">
                 <td><strong>ИТОГО</strong></td>
                 <td><strong>{totals.tpCount}</strong></td>
@@ -8414,9 +8432,9 @@ function PowerAnalysis({ selectedRes }) {
     try {
       const { from: f, to: t } = range();
       const params = { from: f, to: t };
-      if (user.role === 'admin' && selectedRes) params.resId = selectedRes;
+      if (user.allRes && selectedRes) params.resId = selectedRes;
       const [ov, mp] = await Promise.all([
-        api.get('/api/reports/overload', { params: user.role === 'admin' && selectedRes ? { resId: selectedRes } : {} }),
+        api.get('/api/reports/overload', { params: user.allRes && selectedRes ? { resId: selectedRes } : {} }),
         api.get('/api/power/monthly-peaks', { params })
       ]);
       const rows = (ov.data || []).filter(r => r.ratioPct != null && r.ratioPct >= 100).sort((a, b) => (b.ratioPct || 0) - (a.ratioPct || 0));
@@ -8540,7 +8558,7 @@ function PowerAnalysis({ selectedRes }) {
             <thead>
               <tr>
                 <th className="pm-sticky">ТП · СШ</th>
-                {user.role === 'admin' && <th>РЭС</th>}
+                {user.allRes && <th>РЭС</th>}
                 <th>Лимит, кВт</th>
                 {monthly.months.map(m => <th key={m}>{monLabel(m)}</th>)}
               </tr>
@@ -8549,7 +8567,7 @@ function PowerAnalysis({ selectedRes }) {
               {monthly.rows.map(r => (
                 <tr key={r.sectionId}>
                   <td className="pm-sticky"><strong>{r.tpName}</strong> · СШ-{toRoman(r.sectionNumber)}</td>
-                  {user.role === 'admin' && <td>{r.resName}</td>}
+                  {user.allRes && <td>{r.resName}</td>}
                   <td>{r.limitKw != null ? fmt1(r.limitKw) : '—'}</td>
                   {monthly.months.map(m => {
                     const p = r.peaks[m];
@@ -9304,554 +9322,99 @@ function DatabaseMaintenance() {
   );
 }
 
-// Выводы по точке мониторинга (модалка рекомендаций «Карты опроса»). Тексты — в
-// одном месте; правило — первое совпавшее. В футере replace+planReplace = «К замене».
-const POLL_VERDICTS = {
-  replace:     { priority: 1, color: 'red',   bucket: 'toReplace', text: 'Не опрашивается — точка бесполезна для мониторинга. Заменить на СПОДЭС/РиМ / включить в опрос' },
-  planReplace: { priority: 2, color: 'amber', bucket: 'toReplace', text: 'Журнал напряжений недоступен — необходимо заменить ПУ в структуре сети' },
-  restore:     { priority: 3, color: 'amber', bucket: 'toRestore', text: 'Журнал доступен (СПОДЭС/РиМ), но сбор не идёт — восстановить опрос (связь/маршрут), замена не требуется' },
-  fill:        { priority: 4, color: 'gray',  bucket: 'toFill',    text: 'ПУ не задан — заполнить в структуре' },
-  ok:          { priority: 5, color: 'green', bucket: 'ok',        text: 'В порядке' },
-};
-const pollVerdict = (cell) => {
-  if (cell.status === 'no_pu') return POLL_VERDICTS.fill;
-  if (cell.status === 'absent') return POLL_VERDICTS.replace;
-  // Журнал напряжений доступен для СПОДЭС ИЛИ РиМ. Нет журнала → плановая замена.
-  if (!cell.journal) return POLL_VERDICTS.planReplace;          // найден, но не СПОДЭС и не РиМ
-  if (cell.status === 'not_collected') return POLL_VERDICTS.restore;  // журнал есть, но сбор не идёт
-  return POLL_VERDICTS.ok;                                       // журнал есть + собирается
-};
-
-// Явный бейдж СПОДЭС: полное слово, неоново-синее СТАТИЧНОЕ свечение (стиль иконок
-// PageHeader — без пульсаций). На узких экранах сокращается до «СПДС» через CSS.
-const SpodesBadge = () => (
-  <span className="spodes-neon"><span className="sb-full">СПОДЭС</span><span className="sb-short">СПДС</span></span>
-);
-
-// ═══ Раздел «Карта опроса структуры сети»: сверка ПУ структуры со срезом «Опрос ПУ» ═══
-function PollMap({ selectedRes }) {
-  const { user } = useContext(AuthContext);
-  const canSync = hasPerm(user, 'pollmap_sync') || user.role === 'uec_responsible';
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [notice, setNotice] = useState(null);   // { type:'ok'|'err', text }
-  const [searchTp, setSearchTp] = useState('');
-  const [statusFilter, setStatusFilter] = useState(null); // collected|not_collected|absent|no_pu
-  const [legendCollapsed, setLegendCollapsed] = useState(false);
-  const [showOrphans, setShowOrphans] = useState(false);
-  const [recModal, setRecModal] = useState(null); // { title, dockTitle, resName, tpName, items:[{position,pu,cell}] }
-  const [copiedSerial, setCopiedSerial] = useState(null);
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const params = (user.role === 'admin' && selectedRes) ? { resId: selectedRes } : {};
-      const { data } = await api.get('/api/poll-map', { params });
-      setData(data);
-    } catch (e) {
-      setNotice({ type: 'err', text: e.response?.data?.error || e.message });
-    } finally { setLoading(false); }
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [selectedRes]);
-
-  const sync = async () => {
-    setSyncing(true); setNotice(null);
-    try {
-      const { data } = await api.post('/api/poll-map/sync');
-      if (data.warning || data.code === 'empty_snapshot') {
-        // Пустой срез — не ошибка, но и не успех: жёлтый баннер, прежние данные сохранены.
-        setNotice({ type: 'warn', text: data.hint, code: data.code });
-        await load();
-      } else {
-        const dt = data.snapshotAt ? new Date(data.snapshotAt).toLocaleString('ru-RU') : '—';
-        setNotice({ type: 'ok', text: `Синхронизировано: ${data.total} ПУ, из них собирается ${data.collected}, СПОДЭС ${data.spodes}, срез от ${dt}` });
-        await load();
-      }
-    } catch (e) {
-      const d = e.response?.data || {};
-      setNotice({ type: 'err', text: d.hint || d.error || 'Ошибка синхронизации', code: d.code, detail: d.detail });
-    } finally { setSyncing(false); }
-  };
-
-  // Полоса легенды → кружки при скролле (паттерн из «Структуры»).
-  useEffect(() => {
-    let el = null, raf = null, ticking = false;
-    const evaluate = () => {
-      ticking = false; if (!el) return;
-      const top = el.scrollTop;
-      setLegendCollapsed(prev => (!prev && top > 130) ? true : (prev && top < 80) ? false : prev);
-    };
-    const onScroll = () => { if (!ticking) { ticking = true; requestAnimationFrame(evaluate); } };
-    const attach = () => { el = document.querySelector('.content'); if (el) { el.addEventListener('scroll', onScroll, { passive: true }); evaluate(); } else raf = requestAnimationFrame(attach); };
-    attach();
-    return () => { if (raf) cancelAnimationFrame(raf); if (el) el.removeEventListener('scroll', onScroll); };
-  }, []);
-
-  const pctCls = (p) => p >= 90 ? 'green' : p >= 70 ? 'amber' : 'red';
-  const boxCls = (st) => st === 'collected' ? 'status-ok' : st === 'not_collected' ? 'status-pending'
-    : st === 'absent' ? 'status-error' : st === 'no_data' ? 'status-nodata' : 'status-empty';
-  const fmtDate = (d) => d ? new Date(d).toLocaleString('ru-RU') : '—';
-  const fmtN = (v) => v == null ? '—' : v;   // прочерк, когда среза нет (noData)
-
-  const rows = data?.rows || [];
-  const sections = data?.sections || [];
-  const filtered = rows.filter(r => {
-    if (searchTp && !r.tpName?.toLowerCase().includes(searchTp.toLowerCase())) return false;
-    if (statusFilter) {
-      const has = [r.poll.start, r.poll.middle, r.poll.end].some(c => c.status === statusFilter);
-      if (!has) return false;
-    }
-    return true;
-  });
-  const secFiltered = sections.filter(s => {
-    if (searchTp && !s.tpName?.toLowerCase().includes(searchTp.toLowerCase())) return false;
-    if (statusFilter && s.poll.status !== statusFilter) return false;
-    return true;
-  });
-  // Группировка РЭС → ТП → { secs (тех.учёты), vls }. ТП появляется, даже если у неё
-  // только секции без ВЛ (или наоборот).
-  const byRes = {};
-  const bucket = (resName, tpName) => {
-    (byRes[resName] = byRes[resName] || {});
-    return (byRes[resName][tpName] = byRes[resName][tpName] || { secs: [], vls: [] });
-  };
-  secFiltered.forEach(s => bucket(s.resName, s.tpName).secs.push(s));
-  filtered.forEach(r => bucket(r.resName, r.tpName).vls.push(r));
-
-  const puCell = (pu, cell) => {
-    // Зона бейджа резервируется ВСЕГДА (фикс. высота) — квадраты всех ПУ ряда
-    // стоят на одной линии независимо от наличия «СПОДЭС».
-    const showSp = cell.spodes && (cell.status === 'collected' || cell.status === 'not_collected');
-    return (
-      <div className="pu-cell poll-pu-cell" title={cell.status === 'no_data' ? 'Нет данных среза' : (pu || 'ПУ не задан')}>
-        <div className={`status-box ${boxCls(cell.status)}`}>{cell.status === 'no_pu' ? 'X' : ''}</div>
-        <span className="pu-num-line">{pu || ''}</span>
-        <span className="pu-badge-zone">{showSp && <SpodesBadge />}</span>
-      </div>
-    );
-  };
-
-  // Лукап кандидатов/совпадения ТП по «resName||tpName».
-  const tpInfo = {};
-  (data?.tps || []).forEach(t => { tpInfo[t.resName + '||' + t.tpName] = t; });
-  const tpDataAvailable = !!data?.tpDataAvailable;
-
-  // Мини-сводка ВЛ: Y — ПУ с заданными номерами, X — собирается, K — СПОДЭС.
-  const vlMini = (r) => {
-    const assigned = [r.startPu, r.middlePu, r.endPu];
-    const cells = [r.poll.start, r.poll.middle, r.poll.end];
-    const idx = assigned.map((p, i) => (p ? i : -1)).filter(i => i >= 0);
-    const Y = idx.length;
-    const X = idx.filter(i => cells[i].status === 'collected').length;
-    const K = idx.filter(i => cells[i].spodes).length;
-    if (Y === 0) return <span className="poll-vl-mini muted">ПУ не заданы</span>;
-    const cls = X === Y ? 'green' : X === 0 ? 'red' : 'amber';
-    return <span className="poll-vl-mini">опрос: <b className={`mini-${cls}`}>{X}/{Y}</b> · СПОДЭС: {K} из {Y}</span>;
-  };
-
-  // Открыть модалку рекомендаций по ВЛ / по секции (тех.учёту).
-  const openVlRec = (r) => setRecModal({
-    resName: r.resName, tpName: r.tpName,
-    title: `${r.tpName} — ${r.vlName} · рекомендации`,
-    dockTitle: `${r.tpName} — ${r.vlName}`,
-    items: [
-      { position: 'Начало', pu: r.startPu, cell: r.poll.start },
-      { position: 'Середина', pu: r.middlePu, cell: r.poll.middle },
-      { position: 'Конец', pu: r.endPu, cell: r.poll.end },
-    ],
-  });
-  const openSecRec = (sec) => setRecModal({
-    resName: sec.resName, tpName: sec.tpName,
-    title: `${sec.tpName} — СШ-${toRoman(sec.sectionNumber)} · рекомендации`,
-    dockTitle: `${sec.tpName} — СШ-${toRoman(sec.sectionNumber)}`,
-    items: [{ position: 'Ввод (тех.учёт)', pu: sec.techPuNumber, cell: sec.poll }],
-  });
-  const copySerial = (s) => {
-    try { navigator.clipboard?.writeText(s); setCopiedSerial(s); setTimeout(() => setCopiedSerial(null), 1200); } catch { /* noop */ }
-  };
-
-  const exportExcel = () => {
-    if (!data || (!rows.length && !sections.length)) { alert('Нет данных для экспорта'); return; }
-    const stRu = (s) => s === 'collected' ? 'Собирается' : s === 'not_collected' ? 'Не собирается' : s === 'absent' ? 'Отсутствует' : s === 'no_data' ? 'Нет данных' : 'ПУ не задан';
-    const mapRows = [];
-    rows.forEach(r => {
-      [['Начало', r.startPu, r.poll.start], ['Середина', r.middlePu, r.poll.middle], ['Конец', r.endPu, r.poll.end]].forEach(([pos, pu, c]) => {
-        if (!pu) return;
-        mapRows.push({ 'Тип': 'ПУ ВЛ', 'РЭС': r.resName, 'ТП': r.tpName, 'ВЛ': r.vlName, 'Позиция': pos, '№ ПУ': pu, 'Статус': stRu(c.status), 'СПОДЭС': c.spodes ? 'да' : '' });
-      });
-    });
-    sections.forEach(sec => {
-      if (!sec.techPuNumber) return;
-      mapRows.push({ 'Тип': 'тех.учёт', 'РЭС': sec.resName, 'ТП': sec.tpName, 'ВЛ': `СШ-${toRoman(sec.sectionNumber)}`, 'Позиция': 'ввод', '№ ПУ': sec.techPuNumber, 'Статус': stRu(sec.poll.status), 'СПОДЭС': sec.poll.spodes ? 'да' : '' });
-    });
-    const sumRows = [...(data.summary?.byRes || []), { ...data.summary?.total, resName: 'ИТОГО' }].map(a => ({
-      'РЭС': a.resName, 'Всего ПУ': a.totalPu, 'Собирается': a.collected, 'Не собирается': a.notCollected,
-      'Отсутствует': a.absent, 'СПОДЭС': a.spodes, 'ПУ не задан': a.noPu, '% сбора': a.coveragePct
-    }));
-    const orphRows = (data.orphans?.list || []).map(o => ({ '№ ПУ': o.serial, 'СПОДЭС': o.isSpodes ? 'да' : '', 'Собирается': o.isCollected ? 'да' : '' }));
-
-    const wb = XLSX.utils.book_new();
-    const statusColor = (v) => v === 'Собирается' ? XLS_COLORS.green : v === 'Не собирается' ? XLS_COLORS.amber : v === 'Отсутствует' ? XLS_COLORS.red : XLS_COLORS.gray; // 'Нет данных'/'ПУ не задан' → серый
-    const ws1 = XLSX.utils.json_to_sheet(mapRows);
-    ws1['!cols'] = [{ wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 8 }];
-    styleExportSheet(ws1, { 'Статус': statusColor });
-    XLSX.utils.book_append_sheet(wb, ws1, 'Карта');
-    const ws2 = XLSX.utils.json_to_sheet(sumRows);
-    ws2['!cols'] = [{ wch: 18 }, { wch: 9 }, { wch: 11 }, { wch: 13 }, { wch: 12 }, { wch: 8 }, { wch: 11 }, { wch: 9 }];
-    styleExportSheet(ws2, { '% сбора': (v) => { const n = Number(v); return n >= 90 ? XLS_COLORS.green : n >= 70 ? XLS_COLORS.amber : XLS_COLORS.red; } });
-    XLSX.utils.book_append_sheet(wb, ws2, 'Сводка');
-    if (orphRows.length) {
-      const ws3 = XLSX.utils.json_to_sheet(orphRows);
-      ws3['!cols'] = [{ wch: 18 }, { wch: 8 }, { wch: 11 }];
-      styleExportSheet(ws3);
-      XLSX.utils.book_append_sheet(wb, ws3, 'Не в структуре');
-    }
-    XLSX.writeFile(wb, `Карта_опроса_${new Date().toLocaleDateString('ru-RU').split('.').join('-')}.xlsx`);
-  };
-
-  return (
-    <div className="poll-map">
-      <PageHeader icon={<IconMapPin size={24} />} title="Карта опроса структуры сети" />
-
-      <div className="poll-topbar">
-        <div className="poll-snapshot">
-          {loading
-            ? 'Срез загружается, это может занять несколько секунд, подождите…'
-            : data?.snapshotAt
-              ? <>Срез Пирамиды от <strong>{fmtDate(data.snapshotAt)}</strong></>
-              : 'Срез не синхронизирован'}
-        </div>
-        <div className="poll-controls">
-          <input type="text" className="search-input" placeholder="Поиск по ТП..." value={searchTp} onChange={(e) => setSearchTp(e.target.value)} />
-          {canSync && (
-            <button className="pm-btn pm-btn--refresh" onClick={sync} disabled={syncing}>
-              <IconRefresh className="ico" /> {syncing ? 'Синхронизация...' : 'Синхронизировать'}
-            </button>
-          )}
-          <button className="pm-btn pm-btn--excel" onClick={exportExcel} disabled={!rows.length && !sections.length}>
-            <IconDownload className="ico" /> Excel
-          </button>
-        </div>
-      </div>
-
-      {notice && (
-        <div className={`poll-notice ${notice.type}`}>
-          <div className="poll-notice-main">
-            {notice.type === 'ok' ? <IconCheck className="ico" /> : <IconAlertTriangle className="ico" />} {notice.text}
-          </div>
-          {(notice.code || notice.detail) && (
-            <div className="poll-notice-tech">
-              {notice.code && <code>{notice.code}</code>}{notice.detail ? ` · ${notice.detail}` : ''}
-            </div>
-          )}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="loading"><RossetiLoader /></div>
-      ) : (
-        <>
-          {/* Срез не синхронизирован — структура всё равно видна, данные опроса «прочерками» */}
-          {data?.noData && (
-            <div className="poll-notice warn poll-nosync">
-              <div className="poll-notice-main">
-                <IconAlertTriangle className="ico" /> Срез не синхронизирован — показана структура сети без данных опроса.
-              </div>
-              {canSync
-                ? <button className="pm-btn pm-btn--refresh poll-nosync-btn" onClick={sync} disabled={syncing}>
-                    <IconRefresh className="ico" /> {syncing ? 'Синхронизация...' : 'Синхронизировать'}
-                  </button>
-                : <div className="poll-notice-tech">Дождитесь синхронизации администратором.</div>}
-            </div>
-          )}
-          {/* Сводка покрытия */}
-          <div className="pm-table-wrap" style={{ marginBottom: 18 }}>
-            <table className="pm-matrix">
-              <thead>
-                <tr><th className="pm-sticky">РЭС</th><th>Всего</th><th>Собирается</th><th>Не собирается</th><th>Отсутствует</th><th>СПОДЭС</th><th>ПУ не задан</th><th>% сбора</th></tr>
-              </thead>
-              <tbody>
-                {(data.summary?.byRes || []).map(a => (
-                  <tr key={a.resId}>
-                    <td className="pm-sticky"><strong>{a.resName}</strong></td>
-                    <td>{fmtN(a.totalPu)}</td><td>{fmtN(a.collected)}</td><td>{fmtN(a.notCollected)}</td>
-                    <td>{fmtN(a.absent)}</td><td>{fmtN(a.spodes)}</td><td>{fmtN(a.noPu)}</td>
-                    <td className={a.coveragePct == null ? '' : `pm-${pctCls(a.coveragePct)}`}><strong>{a.coveragePct == null ? '—' : `${a.coveragePct}%`}</strong></td>
-                  </tr>
-                ))}
-                {data.summary?.total && (
-                  <tr className="poll-total-row">
-                    <td className="pm-sticky"><strong>ИТОГО</strong></td>
-                    <td>{fmtN(data.summary.total.totalPu)}</td><td>{fmtN(data.summary.total.collected)}</td><td>{fmtN(data.summary.total.notCollected)}</td>
-                    <td>{fmtN(data.summary.total.absent)}</td><td>{fmtN(data.summary.total.spodes)}</td><td>{fmtN(data.summary.total.noPu)}</td>
-                    <td className={data.summary.total.coveragePct == null ? '' : `pm-${pctCls(data.summary.total.coveragePct)}`}><strong>{data.summary.total.coveragePct == null ? '—' : `${data.summary.total.coveragePct}%`}</strong></td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Легенда-фильтры */}
-          <div className={`status-legend ${legendCollapsed ? 'is-collapsed' : ''} ${data?.noData ? 'is-muted' : ''}`}>
-            {[['collected', 'status-ok', 'Собирается'], ['not_collected', 'status-pending', 'В опросе, не собирается'], ['absent', 'status-error', 'В опросе отсутствует'], ['no_pu', 'status-empty', 'ПУ не задан']].map(([k, cls, lbl]) => (
-              <div key={k} className={`legend-item ${statusFilter === k ? 'active' : ''}`} onClick={() => setStatusFilter(statusFilter === k ? null : k)}>
-                <span className={`status-box ${cls}`}>{k === 'no_pu' ? 'X' : ''}</span> {lbl}
-              </div>
-            ))}
-          </div>
-          <div className={`legend-dots ${legendCollapsed ? 'show' : ''}`} aria-hidden={!legendCollapsed}>
-            {[['collected', 'status-ok', 'Собирается'], ['not_collected', 'status-pending', 'В опросе, не собирается'], ['absent', 'status-error', 'В опросе отсутствует'], ['no_pu', 'status-empty', 'ПУ не задан']].map(([k, cls, lbl]) => (
-              <button key={k} type="button" title={lbl} className={`legend-dot ${cls} ${statusFilter === k ? 'active' : ''}`} onClick={() => setStatusFilter(statusFilter === k ? null : k)}>{k === 'no_pu' ? 'X' : ''}</button>
-            ))}
-          </div>
-
-          {/* Дерево */}
-          <div className="poll-tree">
-            {Object.keys(byRes).sort((a, b) => a.localeCompare(b, 'ru')).map(resName => (
-              <div key={resName} className="poll-res">
-                <h3 className="poll-res-title">{resName}</h3>
-                {Object.keys(byRes[resName]).sort((a, b) => a.localeCompare(b, 'ru')).map(tpName => (
-                  <div key={tpName} className="tp-card">
-                    <div className="poll-grid poll-grid--head poll-tp-head">
-                      <span className="poll-vl-name poll-tp-name">{tpName}</span>
-                      <span className="pu-col-label">Начало</span><span className="pu-col-label">Середина</span><span className="pu-col-label">Конец</span>
-                    </div>
-                    {/* Секции шин (тех.учёт на вводе) — клик открывает рекомендации */}
-                    {byRes[resName][tpName].secs.map(sec => (
-                      <div key={'s' + sec.id} className="poll-grid poll-section-line poll-row-click" onClick={() => openSecRec(sec)} title="Рекомендации по тех.учёту">
-                        <span className="poll-vl-name section-line-name">
-                          СШ-{toRoman(sec.sectionNumber)}{sec.tnKva != null ? ` · ${sec.tnKva} кВА` : ''}{sec.techPuNumber ? ` · тех.учёт № ${sec.techPuNumber}` : ''}
-                        </span>
-                        {puCell(sec.techPuNumber, sec.poll)}
-                        <span className="pu-cell-empty" /><span className="pu-cell-empty" />
-                      </div>
-                    ))}
-                    {byRes[resName][tpName].vls.map(r => (
-                      <div key={r.id} className="poll-grid poll-row-click" onClick={() => openVlRec(r)} title="Рекомендации по ВЛ">
-                        <span className="poll-vl-name poll-vl-name--stack">
-                          <span className="poll-vl-title">{r.vlName}</span>
-                          {!data.noData && vlMini(r)}
-                        </span>
-                        {puCell(r.startPu, r.poll.start)}
-                        {puCell(r.middlePu, r.poll.middle)}
-                        {puCell(r.endPu, r.poll.end)}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ))}
-            {filtered.length === 0 && secFiltered.length === 0 && <div className="no-data" style={{ padding: 16 }}>Нет объектов по фильтру</div>}
-          </div>
-
-          {/* В опросе, но нет в структуре */}
-          {data.orphans?.count > 0 && (
-            <div className="poll-orphans">
-              <button className="poll-orphans-toggle" onClick={() => setShowOrphans(v => !v)}>
-                {showOrphans ? <IconArrowDown className="ico" /> : <IconArrowRight className="ico" />} В опросе, но нет в структуре ({data.orphans.count})
-              </button>
-              {showOrphans && (
-                <div className="poll-orphans-list">
-                  {data.orphans.list.map((o, i) => (
-                    <span key={i} className="poll-orphan-chip">
-                      {o.serial}
-                      {o.isCollected && <span className="mini-badge green">собирается</span>}
-                      {o.isSpodes && <SpodesBadge />}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Модалка рекомендаций по ВЛ / тех.учёту */}
-      {recModal && (
-        <ModalShell
-          title={recModal.title}
-          dockTitle={recModal.dockTitle}
-          icon={<IconMapPin size={16} />}
-          className="poll-rec-modal"
-          onClose={() => setRecModal(null)}
-        >
-          {(() => {
-            const nd = !!data?.noData;
-            const enriched = recModal.items.map((it, i) => ({ ...it, order: i, verdict: nd ? null : pollVerdict(it.cell) }));
-            const sorted = nd ? enriched : [...enriched].sort((a, b) => (a.verdict.priority - b.verdict.priority) || (a.order - b.order));
-            const buckets = { toReplace: 0, toRestore: 0, toFill: 0, ok: 0 };
-            if (!nd) enriched.forEach(e => { buckets[e.verdict.bucket]++; });
-            const tp = tpInfo[recModal.resName + '||' + recModal.tpName];
-            const cands = tp?.candidates || [];
-            const stLabel = (st) => st === 'collected' ? 'Собирается' : st === 'not_collected' ? 'Не собирается' : st === 'absent' ? 'Отсутствует' : st === 'no_pu' ? 'ПУ не задан' : 'Нет данных';
-            return (
-              <div className="poll-rec">
-                {nd && (
-                  <div className="poll-notice warn" style={{ marginBottom: 12 }}>
-                    <div className="poll-notice-main"><IconAlertTriangle className="ico" /> Срез не синхронизирован — показан только состав. Выполните синхронизацию для рекомендаций.</div>
-                  </div>
-                )}
-                <div className="poll-rec-tablewrap">
-                <table className="poll-rec-table">
-                  <thead><tr><th>Позиция</th><th>№ ПУ</th><th>Статус</th><th>Вывод</th></tr></thead>
-                  <tbody>
-                    {sorted.map((it, i) => (
-                      <tr key={i}>
-                        <td>{it.position}</td>
-                        <td className="poll-rec-pu">{it.pu || '—'}{it.cell.spodes && <SpodesBadge />}</td>
-                        <td><span className={`rec-status rec-st-${it.cell.status}`}>{stLabel(it.cell.status)}</span></td>
-                        <td>{it.verdict ? <span className={`rec-verdict rec-v-${it.verdict.color}`}>{it.verdict.text}</span> : <span className="muted">—</span>}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                </div>
-                {!nd && (
-                  <div className="poll-rec-footer">
-                    <span className="poll-rec-foot-item"><span className="rec-dot rec-v-red" />К замене: <b>{buckets.toReplace}</b></span>
-                    <span className="poll-rec-foot-item"><span className="rec-dot rec-v-amber" />Восстановить опрос: <b>{buckets.toRestore}</b></span>
-                    <span className="poll-rec-foot-item"><span className="rec-dot rec-v-gray" />Заполнить: <b>{buckets.toFill}</b></span>
-                    <span className="poll-rec-foot-item"><span className="rec-dot rec-v-green" />В порядке: <b>{buckets.ok}</b></span>
-                  </div>
-                )}
-                {tpDataAvailable && (
-                  <div className="poll-cand">
-                    <div className="poll-cand-head">Кандидаты для контроля (СПОДЭС/РиМ) на этой ТП ({cands.length})</div>
-                    {cands.length === 0 ? (
-                      <div className="muted" style={{ padding: '6px 0' }}>
-                        {tp?.tpMatched ? 'Свободных ПУ с журналом напряжений (СПОДЭС/РиМ) на этой ТП нет.' : 'ТП не найдена в срезе Пирамиды по имени (сверьте написание).'}
-                      </div>
-                    ) : (
-                      <>
-                        <div className="poll-cand-hint muted">Эти ПУ уже опрашиваются и имеют журнал напряжений (СПОДЭС или РиМ) на этой ТП — можно рассмотреть как контрольные точки взамен проблемных. Клик по номеру копирует серийник.</div>
-                        <div className="poll-cand-tablewrap">
-                          <table className="poll-cand-table">
-                            <thead><tr><th>№ ПУ</th><th>Адрес (точка учёта)</th><th>Тип</th><th>Опрос</th></tr></thead>
-                            <tbody>
-                              {cands.map((c, i) => (
-                                <tr key={i}>
-                                  <td>
-                                    <button className="poll-cand-serial" title="Скопировать серийник" onClick={() => copySerial(c.serial)}>
-                                      {c.serial}{copiedSerial === c.serial && <span className="poll-copied">скопировано</span>}
-                                    </button>
-                                  </td>
-                                  <td className="poll-cand-addr">{c.tuPath || '—'}</td>
-                                  <td className="poll-cand-poll">
-                                    {c.isSpodes ? <SpodesBadge /> : <span className="mini-badge rim">РиМ</span>}
-                                  </td>
-                                  <td className="poll-cand-poll">
-                                    {c.isCollected
-                                      ? <span className="mini-badge green">собирается</span>
-                                      : <span className="mini-badge">не собирается</span>}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </ModalShell>
-      )}
-    </div>
-  );
-}
-
-// ═══ Раздел «Права доступа» (только суперадмин): матрица админы × права ═══
+// ═══ Раздел «Права доступа»: матрица «должность × право» (как в ЭнергоСфере) ═══
+// Должность задаёт область (все РЭС / свой РЭС), отметки — что можно делать.
+// Права назначаются должности, не человеку. «Администратор» — всегда всё.
 function PermissionsAdmin() {
-  const [catalog, setCatalog] = useState({});
-  const [admins, setAdmins] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [savingId, setSavingId] = useState(null);
-  const [dirty, setDirty] = useState({}); // userId -> локально отредактированные права
+  const [data, setData] = useState(null);      // { groups, catalog, roles, lockedRole }
+  const [edit, setEdit] = useState({});        // role -> Set(прав) (черновик)
+  const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    setLoading(true);
     try {
-      const { data } = await api.get('/api/admin/permissions');
-      setCatalog(data.catalog || {});
-      setAdmins(data.admins || []);
-      setDirty({});
+      const { data: d } = await api.get('/api/admin/permissions');
+      setData(d);
+      setEdit(Object.fromEntries(d.roles.map(r => [r.key, new Set(r.permissions)])));
     } catch (e) {
-      showToast(e.response?.data?.error || 'Ошибка загрузки прав', 'error');
-    } finally { setLoading(false); }
+      showToast(e.response?.data?.error || 'Не удалось загрузить права', 'error');
+    }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(); }, []);
 
-  const permsOf = (a) => dirty[a.id] || a.permissions || {};
-  const isDirty = (a) => !!dirty[a.id];
-  const toggle = (a, key) => {
-    const cur = { ...permsOf(a) };
-    if (cur[key]) delete cur[key]; else cur[key] = true;
-    setDirty(d => ({ ...d, [a.id]: cur }));
-  };
-  const save = async (a) => {
-    setSavingId(a.id);
+  const savedOf = (key) => new Set(data?.roles.find(r => r.key === key)?.permissions || []);
+  const same = (a, b) => a.size === b.size && [...a].every(x => b.has(x));
+  const dirty = data ? data.roles.filter(r => !same(edit[r.key] || new Set(), savedOf(r.key))).map(r => r.key) : [];
+
+  const toggle = (role, perm) => setEdit(m => {
+    const next = new Set(m[role]);
+    if (next.has(perm)) next.delete(perm); else next.add(perm);
+    return { ...m, [role]: next };
+  });
+  const reset = () => setEdit(Object.fromEntries(data.roles.map(r => [r.key, new Set(r.permissions)])));
+  const save = async () => {
+    setBusy(true);
     try {
-      const { data } = await api.put(`/api/admin/permissions/${a.id}`, { permissions: permsOf(a) });
-      setAdmins(list => list.map(x => x.id === a.id ? { ...x, permissions: data.permissions } : x));
-      setDirty(d => { const n = { ...d }; delete n[a.id]; return n; });
-      showToast('Права сохранены — вступят в силу в течение минуты', 'ok');
+      for (const role of dirty) await api.put(`/api/admin/permissions/${role}`, { permissions: [...edit[role]] });
+      showToast('Права должностей сохранены — действуют сразу', 'ok');
+      window.dispatchEvent(new CustomEvent('notificationsUpdated'));
+      await load();
     } catch (e) {
-      showToast(e.response?.data?.error || 'Ошибка сохранения прав', 'error');
-    } finally { setSavingId(null); }
+      showToast(e.response?.data?.error || 'Не удалось сохранить права', 'error');
+    } finally { setBusy(false); }
   };
 
-  const catKeys = Object.keys(catalog);
+  const permsOf = (g) => Object.entries(data.catalog).filter(([, p]) => p.group === g).map(([k]) => k);
 
   return (
     <div className="permissions-admin">
-      <PageHeader icon={<IconLock size={24} />} title="Права доступа" />
-      <p className="perm-hint muted">
-        Отметьте разрешённые действия для каждого пользователя (админы, загрузчики, ответственные РЭС).
-        Изменения применяются <strong>без перелогина</strong> и вступают в силу в течение минуты.
-        Суперадмин может всё и в списке не показан.
-      </p>
-      {loading ? (
+      <PageHeader icon={<IconLock size={24} />} title="Права доступа"
+        subtitle="Должность определяет, какие РЭС видит сотрудник; отметки — что он может делать. Права назначаются должности, а не человеку."
+        actions={<>
+          <button className="ui-btn" disabled={!dirty.length || busy} onClick={reset}>Отменить</button>
+          <button className="ui-btn ui-btn--primary" disabled={!dirty.length || busy} onClick={save}>
+            <IconCheck size={18} />{busy ? 'Сохраняем…' : dirty.length ? `Сохранить (${dirty.length})` : 'Сохранить'}
+          </button>
+        </>} />
+      {!data ? (
         <div className="loading"><RossetiLoader /></div>
-      ) : admins.length === 0 ? (
-        <div className="no-data" style={{ padding: 16 }}>Пользователей нет. Создайте их в «Настройках → Пользователи».</div>
       ) : (
-        <div className="perm-table-wrap">
-          <table className="perm-table">
-            <thead>
-              <tr>
-                <th className="perm-sticky">Пользователь</th>
-                {catKeys.map(k => <th key={k} title={catalog[k]}>{catalog[k]}</th>)}
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {admins.map(a => (
-                <tr key={a.id}>
-                  <td className="perm-sticky">
-                    <div className="perm-admin-name">{a.fio}</div>
-                    <div className="perm-admin-login muted">
-                      {a.login}
-                      {' · '}{a.role === 'admin' ? 'Администратор' : a.role === 'uploader' ? 'Загрузчик АСКУЭ' : a.role === 'res_responsible' ? 'Ответственный РЭС' : a.role}
-                      {a.resName ? ` · ${a.resName}` : ''}
-                    </div>
-                  </td>
-                  {catKeys.map(k => (
-                    <td key={k} className="perm-check-cell">
-                      <input type="checkbox" checked={!!permsOf(a)[k]} onChange={() => toggle(a, k)} />
-                    </td>
+        <div className="ui-card ui-card--flush">
+          <div className="matrix-wrap">
+            <table className="matrix">
+              <thead>
+                <tr>
+                  <th className="matrix__perm">Право</th>
+                  {data.roles.map(r => (
+                    <th key={r.key} className={`matrix__role ${dirty.includes(r.key) ? 'is-dirty' : ''}`}>
+                      <span>{r.title}</span>
+                      <em>{r.scope === 'all' ? 'все РЭС' : 'свой РЭС'}{r.people ? ` · ${r.people} чел.` : ''}</em>
+                    </th>
                   ))}
-                  <td>
-                    <button className="pm-btn pm-btn--refresh perm-save-btn" disabled={!isDirty(a) || savingId === a.id} onClick={() => save(a)}>
-                      {savingId === a.id ? 'Сохранение...' : 'Сохранить'}
-                    </button>
-                  </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.groups.map(g => (
+                  <React.Fragment key={g.id}>
+                    <tr className="matrix__group"><td colSpan={data.roles.length + 1}><span>{g.title}</span></td></tr>
+                    {permsOf(g.id).map(p => (
+                      <tr key={p}>
+                        <td className="matrix__perm">{data.catalog[p].title}</td>
+                        {data.roles.map(r => (
+                          <td key={r.key} className="matrix__cell">
+                            <input type="checkbox" className="ui-check"
+                              checked={r.key === data.lockedRole || !!edit[r.key]?.has(p)}
+                              disabled={r.key === data.lockedRole || busy}
+                              aria-label={`${r.title}: ${data.catalog[p].title}`}
+                              onChange={() => toggle(r.key, p)} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -10403,11 +9966,333 @@ function DeepWorkAnalysis() {
   );
 }
 
+// ═══ «Сводка» — главная: что ждёт действия, состояние ПУ, динамика ═══════════
+// Данные — GET /api/dashboard (одним запросом, по области должности).
+const DASH_STATUS = [
+  { key: 'ok', label: 'Норма', cls: 'st-ok' },
+  { key: 'pending', label: 'На перепроверке', cls: 'st-pending' },
+  { key: 'error', label: 'Ошибка', cls: 'st-error' },
+  { key: 'unchecked', label: 'Не проверен', cls: 'st-none' },
+];
+const fmtInt = (n) => Number(n || 0).toLocaleString('ru-RU');
+const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+
+function Dashboard({ selectedRes, onSectionChange }) {
+  const { user } = useContext(AuthContext);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    setError('');
+    api.get('/api/dashboard', { params: user.allRes && selectedRes ? { resId: selectedRes } : {} })
+      .then(r => alive && setData(r.data))
+      .catch(e => alive && setError(e.response?.data?.error || 'Не удалось загрузить сводку'));
+    return () => { alive = false; };
+  }, [selectedRes, user.allRes]);
+
+  if (error) return <div className="ui-card"><p className="muted">{error}</p></div>;
+  if (!data) return <div className="loading"><RossetiLoader /></div>;
+
+  const w = data.waiting;
+  const t = data.totals;
+  const tiles = [
+    { id: 'tech_pending', value: w.techPending, label: 'Ждут мероприятий РЭС', hint: 'ошибки ПУ после съёма', tone: 'warn', icon: <IconWrench size={20} /> },
+    { id: 'askue_pending', value: w.askuePending, label: 'Ждут проверки АСКУЭ', hint: 'РЭС отработал — нужен съём', tone: 'info', icon: <IconClipboard size={20} /> },
+    { id: 'techblock', value: w.techblock, label: 'У техблока', hint: `завершено за 30 дней: ${w.techblockClosed30}`, tone: 'accent', icon: <IconGavel size={20} /> },
+    { id: 'problem_vl', value: w.problemVl, label: 'Проблемные ВЛ и ТП', hint: 'повторные ошибки и перегрузы', tone: 'danger', icon: <IconAlertTriangle size={20} /> },
+    { id: 'power_overload', value: w.overload, label: 'Перегрузы в работе', hint: 'ограничение или мероприятия', tone: 'danger', icon: <IconZap size={20} /> },
+  ].filter(x => (SECTION_PERMS[x.id] || []).some(k => hasPerm(user, k)));
+
+  const resName = data.resId ? (data.byRes[0]?.name || '') : 'Все РЭС';
+
+  return (
+    <div className="dash">
+      <PageHeader icon={<IconGauge size={24} />} title="Сводка"
+        subtitle={`${resName} · что ждёт действия и как идут дела по сети 0,4 кВ`} />
+
+      {tiles.length > 0 && (
+        <div className="dash-tiles">
+          {tiles.map(x => (
+            <button key={x.id} type="button" className={`dash-tile dash-tile--${x.tone}`} onClick={() => onSectionChange(x.id)}>
+              <span className="dash-tile__icon">{x.icon}</span>
+              <span className="dash-tile__value">{fmtInt(x.value)}</span>
+              <span className="dash-tile__label">{x.label}</span>
+              <span className="dash-tile__hint">{x.hint}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="dash-grid">
+        <div className="ui-card dash-card">
+          <div className="dash-card__head">
+            <h3>Приборы учёта</h3>
+            <span className="muted">{fmtInt(t.tp)} ТП · {fmtInt(t.vl)} линий · {fmtInt(t.pu)} ПУ в структуре</span>
+          </div>
+          <div className="dash-hero">
+            <div><b>{pct(t.ok, t.pu)}%</b><span>в норме</span></div>
+            <div><b>{fmtInt(t.error)}</b><span>с ошибкой</span></div>
+            <div><b>{fmtInt(t.pending)}</b><span>на перепроверке</span></div>
+            <div><b>{fmtInt(t.unchecked)}</b><span>ещё не проверены</span></div>
+          </div>
+          <StatusBars rows={data.byRes} single={!!data.resId} />
+        </div>
+
+        <div className="ui-card dash-card">
+          <div className="dash-card__head">
+            <h3>Динамика за 12 недель</h3>
+            <span className="muted">ПУ с ошибкой по съёмам и отработанные РЭС мероприятия, по неделям</span>
+          </div>
+          <TrendChart weeks={data.weekly} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Состояние ПУ по РЭС: горизонтальный 100%-стек (норма → перепроверка → ошибка →
+// не проверен), легенда с итогами, подсказка на сегменте, вид «таблицей».
+function StatusBars({ rows, single }) {
+  const [table, setTable] = useState(false);
+  const [tip, setTip] = useState(null);
+  const shown = rows.filter(r => r.pu > 0);
+  const sum = (k) => shown.reduce((a, r) => a + r[k], 0);
+  if (!shown.length) return <p className="muted dash-empty">Структура сети ещё не загружена — здесь появится состояние ПУ по РЭС.</p>;
+  return (
+    <div className="dash-bars">
+      <div className="dash-legend">
+        {DASH_STATUS.map(s => (
+          <span key={s.key} className="dash-legend__item"><i className={`dash-swatch ${s.cls}`} />{s.label} · <b>{fmtInt(sum(s.key))}</b></span>
+        ))}
+        <button type="button" className="ui-link" onClick={() => setTable(v => !v)}>{table ? 'Диаграммой' : 'Таблицей'}</button>
+      </div>
+      {table ? (
+        <table className="ui-table">
+          <thead><tr><th>РЭС</th><th>ПУ</th>{DASH_STATUS.map(s => <th key={s.key}>{s.label}</th>)}</tr></thead>
+          <tbody>{shown.map(r => (
+            <tr key={r.id}><td>{r.name}</td><td>{fmtInt(r.pu)}</td>{DASH_STATUS.map(s => <td key={s.key}>{fmtInt(r[s.key])}</td>)}</tr>
+          ))}</tbody>
+        </table>
+      ) : (
+        <ul className="dash-bar-list">
+          {shown.map(r => (
+            <li key={r.id}>
+              {!single && <span className="dash-bar__name">{r.name}</span>}
+              <span className="dash-bar" onMouseLeave={() => setTip(null)}>
+                {DASH_STATUS.filter(s => r[s.key] > 0).map(s => (
+                  <span key={s.key} className={`dash-bar__seg ${s.cls}`} style={{ flexGrow: r[s.key] }}
+                    onMouseEnter={(e) => setTip({ x: e.clientX, y: e.clientY, text: `${r.name}: ${s.label.toLowerCase()} — ${fmtInt(r[s.key])} из ${fmtInt(r.pu)} (${pct(r[s.key], r.pu)}%)` })}
+                    onMouseMove={(e) => setTip(t => t && { ...t, x: e.clientX, y: e.clientY })} />
+                ))}
+              </span>
+              <span className="dash-bar__val">{pct(r.ok, r.pu)}%</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {tip && <div className="dash-tip" style={{ left: tip.x + 14, top: tip.y + 14 }}>{tip.text}</div>}
+    </div>
+  );
+}
+
+// Две линии по неделям (выявлено / отработано), одна ось, перекрестье с подсказкой.
+function TrendChart({ weeks }) {
+  const [hover, setHover] = useState(null);
+  const W = 640, H = 230, L = 36, R = 92, T = 14, B = 30;
+  const series = [
+    { key: 'found', label: 'Выявлено ошибок', cls: 'ser-1' },
+    { key: 'closed', label: 'Отработано РЭС', cls: 'ser-2' },
+  ];
+  const max = Math.max(4, ...weeks.flatMap(w => series.map(s => w[s.key])));
+  const step = Math.ceil(max / 4);
+  const top = step * 4;
+  const x = (i) => L + (i * (W - L - R)) / Math.max(1, weeks.length - 1);
+  const y = (v) => T + (H - T - B) * (1 - v / top);
+  const day = (iso) => { const d = new Date(iso); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  const onMove = (e) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - box.left) / box.width) * W;
+    const i = Math.round(((px - L) / (W - L - R)) * (weeks.length - 1));
+    setHover(Math.max(0, Math.min(weeks.length - 1, i)));
+  };
+  const empty = weeks.every(w => !w.found && !w.closed);
+  const last = weeks[weeks.length - 1] || {};
+  return (
+    <div className="dash-trend">
+      <div className="dash-legend">
+        {series.map(s => <span key={s.key} className="dash-legend__item"><i className={`dash-swatch ${s.cls}`} />{s.label}</span>)}
+      </div>
+      <div className="dash-trend__box">
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Динамика за 12 недель: выявлено ошибок и отработано РЭС"
+          onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+          {[0, 1, 2, 3, 4].map(k => (
+            <g key={k}>
+              <line className="dash-grid-line" x1={L} x2={W - R} y1={y(k * step)} y2={y(k * step)} />
+              <text className="dash-axis" x={L - 8} y={y(k * step) + 4} textAnchor="end">{k * step}</text>
+            </g>
+          ))}
+          {weeks.map((w, i) => (i % 2 === weeks.length % 2 ? null : (
+            <text key={w.week} className="dash-axis" x={x(i)} y={H - 8} textAnchor="middle">{day(w.week)}</text>
+          )))}
+          {series.map(s => (
+            <g key={s.key} className={s.cls}>
+              <polyline className="dash-line" points={weeks.map((w, i) => `${x(i)},${y(w[s.key])}`).join(' ')} />
+              <text className="dash-end-label" x={W - R + 8} y={y(last[s.key] || 0) + (s.key === 'found' ? -4 : 12)}>
+                {s.label.split(' ')[0]} {last[s.key] || 0}
+              </text>
+            </g>
+          ))}
+          {hover !== null && (
+            <g>
+              <line className="dash-cross" x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} />
+              {series.map(s => <circle key={s.key} className={`dash-dot ${s.cls}`} cx={x(hover)} cy={y(weeks[hover][s.key])} r="5" />)}
+            </g>
+          )}
+        </svg>
+        {hover !== null && (
+          <div className="dash-trend__tip" style={{ left: `${(x(hover) / W) * 100}%` }}>
+            <b>неделя с {day(weeks[hover].week)}</b>
+            {series.map(s => <span key={s.key}><i className={`dash-swatch ${s.cls}`} />{s.label}: {weeks[hover][s.key]}</span>)}
+            <span className="muted">подтверждено перепроверкой: {weeks[hover].confirmed}</span>
+          </div>
+        )}
+        {empty && <p className="dash-trend__empty muted">За 12 недель съёмов с ошибками и отработок пока не было.</p>}
+      </div>
+    </div>
+  );
+}
+
+// ═══ «Решения техблока» — вопросы, которые РЭС своими силами не решит ═══════
+// РЭС отметил «решить невозможно, нужны доп. мероприятия». Пока вопрос открыт,
+// линия выведена из мониторинга (не болтается между АСКУЭ и РЭС). Руководство
+// техблока (право techblock_complete) записывает решение и «Завершает».
+function TechBlock({ selectedRes }) {
+  const { user } = useContext(AuthContext);
+  const canComplete = hasPerm(user, 'techblock_complete');
+  const [tab, setTab] = useState('open');
+  const [items, setItems] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const [decision, setDecision] = useState({});
+  const [busy, setBusy] = useState(null);
+  const [viewer, setViewer] = useState(null);
+
+  const load = useCallback(() => {
+    setItems(null);
+    api.get('/api/techblock', { params: { status: tab, ...(user.allRes && selectedRes ? { resId: selectedRes } : {}) } })
+      .then(r => setItems(r.data))
+      .catch(e => { setItems([]); showToast(e.response?.data?.error || 'Не удалось загрузить вопросы'); });
+  }, [tab, selectedRes, user.allRes]);
+  useEffect(() => { load(); }, [load]);
+
+  const complete = async (it) => {
+    const text = (decision[it.id] || '').trim();
+    if (text.split(/\s+/).filter(Boolean).length < 5) { showToast('Запишите решение техблока — не менее 5 слов'); return; }
+    setBusy(it.id);
+    try {
+      await api.post(`/api/techblock/${it.id}/complete`, { decision: text });
+      showToast('Вопрос завершён — линия вернулась в мониторинг, РЭС получил решение', 'ok');
+      setItems(list => list.filter(x => x.id !== it.id));
+      window.dispatchEvent(new CustomEvent('notificationsUpdated'));
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Не удалось завершить');
+    } finally { setBusy(null); }
+  };
+
+  const POS = { start: 'начало', middle: 'середина', end: 'конец' };
+  const date = (d) => d ? new Date(d).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const daysSince = (d) => Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000));
+
+  return (
+    <div className="techblock">
+      <PageHeader icon={<IconGavel size={24} />} title="Решения техблока"
+        subtitle="РЭС сообщил, что проблему ПУ своими силами не решить и нужны дополнительные мероприятия. Пока вопрос открыт, линия не считается проблемной и не возвращается в РЭС и АСКУЭ." />
+      <div className="ui-tabs">
+        <button type="button" className={`ui-tab ${tab === 'open' ? 'is-on' : ''}`} onClick={() => setTab('open')}>Ждут решения</button>
+        <button type="button" className={`ui-tab ${tab === 'closed' ? 'is-on' : ''}`} onClick={() => setTab('closed')}>Завершённые</button>
+      </div>
+      {!items ? <div className="loading"><RossetiLoader /></div>
+        : !items.length ? (
+          <div className="ui-card ui-empty">
+            <IconCheck size={28} />
+            <b>{tab === 'open' ? 'Открытых вопросов нет' : 'Завершённых пока нет'}</b>
+            <span className="muted">{tab === 'open'
+              ? 'Когда РЭС отметит, что проблему решить невозможно, вопрос появится здесь.'
+              : 'Здесь хранятся вопросы с решением техблока.'}</span>
+          </div>
+        ) : (
+          <div className="tb-list">
+            {items.map(it => {
+              const open = openId === it.id;
+              return (
+                <div key={it.id} className={`ui-card tb-card ${open ? 'is-open' : ''}`}>
+                  <button type="button" className="tb-card__head" onClick={() => setOpenId(open ? null : it.id)}>
+                    <span className="tb-card__main">
+                      <span className="tb-card__ids">
+                        <span className="ui-chip">{it.resName}</span>
+                        <span className="ui-chip ui-chip--soft">ПУ {it.puNumber}</span>
+                        {tab === 'open' && <span className={`tb-age ${daysSince(it.createdAt) > 14 ? 'is-late' : ''}`}>{daysSince(it.createdAt)} дн. ждёт</span>}
+                      </span>
+                      <span className="tb-card__title">{it.tpName} · {it.vlName}{it.position ? ` · ${POS[it.position] || it.position}` : ''}</span>
+                      <span className="tb-card__desc">{it.description}</span>
+                    </span>
+                    <IconArrowDown size={20} className="tb-chevron" />
+                  </button>
+                  {open && (
+                    <div className="tb-card__body">
+                      <dl className="tb-facts">
+                        <div><dt>Ошибка ПУ</dt><dd>{it.errorDetails || '—'}</dd></div>
+                        <div><dt>Передал</dt><dd>{it.author || '—'} · {date(it.createdAt)}</dd></div>
+                        {it.repeatCount > 1 && <div><dt>Повторов</dt><dd>ошибка приходила {it.repeatCount} раз(а) до передачи</dd></div>}
+                        {it.closedAt && <div><dt>Решение</dt><dd><b>{it.decision}</b><br /><span className="muted">{it.closer} · {date(it.closedAt)}</span></dd></div>}
+                      </dl>
+                      <div className="tb-desc-full">
+                        <span className="muted">Описание РЭС</span>
+                        <p>{it.description}</p>
+                      </div>
+                      {it.attachments.length > 0 && (
+                        <div className="tb-files">
+                          {it.attachments.map((f, i) => (
+                            <button key={i} type="button" className="ui-btn ui-btn--ghost" onClick={() => setViewer({ files: it.attachments, index: i })}>
+                              <IconPaperclip size={16} />{f.original_name || `Файл ${i + 1}`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {tab === 'open' && canComplete && (
+                        <div className="tb-decide">
+                          <label className="muted" htmlFor={`dec-${it.id}`}>Решение техблока (не менее 5 слов) — его получит РЭС</label>
+                          <textarea id={`dec-${it.id}`} rows={3} value={decision[it.id] || ''}
+                            placeholder="Например: включено в план капремонта на I квартал, работы — подрядчик…"
+                            onChange={(e) => setDecision(d => ({ ...d, [it.id]: e.target.value }))} />
+                          <div className="tb-decide__actions">
+                            <button type="button" className="ui-btn ui-btn--primary" disabled={busy === it.id} onClick={() => complete(it)}>
+                              <IconCheck size={18} />{busy === it.id ? 'Завершаем…' : 'Завершить'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      {viewer && (
+        <FileViewer files={viewer.files} currentIndex={viewer.index} onClose={() => setViewer(null)}
+          onNext={() => setViewer(v => ({ ...v, index: (v.index + 1) % v.files.length }))}
+          onPrev={() => setViewer(v => ({ ...v, index: (v.index - 1 + v.files.length) % v.files.length }))} />
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   // Пока в iframe ждём/меняем токен платформы — показываем лоадер, а не форму логина.
   const [ssoPending, setSsoPending] = useState(EMBEDDED);
-  const [activeSection, setActiveSection] = useState('structure');
+  const [activeSection, setActiveSection] = useState('dashboard');
   const [selectedRes, setSelectedRes] = useState(null);
   const [resList, setResList] = useState([]);
 
@@ -10434,7 +10319,8 @@ export default function App() {
             setUser({
               id: payload.id,
               role: payload.role,
-              resId: payload.resId
+              resId: payload.resId,
+              permissions: {}
             });
             setSelectedRes(payload.resId);
           } catch (error) {
@@ -10484,9 +10370,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (user && user.role === 'admin') {
-      loadResList();
-    }
+    if (user) loadResList();
+  }, [user]);
+
+  // Стартовый раздел — первый доступный по правам (Сводка, если она есть).
+  useEffect(() => {
+    if (!user) return;
+    const order = [['dashboard', 'dashboard_view'], ['structure', 'structure_view'], ['tech_pending', 'res_work'], ['tech_pending', 'tech_pending_view'],
+      ['askue_pending', 'askue_pending_view'], ['techblock', 'techblock_view'], ['reports', 'reports_view']];
+    const allowed = SECTION_PERMS[activeSection];
+    if (allowed && allowed.some(k => hasPerm(user, k))) return;
+    const first = order.find(([, k]) => hasPerm(user, k));
+    if (first) setActiveSection(first[0]);
+    // eslint-disable-next-line
   }, [user]);
 
   const loadResList = async () => {
@@ -10499,13 +10395,7 @@ export default function App() {
   };
 
   const handleLogin = useCallback((userData) => {
-    setUser({
-      id: userData.id,
-      fio: userData.fio,
-      role: userData.role,
-      resId: userData.resId,
-      resName: userData.resName
-    });
+    setUser(userData);
     if (userData.resId) {
       setSelectedRes(userData.resId);
     }
@@ -10589,10 +10479,12 @@ export default function App() {
 
 const renderContent = () => {
   switch (activeSection) {
+    case 'dashboard':
+      return <Dashboard selectedRes={selectedRes} onSectionChange={setActiveSection} />;
+    case 'techblock':
+      return <TechBlock selectedRes={selectedRes} />;
     case 'structure':
       return <NetworkStructure onSectionChange={setActiveSection} />;
-    case 'poll_map':
-      return <PollMap selectedRes={selectedRes} />;
     case 'upload':
       return <FileUpload />;
     case 'tech_pending':
@@ -10631,15 +10523,14 @@ const renderContent = () => {
         <MainMenu
           activeSection={activeSection}
           onSectionChange={setActiveSection}
-          userRole={user.role}
-          isSuper={user.isSuper}
+          user={user}
         />
         
         <div className="main-content">
           <header className="app-header">
             <div className="header-left">
               <h1>Система контроля уровня напряжения в сетях 0,4 кВ</h1>
-              {user.role === 'admin' && activeSection !== 'history' && activeSection !== 'analytics' && activeSection !== 'deep_analysis' && (
+              {user.allRes && activeSection !== 'history' && activeSection !== 'analytics' && activeSection !== 'deep_analysis' && (
                 <select 
                   value={selectedRes || ''}
                   onChange={(e) => setSelectedRes(e.target.value ? parseInt(e.target.value) : null)}
@@ -10659,15 +10550,13 @@ const renderContent = () => {
             
             <div className="header-right">
               <span>{user.fio}</span>
-              <span className="user-role">
-                ({user.role === 'admin' ? 'Администратор' :
-                  user.role === 'uploader' ? 'Загрузчик' : 'Ответственный'})
-              </span>
+              <span className="user-role">{user.roleTitle}</span>
             </div>
           </header>
           
           <main className="content">
-            {renderContent()}
+            {/* key — раздел: при смене плавно проявляется (как в Сфере). */}
+            <div className="section-fade" key={activeSection}>{renderContent()}</div>
           </main>
         </div>
       </div>

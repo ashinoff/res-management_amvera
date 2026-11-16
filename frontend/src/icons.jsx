@@ -236,3 +236,14 @@ export const IconRocket = (p) => (
     <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" /><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
   </Svg>
 );
+// Сводка: циферблат-индикатор.
+export const IconGauge = (p) => (
+  <Svg {...p}><path d="M12 14l4-4" /><path d="M3.34 19a10 10 0 1 1 17.32 0" /><circle cx="12" cy="14" r="1.2" /></Svg>
+);
+// Решения техблока: молоток-решение.
+export const IconGavel = (p) => (
+  <Svg {...p}>
+    <path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10" /><path d="m16 16 6-6" /><path d="m8 8 6-6" />
+    <path d="m9 7 8 8" /><path d="m21 11-8-8" />
+  </Svg>
+);
