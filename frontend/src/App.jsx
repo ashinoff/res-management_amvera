@@ -352,9 +352,9 @@ function MainMenu({ activeSection, onSectionChange, user }) {
     { id: 'techblock', label: 'Решения техблока', icon: <IconGavel size={18} />, perm: SECTION_PERMS.techblock, badge: notificationCounts.techblock },
     { id: 'problem_vl', label: 'Проблемные ВЛ', icon: <IconAlertTriangle size={18} />, perm: SECTION_PERMS.problem_vl, badge: notificationCounts.problem_vl },
     { id: 'power_overload', label: 'Превышение Pном', icon: <IconZap size={18} />, perm: SECTION_PERMS.power_overload, badge: notificationCounts.powerOverload },
-    { id: 'power_analysis', label: 'Анализ мощности', icon: <IconChart size={18} />, perm: SECTION_PERMS.power_analysis },
-    { id: 'analytics', label: 'Анализ напряжения', icon: <IconChart size={18} />, perm: SECTION_PERMS.analytics },
-    { id: 'deep_analysis', label: 'Глубокий анализ работ', icon: <IconSearch size={18} />, perm: SECTION_PERMS.deep_analysis },
+    // «Анализ» — один пункт: напряжение, мощность, глубокий анализ — вкладками.
+    { id: 'analysis', label: 'Анализ', icon: <IconChart size={18} />, perm: ANALYSIS_TABS.map(t => t.perm),
+      sections: ANALYSIS_TABS.map(t => t.id) },
     { id: 'documents', label: 'Загруженные документы', icon: <IconFolder size={18} />, perm: SECTION_PERMS.documents },
     { id: 'history', label: 'История системы', icon: <IconClock size={18} />, perm: SECTION_PERMS.history },
     { id: 'reports', label: 'Отчёты', icon: <IconFileText size={18} />, perm: SECTION_PERMS.reports },
@@ -363,6 +363,24 @@ function MainMenu({ activeSection, onSectionChange, user }) {
   ];
 
   const visibleItems = menuItems.filter(item => item.perm.some(k => hasPerm(user, k)));
+
+  // Группы меню по смыслу — у каждой свой оттенок зелёного.
+  const MENU_GROUPS = [
+    { id: 'net', title: 'Сеть', items: ['dashboard', 'structure', 'upload'] },
+    { id: 'alerts', title: 'Уведомления', items: ['tech_pending', 'askue_pending', 'techblock', 'problem_vl', 'power_overload'] },
+    { id: 'analysis', title: 'Анализ', items: ['analysis'] },
+    { id: 'docs', title: 'Документы и отчёты', items: ['documents', 'reports', 'history'] },
+    { id: 'admin', title: 'Администрирование', items: ['settings', 'permissions'] },
+  ];
+  const openItem = (item) => {
+    if (item.sections) {
+      // «Анализ» — первая доступная вкладка (или та, где уже стоим).
+      const tab = ANALYSIS_TABS.find(t => t.id === activeSection && hasPerm(user, t.perm)) || ANALYSIS_TABS.find(t => hasPerm(user, t.perm));
+      if (tab) onSectionChange(tab.id);
+    } else onSectionChange(item.id);
+    setMenuOpen(false);
+  };
+  const isActive = (item) => (item.sections ? item.sections.includes(activeSection) : activeSection === item.id);
 
   // Суммарный индикатор внимания для кнопки-бургера (переиспользуем те же counts —
   // без второго поллинга): есть ли что-то требующее действия.
@@ -393,19 +411,28 @@ function MainMenu({ activeSection, onSectionChange, user }) {
           </div>
         </div>
       </div>
-      {visibleItems.map(item => (
-        <button
-          key={item.id}
-          onClick={() => { onSectionChange(item.id); setMenuOpen(false); }}
-          className={`menu-item ${activeSection === item.id ? 'active' : ''}`}
-        >
-          <span className="menu-ico">{item.icon}</span>
-          <span className="menu-label">{item.label}</span>
-          {item.badge > 0 && (
-            <span className="notification-badge">{item.badge > 99 ? '99+' : item.badge}</span>
-          )}
-        </button>
-      ))}
+      {MENU_GROUPS.map(g => {
+        const items = visibleItems.filter(i => g.items.includes(i.id));
+        if (!items.length) return null;
+        return (
+          <div key={g.id} className={`menu-group menu-group--${g.id}`}>
+            <span className="menu-group__title">{g.title}</span>
+            {items.map(item => (
+              <button
+                key={item.id}
+                onClick={() => openItem(item)}
+                className={`menu-item ${isActive(item) ? 'active' : ''}`}
+              >
+                <span className="menu-ico">{item.icon}</span>
+                <span className="menu-label">{item.label}</span>
+                {item.badge > 0 && (
+                  <span className="notification-badge">{item.badge > 99 ? '99+' : item.badge}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        );
+      })}
     </nav>
 
       {/* Плавающая кнопка-бургер — только до 1024px (скрыта на десктопе через CSS) */}
@@ -608,6 +635,7 @@ const IconStageRecheck = ({ size = 24 }) => (   // столбцы профиля
 // =====================================================
 
 function NetworkStructure({ onSectionChange } = {}) {
+  const openPu = usePuPanel();
   const [networkData, setNetworkData] = useState([]);
   const [techModal, setTechModal] = useState(null); // секция для «Сведения о техучёте»
   const [techCase, setTechCase] = useState(null);   // активный кейс секции (если есть)
@@ -848,6 +876,8 @@ function NetworkStructure({ onSectionChange } = {}) {
   const puNumber = position === 'start' ? item.startPu : 
                    position === 'middle' ? item.middlePu : 
                    item.endPu;
+  // Единая карточка ПУ (панель на весь экран) вместо модалки.
+  if (puNumber) { openPu(puNumber); return; }
   
   if (puNumber && item.PuStatuses) {
     const status = item.PuStatuses.find(s => 
@@ -2433,6 +2463,7 @@ for (let i = 0; i < files.length; i++) {
 // =====================================================
 
 function Notifications({ filterType, onSectionChange, selectedRes }) {
+  const openPu = usePuPanel();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedNotification, setSelectedNotification] = useState(null);
@@ -2935,8 +2966,7 @@ const loadNotifications = useCallback(async () => {
         if (notif.type === 'error' || notif.type === 'pending_askue') {
           try {
             const data = JSON.parse(notif.message);
-            setDetailsNotification({ ...notif, data });
-            setShowDetailsModal(true);
+            if (data.puNumber) openPu(data.puNumber);   // единая карточка ПУ
           } catch (e) { /* некорректный формат — игнорируем */ }
         } else if (notif.type === 'power_overload') {
           setDetailsNotification({ ...notif, data: notif.errorData || {} });
@@ -9450,6 +9480,7 @@ function ProblemBlock({ title, count, note, tone, children }) {
 const DA_DEFAULTS = { resId: '', dateFrom: '', dateTo: '', windowDays: 4, brigades: 3, perBrigade: 5, fastDays: 1 };
 
 function DeepWorkAnalysis() {
+  const openPu = usePuPanel();
   const [resList, setResList] = useState([]);
   const [settings, setSettings] = useState(() => {
     try {
@@ -9657,6 +9688,7 @@ function DeepWorkAnalysis() {
   // (ошибку по состоянию) + истории загрузок/проверок по номеру ПУ.
   const openPuState = async (rec) => {
     if (!rec || !rec.puNumber) return;
+    openPu(rec.puNumber); return;   // единая карточка ПУ
     setPuTab('current');
     setUploadHistory([]); setCheckHistory([]); setHistoryLoading(true);
     // Предварительно — из записи анализа (мгновенно), уточним статус запросом.
@@ -9962,6 +9994,270 @@ function DeepWorkAnalysis() {
           <IconArrowUp className="ico" />
         </button>
       )}
+    </div>
+  );
+}
+
+// ═══ Карточка ПУ — одно окно вместо россыпи модалок ═══════════════════════
+// Открывается из любого раздела: openPu(номер). Раздел плавно уходит влево,
+// справа выезжает панель на весь экран: слева — ПУ (состояние, открытое
+// уведомление, загрузки и проверки), справа — его ТП (секции и мощность,
+// данные АСКУЭ, все линии с ПУ, перегрузы, вопросы техблоку).
+const PuPanelCtx = createContext(() => {});
+const usePuPanel = () => useContext(PuPanelCtx);
+
+const PU_STATUS = {
+  checked_ok: { label: 'Норма', cls: 'ok' },
+  checked_error: { label: 'Ошибка', cls: 'error' },
+  pending_recheck: { label: 'Ждёт перепроверки АСКУЭ', cls: 'pending' },
+  not_checked: { label: 'Не проверялся', cls: 'none' },
+  empty: { label: 'ПУ не задан', cls: 'empty' },
+};
+const POS_RU = { start: 'Начало', middle: 'Середина', end: 'Конец' };
+const UPLOAD_RU = { success: 'Загружен', duplicate: 'Дубликат', wrong_period: 'Не тот период', error: 'Ошибка файла' };
+const CHECK_RU = { awaiting_work: 'Ждёт мероприятий', awaiting_recheck: 'Ждёт перепроверки', completed: 'Завершено' };
+const fmtDT = (d) => d ? new Date(d).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+const fmtD = (d) => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
+const phasesOf = (text) => ({ A: /Фаза\s*A|Фаза\s*А/i.test(text || ''), B: /Фаза\s*B|Фаза\s*В/i.test(text || ''), C: /Фаза\s*C|Фаза\s*С/i.test(text || '') });
+
+function PuPanel({ puNumber, onClose, onOpen, onSectionChange }) {
+  const { user } = useContext(AuthContext);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [tab, setTab] = useState('checks');
+  const [viewer, setViewer] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    setData(null); setError('');
+    api.get(`/api/pu-card/${encodeURIComponent(puNumber)}`)
+      .then(r => alive && setData(r.data))
+      .catch(e => alive && setError(e.response?.data?.error || 'Не удалось загрузить карточку ПУ'));
+    return () => { alive = false; };
+  }, [puNumber]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !viewer) onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, viewer]);
+
+  const go = (section) => { onClose(); onSectionChange?.(section); };
+  const st = data ? (PU_STATUS[data.pu.status] || PU_STATUS.not_checked) : null;
+  const ph = data ? phasesOf(data.pu.errorDetails || data.pu.openNotification?.errorDetails) : null;
+
+  return (
+    <div className="pu-panel" role="dialog" aria-label={`Карточка ПУ ${puNumber}`}>
+      <div className="pu-panel__scrim" onClick={onClose} />
+      <div className="pu-panel__sheet">
+        <header className="pu-panel__head">
+          <span className="pu-panel__icon"><IconMeter size={24} /></span>
+          <div className="pu-panel__title">
+            <h2>ПУ {puNumber}</h2>
+            {data && (
+              <p>{data.tp.resName} · {data.tp.name} · {data.line.lineType} {data.line.vlName} · {POS_RU[data.pu.position]}</p>
+            )}
+          </div>
+          {st && <span className={`pu-pill pu-pill--${st.cls}`}>{st.label}</span>}
+          <button type="button" className="ui-btn ui-btn--ghost pu-panel__close" onClick={onClose} title="Закрыть (Esc)" aria-label="Закрыть">
+            <IconX size={22} />
+          </button>
+        </header>
+
+        {error ? <div className="pu-panel__msg">{error}</div>
+          : !data ? <div className="pu-panel__msg"><RossetiLoader /></div>
+          : (
+            <div className="pu-panel__body">
+              {/* ── Левая часть: сам ПУ ── */}
+              <section className="pu-col">
+                <div className="ui-card pu-state">
+                  <div className="pu-phases">
+                    {['A', 'B', 'C'].map(f => (
+                      <span key={f} className={`pu-phase ${data.pu.status === 'checked_error' && ph[f] ? 'is-bad' : data.pu.status === 'checked_ok' ? 'is-ok' : ''}`}>{f}</span>
+                    ))}
+                  </div>
+                  <div className="pu-state__text">
+                    {data.pu.status === 'checked_error' ? (
+                      <><b>Обнаружены отклонения</b><p>{data.pu.errorDetails || 'Подробности не сохранены'}</p></>
+                    ) : data.pu.status === 'checked_ok' ? (
+                      <><b>Проверен без отклонений</b><p>Последний съём не показал ошибок по фазам.</p></>
+                    ) : data.pu.status === 'pending_recheck' ? (
+                      <><b>РЭС отработал — ждём съём</b><p>АСКУЭ нужно загрузить журнал за период после мероприятий.</p></>
+                    ) : (
+                      <><b>Ещё не проверялся</b><p>По этому ПУ пока не загружали журналы.</p></>
+                    )}
+                    <span className="muted">Последняя проверка: {fmtDT(data.pu.lastCheck)}</span>
+                  </div>
+                </div>
+
+                {data.pu.openNotification && (
+                  <div className={`ui-card pu-open pu-open--${data.pu.openNotification.type}`}>
+                    <div>
+                      <b>{data.pu.openNotification.type === 'error' ? 'Ждёт мероприятий РЭС' : 'Ждёт проверки АСКУЭ'}</b>
+                      <span className="muted"> · с {fmtD(data.pu.openNotification.firstReportDate || data.pu.openNotification.createdAt)}
+                        {data.pu.openNotification.repeatCount > 1 ? ` · повтор ×${data.pu.openNotification.repeatCount}` : ''}</span>
+                      {data.pu.openNotification.completedComment && <p>РЭС: «{data.pu.openNotification.completedComment}»</p>}
+                    </div>
+                    <button type="button" className="ui-btn" onClick={() => go(data.pu.openNotification.type === 'error' ? 'tech_pending' : 'askue_pending')}>
+                      К уведомлению <IconArrowRight size={16} />
+                    </button>
+                  </div>
+                )}
+
+                <div className="ui-card pu-history">
+                  <div className="ui-tabs">
+                    <button type="button" className={`ui-tab ${tab === 'checks' ? 'is-on' : ''}`} onClick={() => setTab('checks')}>Проверки и мероприятия · {data.checks.length}</button>
+                    <button type="button" className={`ui-tab ${tab === 'uploads' ? 'is-on' : ''}`} onClick={() => setTab('uploads')}>Загрузки · {data.uploads.length}</button>
+                  </div>
+                  {tab === 'checks' ? (
+                    !data.checks.length ? <p className="muted">Мероприятий по этому ПУ ещё не было.</p> : (
+                      <ol className="pu-timeline">
+                        {data.checks.map(c => (
+                          <li key={c.id}>
+                            <div className="pu-timeline__row is-bad"><b>Ошибка</b><span className="muted">{fmtD(c.initialCheckDate)}</span><p>{c.initialError}</p></div>
+                            {c.workCompletedDate && (
+                              <div className="pu-timeline__row is-work"><b>Мероприятия РЭС</b><span className="muted">{fmtD(c.workCompletedDate)}{c.failureCount > 1 ? ` · после ${c.failureCount} съёмов` : ''}</span>
+                                <p>{c.resComment}</p>
+                                {c.attachments.length > 0 && (
+                                  <span className="pu-files">{c.attachments.map((f, i) => (
+                                    <button key={i} type="button" className="ui-link" onClick={() => setViewer({ files: c.attachments, index: i })}>
+                                      <IconPaperclip size={14} /> {f.original_name || `файл ${i + 1}`}
+                                    </button>
+                                  ))}</span>
+                                )}
+                              </div>
+                            )}
+                            {c.recheckDate && (
+                              <div className={`pu-timeline__row ${c.recheckResult === 'ok' ? 'is-ok' : 'is-bad'}`}>
+                                <b>{c.recheckResult === 'ok' ? 'Перепроверка: устранено' : 'Перепроверка: ошибка осталась'}</b><span className="muted">{fmtD(c.recheckDate)}</span>
+                              </div>
+                            )}
+                            <span className="pu-timeline__status">{CHECK_RU[c.status] || c.status}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    )
+                  ) : (
+                    !data.uploads.length ? <p className="muted">Журналы по этому ПУ не загружали.</p> : (
+                      <table className="ui-table">
+                        <thead><tr><th>Дата</th><th>Кто</th><th>Файл</th><th>Итог</th></tr></thead>
+                        <tbody>{data.uploads.map(u => (
+                          <tr key={u.id}>
+                            <td>{fmtDT(u.at)}</td><td>{u.by || '—'}</td><td className="pu-file-cell">{u.fileName}</td>
+                            <td>{u.status !== 'success' ? UPLOAD_RU[u.status] || u.status
+                              : u.hasErrors ? <span className="pu-bad" title={u.errorSummary || ''}>ошибка</span> : <span className="pu-ok">норма</span>}</td>
+                          </tr>
+                        ))}</tbody>
+                      </table>
+                    )
+                  )}
+                </div>
+              </section>
+
+              {/* ── Правая часть: ТП ── */}
+              <section className="pu-col">
+                <div className="pu-col__title">
+                  <h3>{data.tp.name}</h3>
+                  <span className="muted">{data.tp.resName} · {data.tp.lines.length} {data.tp.lines.length === 1 ? 'линия' : 'линий'}</span>
+                </div>
+
+                {data.tp.sections.length > 0 && (
+                  <div className="pu-sections">
+                    {data.tp.sections.map(s => {
+                      const pct = s.loadPct;
+                      const tone = pct == null ? 'none' : pct > 100 ? 'bad' : pct >= 85 ? 'warn' : 'ok';
+                      return (
+                        <div key={s.id} className={`ui-card pu-section ${s.id === data.line.sectionId ? 'is-mine' : ''}`}>
+                          <div className="pu-section__head">
+                            <b>СШ-{toRoman(s.number)}</b>
+                            <span className="muted">{s.tnKva ? `${s.tnKva} кВА` : 'Sном не задан'}{s.techPuNumber ? ` · тех.учёт ${s.techPuNumber}` : ''}</span>
+                          </div>
+                          <div className="pu-load">
+                            <span className={`pu-load__bar pu-load__bar--${tone}`}><i style={{ width: `${Math.min(100, pct || 0)}%` }} /></span>
+                            <span className="pu-load__val">{pct == null ? 'нет данных' : `${pct}%`}</span>
+                          </div>
+                          <dl className="pu-facts">
+                            <div><dt>Пик</dt><dd>{s.lastPeakKw != null ? `${Math.round(s.lastPeakKw * 10) / 10} кВт` : '—'}{s.lastPeakAt ? ` · ${fmtD(s.lastPeakAt)}` : ''}</dd></div>
+                            <div><dt>Лимит</dt><dd>{s.limitKw != null ? `${s.limitKw} кВт` : '—'}</dd></div>
+                            {s.askue && <div><dt>Абоненты</dt><dd>{s.askue.consumers} шт</dd></div>}
+                            {s.askue && <div><dt>Мощность</dt><dd>опрашиваемые {s.askue.limitedKw} · без опроса {s.askue.unpolledKw} · всего {s.askue.totalKw} кВт</dd></div>}
+                          </dl>
+                          {s.overload && (
+                            <button type="button" className="pu-flag pu-flag--bad" onClick={() => go('power_overload')}>
+                              <IconZap size={14} /> Перегруз в работе · цикл {s.overload.cycles}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="ui-card ui-card--flush">
+                  <table className="ui-table pu-lines">
+                    <thead><tr><th>Линия</th><th>Начало</th><th>Середина</th><th>Конец</th></tr></thead>
+                    <tbody>{data.tp.lines.map(l => (
+                      <tr key={l.id} className={l.id === data.line.id ? 'is-mine' : ''}>
+                        <td>
+                          <b>{l.lineType} {l.vlName}</b>
+                          {l.escalated && <span className="pu-flag pu-flag--tech">у техблока</span>}
+                          {l.problem && !l.escalated && <span className="pu-flag pu-flag--bad">проблемная</span>}
+                        </td>
+                        {l.pus.map(p => (
+                          <td key={p.position}>
+                            {p.puNumber ? (
+                              <button type="button" className={`pu-chip pu-chip--${(PU_STATUS[p.status] || PU_STATUS.not_checked).cls} ${p.puNumber === puNumber ? 'is-current' : ''}`}
+                                onClick={() => p.puNumber !== puNumber && onOpen(p.puNumber)} title={(PU_STATUS[p.status] || PU_STATUS.not_checked).label}>
+                                {p.puNumber}
+                              </button>
+                            ) : <span className="muted">—</span>}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+
+                {data.tp.escalations.length > 0 && (
+                  <div className="ui-card pu-esc">
+                    <b>Вопросы техблоку по этой ТП</b>
+                    {data.tp.escalations.map(e => (
+                      <div key={e.id} className="pu-esc__item">
+                        <span className={`pu-flag ${e.status === 'open' ? 'pu-flag--tech' : 'pu-flag--ok'}`}>{e.status === 'open' ? 'ждёт решения' : 'решено'}</span>
+                        <span>{e.vlName} · ПУ {e.puNumber} · {fmtD(e.createdAt)}</span>
+                        <p>{e.status === 'open' ? e.description : `Решение: ${e.decision}`}</p>
+                      </div>
+                    ))}
+                    {hasPerm(user, 'techblock_view') && <button type="button" className="ui-link" onClick={() => go('techblock')}>Открыть «Решения техблока»</button>}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+      </div>
+      {viewer && (
+        <FileViewer files={viewer.files} currentIndex={viewer.index} onClose={() => setViewer(null)}
+          onNext={() => setViewer(v => ({ ...v, index: (v.index + 1) % v.files.length }))}
+          onPrev={() => setViewer(v => ({ ...v, index: (v.index - 1 + v.files.length) % v.files.length }))} />
+      )}
+    </div>
+  );
+}
+
+// «Анализ» — один пункт меню, вкладки: напряжение, мощность, глубокий анализ.
+const ANALYSIS_TABS = [
+  { id: 'analytics', label: 'Напряжение', perm: 'voltage_analysis_view' },
+  { id: 'power_analysis', label: 'Мощность', perm: 'power_analysis_view' },
+  { id: 'deep_analysis', label: 'Глубокий анализ работ', perm: 'deep_analysis_view' },
+];
+function AnalysisTabs({ active, onSectionChange }) {
+  const { user } = useContext(AuthContext);
+  const tabs = ANALYSIS_TABS.filter(t => hasPerm(user, t.perm));
+  if (tabs.length < 2) return null;
+  return (
+    <div className="ui-tabs analysis-tabs">
+      {tabs.map(t => (
+        <button key={t.id} type="button" className={`ui-tab ${active === t.id ? 'is-on' : ''}`} onClick={() => onSectionChange(t.id)}>{t.label}</button>
+      ))}
     </div>
   );
 }
@@ -10295,6 +10591,10 @@ export default function App() {
   const [activeSection, setActiveSection] = useState('dashboard');
   const [selectedRes, setSelectedRes] = useState(null);
   const [resList, setResList] = useState([]);
+  // Карточка ПУ (панель на весь экран) — открывается из любого раздела.
+  const [puOpen, setPuOpen] = useState(null);
+  const openPu = useCallback((n) => setPuOpen(String(n)), []);
+  const closePu = useCallback(() => setPuOpen(null), []);
 
   // Оптимизированная проверка токена
   useEffect(() => {
@@ -10496,7 +10796,7 @@ const renderContent = () => {
     case 'power_overload':
       return <PowerOverload selectedRes={selectedRes} />;
     case 'power_analysis':
-      return <PowerAnalysis selectedRes={selectedRes} />;
+      return <><AnalysisTabs active="power_analysis" onSectionChange={setActiveSection} /><PowerAnalysis selectedRes={selectedRes} /></>;
     case 'documents':
       return <UploadedDocuments />;
     case 'reports':
@@ -10508,9 +10808,9 @@ const renderContent = () => {
     case 'history':
       return <SystemHistory />;
     case 'analytics':
-      return <Analytics />;
+      return <><AnalysisTabs active="analytics" onSectionChange={setActiveSection} /><Analytics /></>;
     case 'deep_analysis':
-      return <DeepWorkAnalysis />;
+      return <><AnalysisTabs active="deep_analysis" onSectionChange={setActiveSection} /><DeepWorkAnalysis /></>;
     default:
       return <NetworkStructure />;
   }
@@ -10518,8 +10818,9 @@ const renderContent = () => {
 
   return (
     <AuthContext.Provider value={{ user, selectedRes }}>
+      <PuPanelCtx.Provider value={openPu}>
       <ModalDockProvider>
-      <div className="app">
+      <div className={`app ${puOpen ? 'pu-open' : ''}`}>
         <MainMenu
           activeSection={activeSection}
           onSectionChange={setActiveSection}
@@ -10560,7 +10861,9 @@ const renderContent = () => {
           </main>
         </div>
       </div>
+      {puOpen && <PuPanel puNumber={puOpen} onClose={closePu} onOpen={openPu} onSectionChange={setActiveSection} />}
       </ModalDockProvider>
+      </PuPanelCtx.Provider>
     </AuthContext.Provider>
   );
 }

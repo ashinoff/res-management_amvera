@@ -3080,6 +3080,110 @@ app.get('/api/dashboard', authenticateToken, requirePerm('dashboard_view'), asyn
   }
 });
 
+// =====================================================
+// КАРТОЧКА ПУ (единое окно вместо россыпи модалок)
+// =====================================================
+// Всё о ПУ и его ТП одним запросом: состояние ПУ, открытое уведомление, история
+// загрузок и проверок; по ТП — секции (Sном, пик, данные АСКУЭ), все линии с ПУ и
+// статусами, активные перегрузы, проблемные ВЛ и вопросы техблоку. Область — по
+// должности: «свой РЭС» видит только свой.
+app.get('/api/pu-card/:puNumber', authenticateToken, async (req, res) => {
+  try {
+    const puNumber = String(req.params.puNumber || '').trim();
+    if (!puNumber) return res.status(400).json({ error: 'Не указан номер ПУ' });
+
+    const line = await NetworkStructure.findOne({
+      where: { [Op.or]: [{ startPu: puNumber }, { middlePu: puNumber }, { endPu: puNumber }] },
+      include: [{ model: ResUnit, attributes: ['id', 'name'] }],
+    });
+    if (!line) return res.status(404).json({ error: `ПУ ${puNumber} нет в структуре сети` });
+    if (!req.user.allRes && line.resId !== req.user.resId) return res.status(403).json({ error: 'ПУ другого РЭС' });
+    const position = line.startPu === puNumber ? 'start' : line.middlePu === puNumber ? 'middle' : 'end';
+
+    const tpLines = await NetworkStructure.findAll({
+      where: { resId: line.resId, tpName: line.tpName },
+      attributes: ['id', 'vlName', 'lineType', 'sectionId', 'startPu', 'middlePu', 'endPu'],
+      order: [['vlName', 'ASC']],
+    });
+    const lineIds = tpLines.map(l => l.id);
+    const allPus = tpLines.flatMap(l => [l.startPu, l.middlePu, l.endPu]).filter(Boolean);
+
+    const [statuses, sections, uploads, checks, notif, problems, escalations] = await Promise.all([
+      PuStatus.findAll({ where: { puNumber: { [Op.in]: allPus } }, attributes: ['puNumber', 'position', 'status', 'errorDetails', 'lastCheck'], raw: true }),
+      TpSection.findAll({ where: { resId: line.resId, tpName: line.tpName }, order: [['sectionNumber', 'ASC']] }),
+      PuUploadHistory.findAll({ where: { puNumber }, include: [{ model: User, attributes: ['fio'] }], order: [['uploadedAt', 'DESC']], limit: 30 }),
+      CheckHistory.findAll({ where: { puNumber }, order: [['createdAt', 'DESC']], limit: 30 }),
+      Notification.findOne({
+        where: { type: { [Op.in]: ['error', 'pending_askue'] }, resId: line.resId, message: { [Op.like]: `%"puNumber":"${puNumber.replace(/["%_\\]/g, '')}"%` } },
+        order: [['createdAt', 'DESC']],
+      }),
+      ProblemVL.findAll({ where: { networkStructureId: { [Op.in]: lineIds }, status: 'active' }, raw: true }),
+      Escalation.findAll({ where: { networkStructureId: { [Op.in]: lineIds } }, order: [['createdAt', 'DESC']], limit: 10, raw: true }),
+    ]);
+    const sectionIds = sections.map(s => s.id);
+    const overloads = sectionIds.length
+      ? await OverloadCase.findAll({ where: { sectionId: { [Op.in]: sectionIds }, stage: { [Op.ne]: 'completed' } }, raw: true })
+      : [];
+
+    const statusOf = (pu) => statuses.find(s => s.puNumber === pu) || null;
+    const summary = (txt) => { try { const p = JSON.parse(txt); return p.summary || txt; } catch { return txt; } };
+    const me = statusOf(puNumber);
+    let open = null;
+    if (notif) { try { open = { id: notif.id, type: notif.type, createdAt: notif.createdAt, ...JSON.parse(notif.message) }; } catch { open = null; } }
+
+    res.json({
+      pu: {
+        puNumber, position,
+        status: me?.status || 'not_checked',
+        errorDetails: me?.errorDetails ? summary(me.errorDetails) : null,
+        lastCheck: me?.lastCheck || null,
+        openNotification: open,
+      },
+      line: { id: line.id, vlName: line.vlName, lineType: line.lineType, sectionId: line.sectionId },
+      tp: {
+        name: line.tpName, resId: line.resId, resName: line.ResUnit?.name || '',
+        sections: sections.map(s => {
+          const limitKw = s.tnKva ? Math.round(s.tnKva * (s.cosPhi || 0.9) * 10) / 10 : null;
+          return {
+            id: s.id, number: s.sectionNumber, tnKva: s.tnKva, cosPhi: s.cosPhi, limitKw,
+            techPuNumber: s.techPuNumber, overloadStatus: s.overloadStatus,
+            lastPeakKw: s.lastPeakKw, lastPeakAt: s.lastPeakAt,
+            loadPct: limitKw && s.lastPeakKw ? Math.round((s.lastPeakKw / limitKw) * 100) : null,
+            askue: s.askueData || null,
+            overload: overloads.find(o => o.sectionId === s.id) || null,
+          };
+        }),
+        lines: tpLines.map(l => ({
+          id: l.id, vlName: l.vlName, lineType: l.lineType, sectionId: l.sectionId,
+          problem: problems.some(p => p.networkStructureId === l.id),
+          escalated: escalations.some(e => e.networkStructureId === l.id && e.status === 'open'),
+          pus: ['start', 'middle', 'end'].map(pos => {
+            const n = l[`${pos}Pu`];
+            return { position: pos, puNumber: n || null, status: n ? (statusOf(n)?.status || 'not_checked') : 'empty' };
+          }),
+        })),
+        escalations: escalations.map(e => ({
+          id: e.id, vlName: e.vlName, puNumber: e.puNumber, status: e.status, description: e.description,
+          decision: e.decision, createdAt: e.createdAt, closedAt: e.closedAt,
+        })),
+      },
+      uploads: uploads.map(u => ({
+        id: u.id, at: u.uploadedAt || u.createdAt, by: u.User?.fio || null, fileName: u.fileName, fileType: u.fileType,
+        status: u.uploadStatus, hasErrors: u.hasErrors, errorSummary: u.errorSummary,
+        period: u.periodStart ? [u.periodStart, u.periodEnd] : null,
+      })),
+      checks: checks.map(c => ({
+        id: c.id, initialCheckDate: c.initialCheckDate, initialError: c.initialError, resComment: c.resComment,
+        workCompletedDate: c.workCompletedDate, recheckDate: c.recheckDate, recheckResult: c.recheckResult,
+        status: c.status, failureCount: c.failureCount, attachments: c.attachments || [],
+      })),
+    });
+  } catch (error) {
+    console.error('pu-card error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // 9. ОЧИСТКА ВСЕХ ДАННЫХ
 app.delete('/api/network/clear-all',
   authenticateToken,
