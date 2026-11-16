@@ -3017,7 +3017,22 @@ app.get('/api/dashboard', authenticateToken, requirePerm('dashboard_view'), asyn
     const rf = (col) => (resId ? `AND ${col} = :resId` : '');
     const q = (sql) => sequelize.query(sql, { replacements: { resId }, type: Sequelize.QueryTypes.SELECT });
 
-    const [byRes, weekly, escalationsByWeek, counts] = await Promise.all([
+    // Линия «с ошибкой», если хоть один её ПУ с ошибкой; «на перепроверке» — если
+    // ошибок нет, но есть ПУ после мероприятий; «в норме» — все ПУ проверены и ок.
+    const linesByRes = q(`WITH ls AS (
+         SELECT ns.id, ns."resId",
+                bool_or(ps.status = 'checked_error') AS e, bool_or(ps.status = 'pending_recheck') AS p,
+                COUNT(ps.id) AS n, bool_and(ps.status = 'checked_ok') AS okall
+         FROM "NetworkStructures" ns LEFT JOIN "PuStatuses" ps ON ps."networkStructureId" = ns.id
+         WHERE TRUE ${rf('ns."resId"')}
+         GROUP BY ns.id, ns."resId")
+       SELECT "resId" AS id,
+              COUNT(*)::int AS lines,
+              COUNT(*) FILTER (WHERE e)::int AS error,
+              COUNT(*) FILTER (WHERE NOT COALESCE(e, false) AND p)::int AS pending,
+              COUNT(*) FILTER (WHERE NOT COALESCE(e, false) AND NOT COALESCE(p, false) AND n > 0 AND okall)::int AS ok
+       FROM ls GROUP BY "resId"`);
+    const [byRes, weekly, escalationsByWeek, counts, lineRows] = await Promise.all([
       q(`SELECT r.id, r.name,
             COUNT(DISTINCT ns."tpName")::int AS tp,
             COUNT(DISTINCT ns.id)::int AS vl,
@@ -3057,10 +3072,19 @@ app.get('/api/dashboard', authenticateToken, requirePerm('dashboard_view'), asyn
                 COUNT(*) FILTER (WHERE status = 'closed' AND "closedAt" >= now() - interval '30 days')::int AS closed30
          FROM "Escalations" WHERE TRUE ${rf('"resId"')}`),
       getNotificationCountsCached(req.user),
+      linesByRes,
     ]);
+    for (const r of byRes) {
+      const l = lineRows.find(x => x.id === r.id) || { lines: 0, ok: 0, error: 0, pending: 0 };
+      r.lines = { total: l.lines, ok: l.ok, error: l.error, pending: l.pending, unchecked: l.lines - l.ok - l.error - l.pending };
+    }
 
     const totals = byRes.reduce((t, r) => {
       for (const k of ['tp', 'vl', 'pu', 'ok', 'error', 'pending', 'unchecked']) t[k] = (t[k] || 0) + r[k];
+      return t;
+    }, {});
+    totals.lines = byRes.reduce((t, r) => {
+      for (const k of ['total', 'ok', 'error', 'pending', 'unchecked']) t[k] = (t[k] || 0) + r.lines[k];
       return t;
     }, {});
     res.json({

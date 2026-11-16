@@ -8670,3 +8670,166 @@ button.pu-flag { cursor: pointer; margin-left: 0; justify-self: start; padding: 
   .dash-status__body { justify-content: center; }
   .page-header-actions { width: 100%; }
 }
+
+/* =====================================================================
+   ЕДИНЫЕ КНОПКИ И ПОДЛОЖКИ (2026-11): палитра меню, срезанные углы
+   ---------------------------------------------------------------------
+   Срез — clip-path (левый верхний и правый нижний углы). Правила через
+   #root / .pu-panel перекрывают старые разрозненные стили кнопок.
+   ===================================================================== */
+:root {
+  --cut: 8px;
+  --cut-sm: 6px;
+  --btn-main: #2b6b63;   --btn-main-h: #235a53;
+  --btn-soft: #e2efeb;   --btn-soft-h: #d2e6e0;   --btn-soft-ink: #1f4a46;
+  --btn-green: #dcefe2;  --btn-green-h: #cbe6d3;  --btn-green-ink: #2c6046;
+  --btn-warn: #f6ead0;   --btn-warn-h: #efdcb4;   --btn-warn-ink: #7a520c;
+  --btn-bad: #f8e3e1;    --btn-bad-h: #f2cfcb;    --btn-bad-ink: #a83631;
+}
+.cut { clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
+
+/* Текстовые кнопки: базовый вид — мягкая мята */
+#root :is(.ui-btn, .primary-btn, .confirm-btn, .cancel-btn, .action-btn, .secondary-btn, .pm-btn, .export-btn,
+  .danger-btn, .delete-selected-btn, .btn-check-db, .fu-submit-btn, .fu-pick-btn, .upload-submit, .btn-default,
+  .btn-complete-green, .btn-upload-orange, .btn-mass-fix, .btn-mass-fix-confirm, .btn-manual-fix, .btn-diagnose,
+  .btn-download-pdf, .btn-view-files, .btn-view-problem, .btn-danger-modern, .btn-cancel-modern, .btn-cleanup,
+  .clear-history-btn, .clear-filters-btn, .attach-btn, .section-add-btn, .da-view-btn, .link-btn, .doc-view-btn, .po-del-btn),
+.pu-panel :is(.ui-btn), .fv .ui-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 42px; padding: 0 18px; border: 0 !important; border-radius: 0 !important;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  background: var(--btn-soft) !important; color: var(--btn-soft-ink) !important;
+  font-size: 14.5px; font-weight: 650; letter-spacing: 0; text-decoration: none; box-shadow: none !important;
+  cursor: pointer; transform: none !important; transition: background-color .15s ease, color .15s ease;
+}
+#root :is(.ui-btn, .cancel-btn, .action-btn, .secondary-btn, .pm-btn, .fu-pick-btn, .btn-check-db, .btn-mass-fix,
+  .btn-manual-fix, .btn-diagnose, .btn-download-pdf, .btn-view-files, .btn-view-problem, .btn-cancel-modern,
+  .clear-filters-btn, .attach-btn, .section-add-btn, .da-view-btn, .link-btn, .doc-view-btn):hover:not(:disabled),
+.pu-panel .ui-btn:hover:not(:disabled), .fv .ui-btn:hover { background: var(--btn-soft-h) !important; }
+
+/* Главное действие — тёмная бирюза */
+#root :is(.ui-btn--primary, .primary-btn, .confirm-btn, .fu-submit-btn, .upload-submit, .btn-default,
+  .btn-complete-green, .btn-mass-fix-confirm, .doc-view-btn.active) {
+  background: var(--btn-main) !important; color: #fff !important;
+}
+#root :is(.ui-btn--primary, .primary-btn, .confirm-btn, .fu-submit-btn, .upload-submit, .btn-default,
+  .btn-complete-green, .btn-mass-fix-confirm):hover:not(:disabled) { background: var(--btn-main-h) !important; }
+
+/* Выгрузка в Excel — мягкая зелень */
+#root :is(.pm-btn--excel, .export-btn) { background: var(--btn-green) !important; color: var(--btn-green-ink) !important; }
+#root :is(.pm-btn--excel, .export-btn):hover:not(:disabled) { background: var(--btn-green-h) !important; }
+
+/* Внимание — мягкая охра */
+#root :is(.btn-upload-orange, .clear-history-btn) { background: var(--btn-warn) !important; color: var(--btn-warn-ink) !important; }
+#root :is(.btn-upload-orange, .clear-history-btn):hover:not(:disabled) { background: var(--btn-warn-h) !important; }
+
+/* Удаление — мягкий красный */
+#root :is(.danger-btn, .delete-selected-btn, .btn-danger-modern, .btn-cleanup, .po-del-btn) {
+  background: var(--btn-bad) !important; color: var(--btn-bad-ink) !important;
+}
+#root :is(.danger-btn, .delete-selected-btn, .btn-danger-modern, .btn-cleanup, .po-del-btn):hover:not(:disabled) { background: var(--btn-bad-h) !important; }
+
+/* Прозрачные и «мягкие на цветном» */
+#root .ui-btn--ghost, .pu-panel .ui-btn--ghost { background: transparent !important; }
+#root .ui-btn--ghost:hover:not(:disabled), .pu-panel .ui-btn--ghost:hover:not(:disabled) { background: var(--btn-soft) !important; }
+.pu-panel .ui-btn--soft { background: rgba(255,255,255,.9) !important; }
+#root :is(.ui-btn, .primary-btn, .confirm-btn, .cancel-btn, .action-btn, .danger-btn, .pm-btn, .export-btn, .delete-selected-btn):disabled {
+  opacity: .45; cursor: default;
+}
+#root .ui-btn svg, #root .pm-btn svg, #root .export-btn svg { color: currentColor; filter: none; }
+#root .ui-btn .ico, #root .pm-btn .ico, #root .export-btn .ico { color: currentColor !important; filter: none !important; }
+
+/* Кнопки-значки (просмотр, удалить, правка) — 40px, срезанные углы */
+#root :is(.btn-view, .btn-icon), .pu-panel :is(.btn-view, .btn-icon) {
+  width: 40px; height: 40px; min-height: 0; padding: 0; border: 0 !important; border-radius: 0 !important;
+  clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+  display: inline-grid; place-items: center; background: var(--btn-soft) !important; color: var(--btn-soft-ink) !important;
+  box-shadow: none !important; transition: background-color .15s ease;
+}
+#root .btn-view:hover, #root .btn-icon:hover:not(:disabled) { background: var(--btn-soft-h) !important; }
+#root .btn-icon.danger { background: var(--btn-bad) !important; color: var(--btn-bad-ink) !important; }
+#root .btn-icon.danger:hover:not(:disabled) { background: var(--btn-bad-h) !important; }
+#root :is(.btn-view, .btn-icon) svg { width: 19px; height: 19px; }
+
+/* Плавающие круглые кнопки структуры — в палитру */
+#root .fab-btn { background: var(--btn-main) !important; color: #fff !important; box-shadow: 0 8px 22px rgba(20,24,31,.22) !important; }
+#root .fab-btn.fab-green { background: #3f8a6a !important; }
+#root .fab-btn.fab-blue { background: #2f7480 !important; }
+#root .fab-btn.fab-warn { background: #b07d1f !important; }
+#root .fab-btn.fab-danger { background: #b9433d !important; }
+#root .fab-btn svg { filter: none !important; }
+
+/* ── Подложки: статусы, должности, вкладки, чипы — срезанные углы ── */
+.status-badge, .role-badge, .pu-pill, .ui-chip, .ui-tab, .dash-chip, .pu-flag, .pu-timeline__status, .user-role, .tech-pill {
+  border-radius: 0 !important;
+  clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+}
+.ui-tabs { border-radius: 0; clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
+.ui-tab.is-on { box-shadow: none; }
+
+/* Документы: статус шире, цвета интерьера, текст тёмный */
+.status-badge { min-width: 140px; height: 30px; padding: 0 16px; font-weight: 650; color: var(--text) !important; }
+.status-badge.status-completed { background: #d9ede0 !important; }
+.status-badge.status-awaiting_recheck, .status-badge.status-awaiting_work, .status-badge.status-pending { background: #f4e7c8 !important; }
+
+/* ── «Превышение Pном»: вкладки этапов в общем стиле ── */
+.po-tabs {
+  display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; margin-bottom: 18px;
+  background: color-mix(in srgb, var(--tint) 45%, #fff);
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+.po-tab, .po-tab--rich {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 16px; border: 0 !important;
+  border-radius: 0 !important; background: transparent !important; color: var(--text-muted) !important;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+  clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+  transition: background-color .15s ease, color .15s ease;
+}
+.po-tab:hover { background: rgba(255,255,255,.55) !important; }
+.po-tab.active { background: var(--surface) !important; color: var(--text) !important; font-weight: 700; }
+.po-tab-ico, .po-tab--rich:hover .po-tab-ico { filter: none !important; }
+.po-tab-ico svg { width: 20px; height: 20px; }
+.po-tab-count {
+  min-width: 30px; height: 26px; padding: 0 8px; display: inline-grid; place-items: center;
+  font-size: 15px !important; font-weight: 800; font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, currentColor 14%, #fff);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+
+/* ── Структура: тип линии — тёмно-зелёное свечение, с ошибкой — тёмно-красное ── */
+.line-type-badge { color: #23614a !important; text-shadow: 0 0 3px rgba(35,97,74,.35) !important; }
+.line-type-badge.editable:hover { color: #1b4f3c !important; text-shadow: 0 0 4px rgba(35,97,74,.5) !important; }
+.line-type-badge.is-bad { color: #9b2b26 !important; text-shadow: 0 0 3px rgba(155,43,38,.4) !important; }
+.line-type-badge.is-bad.editable:hover { color: #7f211d !important; text-shadow: 0 0 4px rgba(155,43,38,.55) !important; }
+.section-badge { color: #2f6f6a !important; text-shadow: 0 0 3px rgba(47,111,106,.3) !important; }
+
+/* ── Карточка ПУ: медленнее въезд/уход, документы ── */
+.pu-panel__sheet { animation: pu-slide .5s var(--ease) backwards; }
+.pu-panel.is-leaving .pu-panel__sheet { animation: pu-slide-out .48s var(--ease) forwards; }
+@keyframes pu-slide-out { from { transform: translateX(0); } to { transform: translateX(100%); } }
+.pu-panel.is-leaving { pointer-events: none; }
+.pu-docs { display: grid; gap: 12px; }
+.pu-docs__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+.pu-doc {
+  display: grid; gap: 4px; padding: 0 0 8px; border: 0; background: var(--surface-2); cursor: pointer; text-align: left; overflow: hidden;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  transition: background-color .15s ease;
+}
+.pu-doc:hover { background: var(--btn-soft-h); }
+.pu-doc__img, .pu-doc .blob-img-fallback { width: 100%; height: 104px; object-fit: cover; display: grid; place-items: center; background: #e9eee9; }
+.pu-doc__file { height: 104px; display: grid; place-items: center; align-content: center; gap: 4px; font-size: 12px; font-weight: 800; color: var(--accent-strong); background: color-mix(in srgb, var(--tint) 40%, #fff); }
+.pu-doc__name { padding: 0 10px; font-size: 12.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pu-doc__date { padding: 0 10px; font-size: 12px; color: var(--text-muted); }
+
+/* «Лист» (подробности вместо модалки): тело листа */
+.sheet-panel .pu-panel__head h2 { font-size: 24px; }
+.sheet-body { flex: 1; overflow: auto; padding: 24px 32px 40px; }
+.sheet-body .modal-body { max-width: 1100px; padding: 0; }
+.sheet-body .modal-footer {
+  max-width: 1100px; margin-top: 22px; padding: 16px 0 0; background: transparent; border-top: 1px solid var(--border);
+  display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;
+}
+@media (max-width: 1100px) { .sheet-body { padding: 16px; } }
+#root .pu-panel__close, .pu-panel .pu-panel__close { width: 44px !important; min-width: 44px; height: 44px; padding: 0 !important; flex: none; }
+.pu-panel__close svg { width: 22px; height: 22px; flex: none; }
+.sheet-panel .tech-pill { flex: none; padding: 6px 14px; font-size: 14px; }

@@ -528,13 +528,14 @@ function ModalShell({ title, dockTitle, titleExtra, icon, onClose, onBackdrop, v
   const dock = useContext(ModalDockCtx);
   const id = useRef('m' + (++__modalSeq)).current;
   const isConfirm = variant === 'confirm';
+  const noDock = isConfirm || variant === 'sheet';   // «лист» в док не сворачивается
   const [minimized, setMinimized] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
   const chipTitle = dockTitle || (typeof title === 'string' ? title : 'Окно');
 
   const minimize = () => {
-    if (isConfirm || !dock) return;
+    if (noDock || !dock) return;
     setMinimized(true);
     dock.toDock(id, { id, title: chipTitle, icon });
     dock.clearActive(id);
@@ -542,7 +543,7 @@ function ModalShell({ title, dockTitle, titleExtra, icon, onClose, onBackdrop, v
 
   // Регистрация + политика «одно окно» (только обычные модалки, не confirm).
   useEffect(() => {
-    if (isConfirm || !dock) return;
+    if (noDock || !dock) return;
     dock.register(id, {
       minimize: () => { setMinimized(true); dock.toDock(id, { id, title: chipTitle, icon }); },
       restore: () => { setMinimized(false); dock.setActive(id); },
@@ -562,6 +563,27 @@ function ModalShell({ title, dockTitle, titleExtra, icon, onClose, onBackdrop, v
   }, [minimized]);
 
   if (minimized) return null;
+
+  // «Лист» — панель поверх раздела, как карточка ПУ (подробности вместо модалки).
+  if (variant === 'sheet') {
+    return (
+      <ModalShellCtx.Provider value={{ fullscreen: true }}>
+        <div className="pu-panel sheet-panel" role="dialog">
+          <div className="pu-panel__sheet">
+            <header className="pu-panel__head">
+              {icon && <span className="pu-panel__icon">{icon}</span>}
+              <div className="pu-panel__title"><h2>{title}</h2></div>
+              {titleExtra}
+              <button type="button" className="ui-btn ui-btn--ghost pu-panel__close" onClick={() => onCloseRef.current && onCloseRef.current()} title="Закрыть (Esc)" aria-label="Закрыть">
+                <IconX size={22} />
+              </button>
+            </header>
+            <div className={`sheet-body ${className ? `sheet-body--${className.split(' ')[0]}` : ''}`}>{children}</div>
+          </div>
+        </div>
+      </ModalShellCtx.Provider>
+    );
+  }
 
   const handleBackdrop = () => {
     if (onBackdrop === null) return;                  // явно отключено
@@ -1164,9 +1186,12 @@ const executeClearHistory = async () => {
     const secLabel = sec ? `СШ-${toRoman(sec.sectionNumber)}` : '—';
     const editable = canEditStructure;
     const onEdit = (e) => { e.stopPropagation(); if (editable) openLineEdit(item); };
+    // Свечение: тёмно-красное, если на линии есть ПУ с ошибкой, иначе тёмно-зелёное.
+    const lineBad = (item.PuStatuses || []).some(st => st.status === 'checked_error'
+      && [item.startPu, item.middlePu, item.endPu].includes(st.puNumber));
     return (
       <>
-        <span className={`line-type-badge${editable ? ' editable' : ''}`}
+        <span className={`line-type-badge${lineBad ? ' is-bad' : ''}${editable ? ' editable' : ''}`}
           title={editable ? 'Тип линии — двойной клик, чтобы изменить' : 'Тип линии'}
           onDoubleClick={onEdit}>{item.lineType || 'ВЛ'}</span>
         <span className={`section-badge${editable ? ' editable' : ''}`}
@@ -4434,7 +4459,7 @@ function PowerOverload({ selectedRes }) {
             title={<>{s.tpName} · СШ-{toRoman(s.sectionNumber)}</>}
             dockTitle={`${s.tpName} СШ-${toRoman(s.sectionNumber)}`}
             titleExtra={<span className={`tech-pill ${status.cls}`}>{status.t}</span>}
-            className="po-details-modal" icon={<IconZap size={16} />}
+            className="po-details-modal" icon={<IconZap size={22} />} variant="sheet"
             onClose={() => setDetailsCase(null)}
           >
               <div className="modal-body">
@@ -4644,7 +4669,7 @@ function ProblemTpModal({ tp, onClose, onViewFiles }) {
   const dt = (v) => v ? new Date(v).toLocaleString('ru-RU') : '—';
   return (
     <ModalShell title={`${tp.tpName} · СШ-${toRoman(tp.sectionNumber)} — история`}
-      icon={<IconAlertTriangle size={16} />} className="details-modal problem-tp-modal" onClose={onClose}>
+      icon={<IconAlertTriangle size={22} />} className="details-modal problem-tp-modal" variant="sheet" onClose={onClose}>
       <div className="modal-body">
         <div className="detail-section">
           <div className="detail-row"><strong>РЭС:</strong> {tp.resName}</div>
@@ -10015,7 +10040,7 @@ const fmtDT = (d) => d ? new Date(d).toLocaleString('ru-RU', { day: '2-digit', m
 const fmtD = (d) => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
 const phasesOf = (text) => ({ A: /Фаза\s*A|Фаза\s*А/i.test(text || ''), B: /Фаза\s*B|Фаза\s*В/i.test(text || ''), C: /Фаза\s*C|Фаза\s*С/i.test(text || '') });
 
-function PuPanel({ puNumber, onClose, onOpen, onSectionChange }) {
+function PuPanel({ puNumber, leaving, onClose, onOpen, onSectionChange }) {
   const { user } = useContext(AuthContext);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -10036,12 +10061,12 @@ function PuPanel({ puNumber, onClose, onOpen, onSectionChange }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, viewer]);
 
-  const go = (section) => { onClose(); onSectionChange?.(section); };
+  const go = (section) => onSectionChange?.(section);
   const st = data ? (PU_STATUS[data.pu.status] || PU_STATUS.not_checked) : null;
   const ph = data ? phasesOf(data.pu.errorDetails || data.pu.openNotification?.errorDetails) : null;
 
   return (
-    <div className="pu-panel" role="dialog" aria-label={`Карточка ПУ ${puNumber}`}>
+    <div className={`pu-panel ${leaving ? 'is-leaving' : ''}`} role="dialog" aria-label={`Карточка ПУ ${puNumber}`}>
       <div className="pu-panel__sheet">
         <header className="pu-panel__head">
           <span className="pu-panel__icon"><IconMeter size={24} /></span>
@@ -10230,6 +10255,31 @@ function PuPanel({ puNumber, onClose, onOpen, onSectionChange }) {
                   </table>
                 </div>
 
+                {(() => {
+                  // Документы и фото, которые РЭС прикладывал к мероприятиям по этому ПУ.
+                  const docs = data.checks.flatMap(c => (c.attachments || []).map(f => ({ ...f, at: c.workCompletedDate || c.initialCheckDate })));
+                  if (!docs.length) return null;
+                  return (
+                    <div className="ui-card pu-docs">
+                      <div className="pu-card-title"><span className="pu-card-title__icon"><IconFolder size={18} /></span><b>Документы и фото</b>
+                        <span className="muted">{docs.length} {docs.length === 1 ? 'файл' : docs.length < 5 ? 'файла' : 'файлов'}</span></div>
+                      <div className="pu-docs__grid">
+                        {docs.map((f, i) => {
+                          const isImg = /\.(jpe?g|png|gif|webp)$/i.test(f.url || f.original_name || '');
+                          return (
+                            <button key={i} type="button" className="pu-doc" onClick={() => setViewer({ files: docs, index: i })} title={f.original_name}>
+                              {isImg ? <BlobImage file={f} alt={f.original_name} className="pu-doc__img" />
+                                : <span className="pu-doc__file"><IconFileText size={28} />PDF</span>}
+                              <span className="pu-doc__name">{f.original_name || `файл ${i + 1}`}</span>
+                              <span className="pu-doc__date">{fmtD(f.at)}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {data.tp.escalations.length > 0 && (
                   <div className="ui-card pu-esc">
                     <div className="pu-card-title"><span className="pu-card-title__icon pu-card-title__icon--tech"><IconGavel size={18} /></span><b>Вопросы техблоку по этой ТП</b></div>
@@ -10277,11 +10327,12 @@ function AnalysisTabs({ active, onSectionChange }) {
 
 // ═══ «Сводка» — главная: что ждёт действия, состояние ПУ, динамика ═══════════
 // Данные — GET /api/dashboard (одним запросом, по области должности).
-const DASH_STATUS = [
-  { key: 'ok', label: 'Норма', cls: 'st-ok', color: '#2f8a57' },
+// Состояние линии: ошибка, если хоть один ПУ с ошибкой.
+const LINE_STATUS = [
+  { key: 'ok', label: 'В норме', cls: 'st-ok', color: '#2f8a57' },
   { key: 'pending', label: 'На перепроверке', cls: 'st-pending', color: '#c98a14' },
-  { key: 'error', label: 'Ошибка', cls: 'st-error', color: '#d64545' },
-  { key: 'unchecked', label: 'Не проверен', cls: 'st-none', color: '#c9c8c1' },
+  { key: 'error', label: 'С ошибкой', cls: 'st-error', color: '#d64545' },
+  { key: 'unchecked', label: 'Не проверены', cls: 'st-none', color: '#c9c8c1' },
 ];
 const fmtInt = (n) => Number(n || 0).toLocaleString('ru-RU');
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -10363,12 +10414,14 @@ function Dashboard({ selectedRes, onSectionChange }) {
   const weeksFound = data.weekly.map(x => x.found);
   const weeksClosed = data.weekly.map(x => x.closed);
   const resName = data.resId ? (data.byRes[0]?.name || '') : 'Все РЭС';
-  const okPct = pct(t.ok, t.pu);
-  const statusParts = DASH_STATUS.map(s => ({ label: s.label, value: t[s.key] || 0, color: s.color }));
-  const resRows = data.byRes.filter(r => r.pu > 0);
+  // Линия «с ошибкой», если хоть один её ПУ с ошибкой (считает сервер).
+  const L = t.lines || { total: 0, ok: 0, error: 0, pending: 0, unchecked: 0 };
+  const okPct = pct(L.ok, L.total);
+  const statusParts = LINE_STATUS.map(s => ({ label: s.label, value: L[s.key] || 0, color: s.color }));
+  const resRows = data.byRes.filter(r => r.lines && r.lines.total > 0);
 
   const heroes = [
-    { id: 'structure', tone: 'g1', title: 'ПУ в норме', value: `${fmtInt(t.ok)} из ${fmtInt(t.pu)}`, hint: 'по последним съёмам', ring: okPct },
+    { id: 'structure', tone: 'g1', title: 'Линии в норме', value: `${fmtInt(L.ok)} из ${fmtInt(L.total)}`, hint: `ПУ в норме: ${fmtInt(t.ok)} из ${fmtInt(t.pu)}`, ring: okPct },
     { id: 'tech_pending', tone: 'g2', title: 'Ждут мероприятий РЭС', value: fmtInt(w.techPending), hint: 'выявлено за 12 недель', bars: weeksFound, icon: <IconWrench size={22} /> },
     { id: 'askue_pending', tone: 'g3', title: 'Ждут проверки АСКУЭ', value: fmtInt(w.askuePending), hint: 'отработано РЭС за 12 недель', bars: weeksClosed, icon: <IconClipboard size={22} /> },
     { id: 'techblock', tone: 'g4', title: 'У техблока', value: fmtInt(w.techblock), hint: `решено за 30 дней: ${w.techblockClosed30}`, icon: <IconGavel size={22} /> },
@@ -10407,10 +10460,10 @@ function Dashboard({ selectedRes, onSectionChange }) {
       <div className="dash-row">
         <div className="ui-card dash-card dash-status">
           <div className="dash-card__head">
-            <h3>Состояние приборов учёта</h3>
-            <span className="muted">доля по последним съёмам</span>
+            <h3>Состояние линий</h3>
+            <span className="muted">линия с ошибкой — если хоть один её ПУ с ошибкой</span>
           </div>
-          {!t.pu ? <p className="muted dash-empty">Структура сети ещё не загружена.</p> : (
+          {!L.total ? <p className="muted dash-empty">Структура сети ещё не загружена.</p> : (
             <div className="dash-status__body">
               <Donut parts={statusParts} size={200} stroke={26} onTip={setTip}
                 center={<>
@@ -10418,12 +10471,12 @@ function Dashboard({ selectedRes, onSectionChange }) {
                   <text x="50%" y="60%" textAnchor="middle" className="donut__small">в норме</text>
                 </>} />
               <ul className="dash-status__legend">
-                {DASH_STATUS.map(s => (
+                {LINE_STATUS.map(s => (
                   <li key={s.key}>
                     <i className={`dash-swatch ${s.cls}`} />
                     <span>{s.label}</span>
-                    <b>{fmtInt(t[s.key])}</b>
-                    <em>{pct(t[s.key], t.pu)}%</em>
+                    <b>{fmtInt(L[s.key])}</b>
+                    <em>{pct(L[s.key], L.total)}%</em>
                   </li>
                 ))}
               </ul>
@@ -10445,15 +10498,15 @@ function Dashboard({ selectedRes, onSectionChange }) {
           <div className="dash-card__head dash-card__head--row">
             <div>
               <h3>По РЭС</h3>
-              <span className="muted">кольцо — состояние ПУ, в центре доля в норме</span>
+              <span className="muted">кольцо — состояние линий, в центре доля линий в норме</span>
             </div>
             <button type="button" className="ui-link" onClick={() => setTable(v => !v)}>{table ? 'Кольцами' : 'Таблицей'}</button>
           </div>
           {table ? (
             <table className="ui-table">
-              <thead><tr><th>РЭС</th><th>ТП</th><th>ПУ</th>{DASH_STATUS.map(s => <th key={s.key}>{s.label}</th>)}</tr></thead>
+              <thead><tr><th>РЭС</th><th>ТП</th><th>Линий</th>{LINE_STATUS.map(s => <th key={s.key}>{s.label}</th>)}</tr></thead>
               <tbody>{resRows.map(r => (
-                <tr key={r.id}><td>{r.name}</td><td>{fmtInt(r.tp)}</td><td>{fmtInt(r.pu)}</td>{DASH_STATUS.map(s => <td key={s.key}>{fmtInt(r[s.key])}</td>)}</tr>
+                <tr key={r.id}><td>{r.name}</td><td>{fmtInt(r.tp)}</td><td>{fmtInt(r.lines.total)}</td>{LINE_STATUS.map(s => <td key={s.key}>{fmtInt(r.lines[s.key])}</td>)}</tr>
               ))}</tbody>
             </table>
           ) : (
@@ -10461,14 +10514,14 @@ function Dashboard({ selectedRes, onSectionChange }) {
               {resRows.map(r => (
                 <div key={r.id} className="dash-res">
                   <Donut size={112} stroke={14} onTip={setTip}
-                    parts={DASH_STATUS.map(s => ({ label: `${r.name} · ${s.label.toLowerCase()}`, value: r[s.key] || 0, color: s.color }))}
-                    center={<text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" className="donut__mid">{pct(r.ok, r.pu)}%</text>} />
+                    parts={LINE_STATUS.map(s => ({ label: `${r.name} · ${s.label.toLowerCase()}`, value: r.lines[s.key] || 0, color: s.color }))}
+                    center={<text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" className="donut__mid">{pct(r.lines.ok, r.lines.total)}%</text>} />
                   <b className="dash-res__name">{r.name}</b>
-                  <span className="dash-res__meta">{fmtInt(r.tp)} ТП · {fmtInt(r.pu)} ПУ</span>
+                  <span className="dash-res__meta">{fmtInt(r.tp)} ТП · {fmtInt(r.lines.total)} линий · {fmtInt(r.pu)} ПУ</span>
                   <span className="dash-res__bad">
-                    {r.error > 0 && <span className="t-bad">ошибок {fmtInt(r.error)}</span>}
-                    {r.pending > 0 && <span className="t-warn">на перепроверке {fmtInt(r.pending)}</span>}
-                    {!r.error && !r.pending && <span className="t-ok">без замечаний</span>}
+                    {r.lines.error > 0 && <span className="t-bad">с ошибкой {fmtInt(r.lines.error)}</span>}
+                    {r.lines.pending > 0 && <span className="t-warn">на перепроверке {fmtInt(r.lines.pending)}</span>}
+                    {!r.lines.error && !r.lines.pending && <span className="t-ok">без замечаний</span>}
                   </span>
                 </div>
               ))}
@@ -10694,8 +10747,17 @@ export default function App() {
   const [resList, setResList] = useState([]);
   // Карточка ПУ (панель на весь экран) — открывается из любого раздела.
   const [puOpen, setPuOpen] = useState(null);
-  const openPu = useCallback((n) => setPuOpen(String(n)), []);
-  const closePu = useCallback(() => setPuOpen(null), []);
+  const [puLeaving, setPuLeaving] = useState(false);
+  const leaveTimer = useRef(null);
+  const openPu = useCallback((n) => { clearTimeout(leaveTimer.current); setPuLeaving(false); setPuOpen(String(n)); }, []);
+  // Уход карточки — с анимацией, потом размонтируем.
+  const closePu = useCallback(() => {
+    setPuLeaving(true);
+    clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => { setPuOpen(null); setPuLeaving(false); }, 480);
+  }, []);
+  // Переход по меню при открытой карточке: раздел меняется сразу, карточка уезжает.
+  const goSection = useCallback((id) => { setActiveSection(id); if (puOpen) closePu(); }, [puOpen, closePu]);
 
   // Оптимизированная проверка токена
   useEffect(() => {
@@ -10924,7 +10986,7 @@ const renderContent = () => {
       <div className={`app ${puOpen ? 'has-pu-card' : ''}`}>
         <MainMenu
           activeSection={activeSection}
-          onSectionChange={setActiveSection}
+          onSectionChange={goSection}
           user={user}
         />
         
@@ -10962,7 +11024,7 @@ const renderContent = () => {
           </main>
         </div>
       </div>
-      {puOpen && <PuPanel puNumber={puOpen} onClose={closePu} onOpen={openPu} onSectionChange={setActiveSection} />}
+      {puOpen && <PuPanel puNumber={puOpen} leaving={puLeaving} onClose={closePu} onOpen={openPu} onSectionChange={goSection} />}
       </ModalDockProvider>
       </PuPanelCtx.Provider>
     </AuthContext.Provider>
