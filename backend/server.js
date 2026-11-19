@@ -1094,6 +1094,7 @@ const ROLES = {
   admin:           { title: 'Администратор',      scope: 'all' },
   nach_sue:        { title: 'Начальник СУЭ',       scope: 'all' },
   eng_sue:         { title: 'Инженер СУЭ',         scope: 'all' },
+  eng_askue:       { title: 'Инженер АСКУЭ',       scope: 'res' },
   nach_res:        { title: 'Начальник РЭС',       scope: 'res' },
   master_res:      { title: 'Мастер РЭС',          scope: 'res' },
   nach_riru:       { title: 'Начальник РИРУ',      scope: 'res' },
@@ -1163,6 +1164,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
   nach_sue: [...VIEW_COMMON, 'tech_pending_view', 'askue_pending_view', 'problem_vl_view', 'overload_view', 'deep_analysis_view',
     'upload_files', 'overload_askue', 'problem_vl_manage', 'structure_edit_pu', 'techblock_view'],
   eng_sue: [...VIEW_COMMON, 'tech_pending_view', 'askue_pending_view', 'problem_vl_view', 'overload_view',
+    'upload_files', 'overload_askue', 'structure_edit_pu'],
+  // Инженер АСКУЭ — права АСКУЭ, но в пределах своего РЭС (загрузка журналов/профилей своего РЭС).
+  eng_askue: [...VIEW_COMMON, 'tech_pending_view', 'askue_pending_view', 'problem_vl_view', 'overload_view',
     'upload_files', 'overload_askue', 'structure_edit_pu'],
   nach_res: [...VIEW_COMMON, 'tech_pending_view', 'overload_view', 'res_work', 'overload_res'],
   master_res: [...VIEW_COMMON, 'tech_pending_view', 'overload_view', 'res_work', 'overload_res'],
@@ -2241,8 +2245,10 @@ app.post('/api/upload/analyze',
       const { type, requiredPeriod } = req.body;
       const userId = req.user.id;
       
-      // Берем resId из body (если есть) или из токена пользователя
-      const resId = req.body.resId || req.user.resId;
+      // Берем resId из body (если есть) или из токена пользователя.
+      // FormData превращает пустое значение в строку "null"/"undefined" — такие считаем отсутствующими.
+      const bodyResId = parseInt(req.body.resId, 10);
+      const resId = Number.isInteger(bodyResId) ? bodyResId : (req.user.resId ?? null);
 
       // ── Профиль мощности (Пирамида) — матчинг по ПУ техучёта, resId не нужен ──
       if (type === 'profile') {

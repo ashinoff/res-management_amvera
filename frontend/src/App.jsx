@@ -2722,7 +2722,8 @@ const loadNotifications = useCallback(async () => {
 };
 
   // Функция загрузки файла прямо из уведомления АСКУЭ
-  const handleFileUpload = async (puNumber, notificationData) => {
+  // resId — РЭС из самого уведомления: у администратора без привязки к РЭС user.resId пустой
+  const handleFileUpload = async (puNumber, notificationData, notifResId) => {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.xlsx,.xls,.csv';
@@ -2743,7 +2744,8 @@ const loadNotifications = useCallback(async () => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('type', 'rim_single');
-    formData.append('resId', user.resId);
+    const uploadResId = notifResId ?? user.resId;
+    if (uploadResId != null) formData.append('resId', uploadResId);
     formData.append('requiredPeriod', notificationData.checkFromDate);
     
     try {
@@ -3094,7 +3096,7 @@ const loadNotifications = useCallback(async () => {
                 <div className="notification-buttons">
                   <button 
                     className="btn-upload-orange"  // Изменили класс
-                    onClick={(e) => { e.stopPropagation(); handleFileUpload(data.puNumber, data); }}
+                    onClick={(e) => { e.stopPropagation(); handleFileUpload(data.puNumber, data, notif.resId); }}
                     disabled={uploadingPu === data.puNumber}
                     title="Загрузить файл"
                   >
