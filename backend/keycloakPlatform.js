@@ -13,7 +13,9 @@ const KEYCLOAK_URL = (process.env.KEYCLOAK_URL || 'https://keycloak-waw-ashinoff
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || 'platform';
 const KEYCLOAK_AZP = process.env.KEYCLOAK_AZP || 'web-desktop';
 // Одна realm-роль доступа к приложению (паттерн платформы: <app>-user).
-const ACCESS_ROLE = process.env.ACCESS_ROLE || 'resm-user';
+// Пусто (по умолчанию) — пускаем всех вошедших в платформу: роль и РЭС берутся по email
+// из своей базы (решение владельца 24.11.2026). Было: 'resm-user'.
+const ACCESS_ROLE = (process.env.ACCESS_ROLE || '').trim();
 const PLATFORM_ORIGIN = process.env.PLATFORM_ORIGIN || 'https://sue-system-2-ashinoff.waw0.amvera.tech';
 
 const ISSUER = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`;
@@ -63,7 +65,7 @@ function identityFromClaims(claims) {
 
 // Есть ли у пользователя роль доступа к приложению.
 function hasAccess(roles) {
-  return Array.isArray(roles) && roles.includes(ACCESS_ROLE);
+  return !ACCESS_ROLE || (Array.isArray(roles) && roles.includes(ACCESS_ROLE));
 }
 
 module.exports = {
